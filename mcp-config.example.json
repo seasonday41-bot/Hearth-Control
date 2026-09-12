@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "hearth": {
+      "command": "node",
+      "args": [
+        "/path/to/hearth/mcp/stdio.mjs"
+      ],
+      "env": {
+        "HEARTH_WORKSPACE": "/path/to/your/workspace",
+        "HEARTH_PERMISSIONS": "{\"Files\":\"Ask\",\"Git\":\"Allow\",\"Terminal\":\"Blocked\",\"Browser\":\"Blocked\"}"
+      }
+    }
+  }
+}

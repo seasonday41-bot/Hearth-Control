@@ -1,0 +1,1583 @@
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+
+type Permission = 'Allow' | 'Ask' | 'Blocked';
+type NavItem = 'Overview' | 'Task Console' | 'Goals' | 'Workspace' | 'Permissions' | 'Logs';
+type IconName = 'grid' | 'folder' | 'lock' | 'terminal' | 'moon' | 'sun' | 'chevron' | 'activity' | 'copy' | 'server' | 'console' | 'radio' | 'flag' | 'check' | 'plus';
+
+const Icon = ({ name }: { name: IconName }) => {
+  const paths: Record<IconName, ReactNode> = {
+    grid: <><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></>,
+    folder: <path d="M3.5 6.5h6l2-2h9a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-17a2 2 0 0 1-2-2v-10a2 2 0 0 1 2-2Z"/>,
+    lock: <><rect x="4" y="10" width="16" height="11" rx="3"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></>,
+    terminal: <><path d="m5 8 4 4-4 4"/><path d="M12 17h6"/></>,
+    moon: <path d="M20.5 15.6A8.6 8.6 0 0 1 8.4 3.5 8.7 8.7 0 1 0 20.5 15.6Z"/>,
+    sun: <><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></>,
+    chevron: <path d="m9 18 6-6-6-6"/>,
+    activity: <path d="M3 12h4l2.2-7 4.3 14 2.3-7H21"/>,
+    copy: <><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></>,
+    server: <><rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/><path d="M7 7h.01M7 17h.01"/></>,
+    console: <><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></>,
+    radio: <><path d="M4.93 19.07A10 10 0 0 1 2 12a10 10 0 0 1 2.93-7.07"/><path d="M19.07 4.93A10 10 0 0 1 22 12a10 10 0 0 1-2.93 7.07"/><path d="M7.76 16.24A6 6 0 0 1 6 12a6 6 0 0 1 1.76-4.24"/><path d="M16.24 7.76A6 6 0 0 1 18 12a6 6 0 0 1-1.76 4.24"/><circle cx="12" cy="12" r="2"/></>,
+    flag: <><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></>,
+    check: <polyline points="20 6 9 17 4 12"/>,
+    plus: <><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></>,
+  };
+  return <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">{paths[name]}</svg>;
+};
+
+type LogEntry = { time: string; source: string; message: string; tone: string };
+type ApprovalRequest = { requestId: string; permission: string; action: string };
+
+const initialPermissions: Array<{ name: string; detail: string; value: Permission; disabled?: boolean }> = [
+  { name: 'Files', detail: 'Read and write inside this workspace', value: 'Allow' },
+  { name: 'Git', detail: 'Inspect status, history and diffs', value: 'Allow' },
+  { name: 'Terminal', detail: 'Run local commands after confirmation', value: 'Ask' },
+  { name: 'Antigravity', detail: 'Run approved tasks through the secure Antigravity CLI', value: 'Ask' },
+  { name: 'Browser', detail: 'No browser tool — not available in this version', value: 'Blocked', disabled: true },
+];
+
+const nav: Array<{ name: NavItem; icon: IconName }> = [
+  { name: 'Overview', icon: 'grid' },
+  { name: 'Task Console', icon: 'console' },
+  { name: 'Goals', icon: 'flag' },
+  { name: 'Workspace', icon: 'folder' },
+  { name: 'Permissions', icon: 'lock' },
+  { name: 'Logs', icon: 'terminal' },
+];
+
+export default function App() {
+  const [running, setRunning] = useState(false);
+  const [workspace, setWorkspace] = useState('');
+  const [port, setPort] = useState(3001);
+  const [pid, setPid] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [settingsReady, setSettingsReady] = useState(false);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [permissions, setPermissions] = useState(initialPermissions);
+  const [activeNav, setActiveNav] = useState<NavItem>('Overview');
+  const [dark, setDark] = useState(() => localStorage.getItem('control-theme') === 'dark');
+  const [notice, setNotice] = useState('');
+  const [approval, setApproval] = useState<ApprovalRequest | null>(null);
+  const [workspaceValid, setWorkspaceValid] = useState<boolean | null>(null);
+  const [updaterInfo, setUpdaterInfo] = useState<UpdaterInfo | null>(null);
+  const [updateCheck, setUpdateCheck] = useState<UpdateCheck | null>(null);
+  const [updateBusy, setUpdateBusy] = useState(false);
+  const [showUpdateDetails, setShowUpdateDetails] = useState(false);
+
+  // Bridge states
+  const [bridgeState, setBridgeState] = useState<BridgeState | null>(null);
+  const [reviewTask, setReviewTask] = useState<BridgeTask | null>(null);
+  const [bridgeBusy, setBridgeBusy] = useState(false);
+  const [bridgeEmail, setBridgeEmail] = useState('');
+  const [bridgePassword, setBridgePassword] = useState('');
+  const [bridgeAuthMode, setBridgeAuthMode] = useState<'sign-in' | 'sign-up'>('sign-in');
+
+  // Task Console states
+  const [executorStatus, setExecutorStatus] = useState<AntigravityStatus | null>(null);
+  const [taskPrompt, setTaskPrompt] = useState('');
+  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
+  const [activeTaskSource, setActiveTaskSource] = useState<'Local' | 'Remote'>('Local');
+  const [taskData, setTaskData] = useState<AntigravityTaskData | null>(null);
+  const [taskSubmitting, setTaskSubmitting] = useState(false);
+  const [recoveryBusy, setRecoveryBusy] = useState(false);
+  const [followUpInput, setFollowUpInput] = useState('');
+  const [followUpSubmitting, setFollowUpSubmitting] = useState(false);
+  const [pollTrigger, setPollTrigger] = useState(0);
+  const [, setNowTick] = useState(Date.now());
+
+  // Goals states
+  const [goals, setGoals] = useState<Goal[]>([]);
+  const [selectedGoalId, setSelectedGoalId] = useState<string | null>(null);
+  const [goalActionBusy, setGoalActionBusy] = useState(false);
+  const [showNewGoalModal, setShowNewGoalModal] = useState(false);
+  const [newGoalTitle, setNewGoalTitle] = useState('');
+  const [newGoalObjective, setNewGoalObjective] = useState('');
+  const [newGoalConstraints, setNewGoalConstraints] = useState('');
+  const [newGoalSteps, setNewGoalSteps] = useState<Array<{ title: string; description: string; route: StepRoute; required: boolean }>>([
+    { title: '', description: '', route: 'antigravity', required: true },
+  ]);
+
+  const isGoalActive = useMemo(() => goals.some((g) => ['running', 'waiting', 'paused'].includes(g.status)), [goals]);
+  const selectedGoal = useMemo(() => goals.find((g) => g.id === selectedGoalId) || goals[0] || null, [goals, selectedGoalId]);
+
+  const activeTaskIdRef = useRef<string | null>(null);
+  const pollingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const startTaskLockRef = useRef(false);
+
+  useEffect(() => {
+    activeTaskIdRef.current = activeTaskId;
+  }, [activeTaskId]);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    localStorage.setItem('control-theme', dark ? 'dark' : 'light');
+    if (settingsReady) void window.controlApp.saveSettings({ theme: dark ? 'dark' : 'light' });
+  }, [dark, settingsReady]);
+
+  useEffect(() => {
+    let active = true;
+    Promise.all([
+      window.controlApp.getSettings(),
+      window.controlApp.getServerState(),
+      window.controlApp.antigravityStatus().catch(() => null),
+      window.controlApp.bridgeGetState().catch(() => null),
+      window.controlApp.updaterGetInfo().catch(() => null),
+      window.controlApp.updaterCheck().catch(() => null),
+      window.controlApp.goalsList().catch(() => []),
+      window.controlApp.antigravityListTasks().catch(() => []),
+    ]).then(([settings, state, executor, bridge, updateInfo, update, goalsList, taskList]) => {
+      if (!active) return;
+      if (settings.workspace) setWorkspace(settings.workspace);
+      setPort(settings.port);
+      setDark(settings.theme === 'dark');
+      setPermissions((current) => current.map((item) => ({ ...item, value: settings.permissions[item.name] ?? item.value })));
+      setRunning(state.running);
+      setPid(state.pid);
+      if (executor) setExecutorStatus(executor);
+      if (bridge) setBridgeState(bridge);
+      if (updateInfo) setUpdaterInfo(updateInfo);
+      if (update) setUpdateCheck(update);
+      if (goalsList) setGoals(goalsList);
+
+      if (Array.isArray(taskList) && taskList.length > 0) {
+        const recoveringOrActive = taskList.find((t: any) => !t.dismissed && ['recovery_required', 'running', 'starting', 'waiting'].includes(t.status))
+          || taskList.find((t: any) => !t.dismissed);
+        if (recoveringOrActive) {
+          setActiveTaskId(recoveringOrActive.taskId);
+          setActiveTaskSource(recoveringOrActive.source === 'remote' ? 'Remote' : 'Local');
+          setTaskData(recoveringOrActive);
+        }
+      }
+
+      setSettingsReady(true);
+    });
+
+    const unsubscribe = window.controlApp.onServerEvent((event) => {
+      if (event.type === 'state' && event.state) {
+        setRunning((event.state as ServerState).running);
+        setPort((event.state as ServerState).port);
+        setPid((event.state as ServerState).pid);
+        setBusy(false);
+      }
+      if (event.type === 'bridge:state' && event.state) {
+        setBridgeState(event.state as BridgeState);
+      }
+      if (event.type === 'log' && event.message) {
+        setLogs((current) => [...current, { time: now(), source: event.source ?? 'core', tone: event.tone ?? 'quiet', message: event.message ?? '' }]);
+      }
+      if (event.type === 'approval' && event.requestId && event.permission && event.action) {
+        setApproval({ requestId: event.requestId, permission: event.permission, action: event.action });
+      }
+      if (event.type === 'goals:updated' && event.goal) {
+        const updatedGoal = event.goal;
+        setGoals((current) => {
+          const idx = current.findIndex((g) => g.id === updatedGoal.id);
+          if (idx >= 0) {
+            const next = [...current];
+            next[idx] = updatedGoal;
+            return next;
+          }
+          return [updatedGoal, ...current];
+        });
+      }
+    });
+
+    return () => { active = false; unsubscribe(); };
+  }, []);
+
+  // Local manifest checks are deliberately infrequent and never install by
+  // themselves. A manual check is always available below.
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (updateBusy) return;
+      void window.controlApp.updaterCheck().then(setUpdateCheck).catch(() => {});
+    }, 12_000);
+    return () => window.clearInterval(timer);
+  }, [updateBusy]);
+
+  // Validate workspace path against real filesystem on every workspace change
+  useEffect(() => {
+    setWorkspaceValid(null);
+    if (!workspace) { setWorkspaceValid(false); return; }
+    void window.controlApp.validateWorkspace(workspace).then((result) => setWorkspaceValid(result.valid));
+  }, [workspace]);
+
+  // Single polling timer instance per active task
+  useEffect(() => {
+    if (pollingTimerRef.current) {
+      clearInterval(pollingTimerRef.current);
+      pollingTimerRef.current = null;
+    }
+    if (!activeTaskId) return;
+
+    let isSubscribed = true;
+    const poll = async () => {
+      const currentId = activeTaskIdRef.current;
+      if (!currentId || !isSubscribed) return;
+      try {
+        const data = await window.controlApp.antigravityTask(currentId);
+        if (!isSubscribed || activeTaskIdRef.current !== currentId) return;
+        setTaskData(data);
+        if (data.status === 'done' || data.status === 'error') {
+          if (pollingTimerRef.current) {
+            clearInterval(pollingTimerRef.current);
+            pollingTimerRef.current = null;
+          }
+        }
+      } catch (err) {
+        console.error('Task poll error:', err);
+      }
+    };
+
+    void poll();
+    pollingTimerRef.current = setInterval(poll, 2500);
+
+    return () => {
+      isSubscribed = false;
+      if (pollingTimerRef.current) {
+        clearInterval(pollingTimerRef.current);
+        pollingTimerRef.current = null;
+      }
+    };
+  }, [activeTaskId, pollTrigger]);
+
+  const isTaskRunning = Boolean(
+    taskSubmitting ||
+    (taskData && !taskData.dismissed && (
+      ['pending', 'starting', 'running'].includes(taskData.status) ||
+      taskData.status === 'recovery_required' ||
+      (taskData.status === 'paused' && (taskData as any).retainExecutionLock)
+    ))
+  );
+
+  // Ticker for live elapsed time while task is active
+  useEffect(() => {
+    if (!isTaskRunning) return;
+    const interval = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, [isTaskRunning]);
+
+  const now = () => new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(new Date());
+  const allowed = useMemo(() => permissions.filter((item) => item.value === 'Allow').length, [permissions]);
+  const flash = (message: string) => { setNotice(message); window.setTimeout(() => setNotice(''), 2200); };
+
+  const promptBytes = useMemo(() => new TextEncoder().encode(taskPrompt).length, [taskPrompt]);
+
+  const antigravityPerm = permissions.find((p) => p.name === 'Antigravity')?.value ?? 'Ask';
+  const rotateAntigravityPerm = () => {
+    const index = permissions.findIndex((p) => p.name === 'Antigravity');
+    if (index !== -1) rotatePermission(index);
+  };
+
+  const formatElapsed = (created?: string, completed?: string) => {
+    if (!created) return '—';
+    const start = new Date(created).getTime();
+    const end = completed ? new Date(completed).getTime() : Date.now();
+    const sec = Math.max(0, Math.floor((end - start) / 1000));
+    const mins = Math.floor(sec / 60);
+    const remainingSec = sec % 60;
+    return mins > 0 ? `${mins}m ${remainingSec}s` : `${remainingSec}s`;
+  };
+
+  const toggleServer = async () => {
+    if (busy) return;
+    setBusy(true);
+    if (running) await window.controlApp.stopServer();
+    else await window.controlApp.startServer({ workspace, port });
+  };
+
+  const rotatePermission = (index: number) => {
+    const options: Permission[] = ['Allow', 'Ask', 'Blocked'];
+    setPermissions((current) => {
+      if (current[index]?.disabled) return current;
+      const next = current.map((item, itemIndex) => itemIndex === index ? { ...item, value: options[(options.indexOf(item.value) + 1) % options.length] } : item);
+      void window.controlApp.saveSettings({ permissions: Object.fromEntries(next.map((item) => [item.name, item.value])) });
+      return next;
+    });
+  };
+
+  const chooseWorkspace = async () => {
+    if (isTaskRunning || isGoalActive) {
+      flash('Cannot change workspace while a task or goal is active');
+      return;
+    }
+    const selected = await window.controlApp.chooseWorkspace();
+    if (selected) { setWorkspace(selected); flash('Workspace updated'); }
+  };
+
+  const handleRunGoal = async (goalId: string) => {
+    setGoalActionBusy(true);
+    try {
+      const updated = await window.controlApp.goalsRun(goalId);
+      setGoals((prev) => prev.map((g) => (g.id === updated.id ? updated : g)));
+      flash(`Goal '${updated.title}' finished: ${updated.status}`);
+    } catch (err: any) {
+      flash(`Goal run error: ${err.message}`);
+    } finally {
+      setGoalActionBusy(false);
+    }
+  };
+
+  const handlePauseGoal = async (goalId: string) => {
+    try {
+      const updated = await window.controlApp.goalsPause(goalId);
+      setGoals((prev) => prev.map((g) => (g.id === updated.id ? updated : g)));
+      flash(`Goal '${updated.title}' paused`);
+    } catch (err: any) {
+      flash(`Pause error: ${err.message}`);
+    }
+  };
+
+  const handleResumeGoal = async (goalId: string) => {
+    setGoalActionBusy(true);
+    try {
+      const updated = await window.controlApp.goalsResume(goalId);
+      setGoals((prev) => prev.map((g) => (g.id === updated.id ? updated : g)));
+      flash(`Goal '${updated.title}' resumed`);
+    } catch (err: any) {
+      flash(`Resume error: ${err.message}`);
+    } finally {
+      setGoalActionBusy(false);
+    }
+  };
+
+  const handleSignoffStep = async (goalId: string, stepId: string, action: 'complete' | 'fail') => {
+    setGoalActionBusy(true);
+    try {
+      const updated = await window.controlApp.goalsSignoffStep({
+        goalId,
+        stepId,
+        action,
+        autoRun: action === 'complete',
+      });
+      setGoals((prev) => prev.map((g) => (g.id === updated.id ? updated : g)));
+      flash(action === 'complete' ? 'Manual step marked complete' : 'Manual step marked failed');
+    } catch (err: any) {
+      flash(`Sign-off error: ${err.message}`);
+    } finally {
+      setGoalActionBusy(false);
+    }
+  };
+
+  const handleCreateGoal = async () => {
+    if (!newGoalTitle.trim() || !newGoalObjective.trim()) {
+      flash('Please enter goal title and objective');
+      return;
+    }
+    const validSteps = newGoalSteps.filter((s) => s.title.trim().length > 0);
+    if (validSteps.length === 0) {
+      flash('Please add at least one step with a title');
+      return;
+    }
+    const constraints = newGoalConstraints
+      .split(',')
+      .map((c) => c.trim())
+      .filter(Boolean);
+
+    try {
+      const created = await window.controlApp.goalsCreate({
+        title: newGoalTitle.trim(),
+        objective: newGoalObjective.trim(),
+        workspace,
+        constraints,
+        steps: validSteps.map((s, idx) => ({
+          id: `step-${idx + 1}`,
+          title: s.title.trim(),
+          description: s.description.trim(),
+          route: s.route,
+          required: s.required,
+        })),
+      });
+      setGoals((prev) => [created, ...prev]);
+      setSelectedGoalId(created.id);
+      setShowNewGoalModal(false);
+      setNewGoalTitle('');
+      setNewGoalObjective('');
+      setNewGoalConstraints('');
+      setNewGoalSteps([{ title: '', description: '', route: 'antigravity', required: true }]);
+      flash(`Goal '${created.title}' created`);
+    } catch (err: any) {
+      flash(`Create error: ${err.message}`);
+    }
+  };
+
+  const answerApproval = async (allowedChoice: boolean) => {
+    if (!approval) return;
+    await window.controlApp.respondToApproval({ requestId: approval.requestId, allowed: allowedChoice });
+    setLogs((current) => [...current, { time: now(), source: 'approval', tone: allowedChoice ? 'success' : 'warning', message: `${allowedChoice ? 'Allowed' : 'Denied'} once: ${approval.action}` }]);
+    setApproval(null);
+  };
+
+  const navigate = (item: NavItem) => {
+    setActiveNav(item);
+    if (item !== 'Task Console') {
+      setTimeout(() => {
+        document.getElementById(item.toLowerCase())?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 50);
+    }
+  };
+
+  useEffect(() => {
+    if (!approval) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        void answerApproval(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [approval]);
+
+  const handleStartTask = async () => {
+    if (startTaskLockRef.current || !taskPrompt.trim() || isTaskRunning || taskSubmitting) return;
+    if (promptBytes > 65536) {
+      flash('Prompt exceeds maximum 64 KiB limit');
+      return;
+    }
+    startTaskLockRef.current = true;
+    setTaskSubmitting(true);
+    // Do not leave a prior task's result visible during executor startup.
+    setActiveTaskId(null);
+    setActiveTaskSource('Local');
+    const title = taskPrompt.trim().slice(0, 96) || 'New task';
+    setTaskData({
+      taskId: 'pending...',
+      conversationId: null,
+      workspace,
+      title,
+      status: 'starting',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      lastEvent: null,
+      recentEvents: [],
+      lastAnswer: null,
+      error: null,
+      completion: null,
+    });
+    try {
+      const res = await window.controlApp.antigravityStart({ prompt: taskPrompt.trim(), title });
+      setActiveTaskId(res.taskId);
+      setActiveTaskSource('Local');
+      setTaskData((current) => ({
+        taskId: res.taskId,
+        conversationId: res.conversationId || null,
+        workspace: res.workspace || workspace,
+        title: current?.title || title,
+        status: (res.status as AntigravityTaskData['status']) || 'running',
+        createdAt: res.startedAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        lastEvent: null,
+        recentEvents: [],
+        lastAnswer: null,
+        error: null,
+        completion: (res as any).completion || null,
+      }));
+      flash(`Task ${res.taskId.slice(0, 8)} started`);
+    } catch (err: any) {
+      const errorMsg = err?.message || 'Failed to start task';
+      setTaskData((current) => ({
+        taskId: current && current.taskId !== 'pending...' ? current.taskId : 'failed',
+        conversationId: current?.conversationId || null,
+        workspace,
+        title: current?.title || title,
+        status: 'error',
+        createdAt: current?.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        lastEvent: null,
+        recentEvents: current?.recentEvents || [],
+        lastAnswer: null,
+        error: errorMsg,
+        completion: null,
+      }));
+      flash(`Failed to start task: ${errorMsg}`);
+    } finally {
+      setTaskSubmitting(false);
+      startTaskLockRef.current = false;
+    }
+  };
+
+  const handleSendFollowUp = async () => {
+    if (!followUpInput.trim() || !activeTaskId || followUpSubmitting) return;
+    const msgBytes = new TextEncoder().encode(followUpInput).length;
+    if (msgBytes > 65536) {
+      flash('Message exceeds maximum 64 KiB limit');
+      return;
+    }
+    setFollowUpSubmitting(true);
+    try {
+      // Clear the old terminal state before the next response is classified.
+      setTaskData((current) => current ? { ...current, status: 'running', lastAnswer: null, error: null, completion: null } : current);
+      await window.controlApp.antigravitySend({ taskId: activeTaskId, message: followUpInput.trim() });
+      setFollowUpInput('');
+      flash('Follow-up message sent');
+      setPollTrigger((prev) => prev + 1);
+    } catch (err: any) {
+      flash(`Failed to send follow-up: ${err?.message || 'Unknown error'}`);
+    } finally {
+      setFollowUpSubmitting(false);
+    }
+  };
+
+  const handleResumeTask = async () => {
+    if (!activeTaskId || recoveryBusy) return;
+    setRecoveryBusy(true);
+    try {
+      const res = await window.controlApp.antigravityResume(activeTaskId);
+      setTaskData((current) => current ? {
+        ...current,
+        status: (res.status as AntigravityTaskData['status']) || 'running',
+        error: null,
+      } : null);
+      flash(`Task ${activeTaskId.slice(0, 8)} resumed`);
+      setPollTrigger((prev) => prev + 1);
+    } catch (err: any) {
+      flash(`Resume error: ${err?.message || 'Failed to resume'}`);
+    } finally {
+      setRecoveryBusy(false);
+    }
+  };
+
+  const handleMarkTaskFailed = async () => {
+    if (!activeTaskId || recoveryBusy) return;
+    setRecoveryBusy(true);
+    try {
+      const res = await window.controlApp.antigravityMarkFailed({ taskId: activeTaskId, reason: 'Marked failed by user from recovery' });
+      setTaskData(res);
+      flash(`Task ${activeTaskId.slice(0, 8)} marked failed`);
+    } catch (err: any) {
+      flash(`Error marking failed: ${err?.message || 'Failed'}`);
+    } finally {
+      setRecoveryBusy(false);
+    }
+  };
+
+  const handleDismissTask = async () => {
+    if (!activeTaskId || recoveryBusy) return;
+    setRecoveryBusy(true);
+    try {
+      await window.controlApp.antigravityDismiss(activeTaskId);
+      setActiveTaskId(null);
+      setTaskData(null);
+      flash('Task dismissed from active view');
+    } catch (err: any) {
+      flash(`Dismiss error: ${err?.message || 'Failed'}`);
+    } finally {
+      setRecoveryBusy(false);
+    }
+  };
+
+  const toggleBridge = async () => {
+    if (bridgeBusy || !bridgeState) return;
+    setBridgeBusy(true);
+    try {
+      const next = await window.controlApp.bridgeSetEnabled(!bridgeState.enabled);
+      setBridgeState(next);
+      flash(`Remote Bridge ${next.enabled ? 'Enabled' : 'Disabled'}`);
+    } catch (err: any) {
+      flash(`Failed to toggle bridge: ${err?.message || 'Unknown error'}`);
+    } finally {
+      setBridgeBusy(false);
+    }
+  };
+
+  const handleBridgeAuth = async () => {
+    if (bridgeBusy || !bridgeEmail.trim() || bridgePassword.length < 8) return;
+    setBridgeBusy(true);
+    try {
+      if (bridgeAuthMode === 'sign-up') {
+        const result = await window.controlApp.bridgeSignUp({ email: bridgeEmail.trim(), password: bridgePassword });
+        if (result.needsEmailVerification) {
+          flash('Check your email, then sign in');
+          setBridgeAuthMode('sign-in');
+        } else {
+          setBridgeState(await window.controlApp.bridgeGetState());
+          flash('Hearth is connected to Supabase');
+        }
+      } else {
+        setBridgeState(await window.controlApp.bridgeSignIn({ email: bridgeEmail.trim(), password: bridgePassword }));
+        flash('Hearth is connected to Supabase');
+      }
+      setBridgePassword('');
+    } catch (err: any) {
+      flash(err?.message || 'Could not connect to Supabase');
+    } finally {
+      setBridgeBusy(false);
+    }
+  };
+
+  const handleBridgeSignOut = async () => {
+    if (bridgeBusy) return;
+    setBridgeBusy(true);
+    try {
+      setBridgeState(await window.controlApp.bridgeSignOut());
+      setBridgePassword('');
+      flash('Signed out and Remote Bridge disabled');
+    } finally {
+      setBridgeBusy(false);
+    }
+  };
+
+  const copyPairingSecret = async () => {
+    try {
+      const secret = await window.controlApp.bridgeGetPairingSecret();
+      await navigator.clipboard.writeText(secret);
+      flash('Pairing secret copied — store it securely');
+    } catch (err: any) {
+      flash(err?.message || 'Could not get pairing secret');
+    }
+  };
+
+  const checkForUpdate = async () => {
+    if (updateBusy) return;
+    setUpdateBusy(true);
+    setUpdateCheck((current) => current ? { ...current, state: 'checking', error: null } : current);
+    try {
+      const result = await window.controlApp.updaterCheck();
+      setUpdateCheck(result);
+      if (result.state === 'update_ready') flash(`Update ${result.available?.version} is ready`);
+    } catch (err: any) {
+      flash(err?.message || 'Could not check for updates');
+    } finally {
+      setUpdateBusy(false);
+    }
+  };
+
+  const chooseUpdateDirectory = async () => {
+    if (updateBusy) return;
+    const info = await window.controlApp.updaterChooseDirectory();
+    setUpdaterInfo(info);
+    await checkForUpdate();
+  };
+
+  const installUpdate = async () => {
+    if (updateBusy || updateCheck?.state !== 'update_ready' || !updateCheck.available) return;
+    const approved = window.confirm(`Install Hearth Control ${updateCheck.available.version}?\n\nThe current app will be backed up and Hearth will restart.`);
+    if (!approved) return;
+    setUpdateBusy(true);
+    setUpdateCheck((current) => current ? { ...current, state: 'installing', error: null } : current);
+    try {
+      await window.controlApp.updaterInstall();
+      setUpdateCheck((current) => current ? { ...current, state: 'restarting' } : current);
+    } catch (err: any) {
+      setUpdateCheck((current) => current ? { ...current, state: 'error', error: err?.message || 'Install failed' } : current);
+      setUpdateBusy(false);
+    }
+  };
+
+  const updateStatusText: Record<UpdateStatus, string> = {
+    idle: 'Checking for update', checking: 'Checking for update', up_to_date: 'Up to date', update_ready: 'Update ready', installing: 'Installing', restarting: 'Restarting', rollback: 'Rollback', error: 'Error',
+  };
+
+  const handleApproveRemoteTask = async (task: BridgeTask) => {
+    if (bridgeBusy || isTaskRunning) {
+      flash('Cannot run while another task is running');
+      return;
+    }
+    setBridgeBusy(true);
+    setActiveTaskId(null);
+    setActiveTaskSource('Remote');
+    setTaskData({ taskId: 'pending', conversationId: null, workspace, title: task.title || 'Remote task', status: 'pending', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), lastEvent: null, recentEvents: [], lastAnswer: null, error: null, completion: null });
+    try {
+      const res = await window.controlApp.bridgeApproveTask(task.id);
+      setTaskData(null);
+      setActiveTaskId(res.taskId);
+      setActiveTaskSource('Remote');
+      setReviewTask(null);
+      flash(`Remote task approved (${res.taskId})`);
+    } catch (err: any) {
+      setTaskData(null);
+      flash(`Failed to approve task: ${err?.message || 'Unknown error'}`);
+    } finally {
+      setBridgeBusy(false);
+    }
+  };
+
+  const handleRejectRemoteTask = async (task: BridgeTask) => {
+    if (bridgeBusy) return;
+    setBridgeBusy(true);
+    try {
+      await window.controlApp.bridgeRejectTask(task.id);
+      setReviewTask(null);
+      flash('Remote task rejected');
+    } catch (err: any) {
+      flash(`Failed to reject task: ${err?.message || 'Unknown error'}`);
+    } finally {
+      setBridgeBusy(false);
+    }
+  };
+
+  return (
+    <div className="app-frame">
+      <div className="titlebar-drag-region" aria-hidden="true">
+        <div className="window-drag-handle" />
+      </div>
+      <aside className="sidebar">
+        <div className="brand"><div className="brand-mark"><span /><span /><span /></div><div><strong>Hearth</strong><small>Local Control</small></div></div>
+        <nav aria-label="Primary navigation">
+          <p className="nav-label">CONTROL</p>
+          {nav.map((item) => (
+            <button key={item.name} className={activeNav === item.name ? 'active' : ''} onClick={() => navigate(item.name)}>
+              <Icon name={item.icon} />
+              <span>{item.name}</span>
+              {activeNav === item.name && <i />}
+            </button>
+          ))}
+        </nav>
+        <div className="sidebar-bottom">
+          <div className="local-badge"><span /> Local connection only</div>
+          <button className="theme-switch" onClick={() => setDark((current) => !current)} aria-label={`Use ${dark ? 'light' : 'dark'} mode`}><span><Icon name="sun" /></span><span><Icon name="moon" /></span><i className={dark ? 'to-dark' : ''} /></button>
+          <p>Hearth Control · {updaterInfo ? `v${updaterInfo.currentVersion}` : 'loading build…'}</p>
+        </div>
+      </aside>
+
+      <main className="main-content">
+        {activeNav === 'Task Console' ? (
+          <div className="task-console-view">
+            <header className="page-header">
+              <div>
+                <p className="kicker">ANTIGRAVITY TASK CONSOLE</p>
+                <h1>Task Console.</h1>
+                <p className="intro">Dispatch natural language instructions to Antigravity executor.</p>
+              </div>
+              <div className={`connection-pill ${executorStatus?.available ? 'online' : ''}`}>
+                <span /> Executor · {executorStatus?.available ? 'Connected' : 'Unavailable'}
+              </div>
+            </header>
+
+            <div className="task-workspace-bar">
+              <div className="task-workspace-info">
+                <Icon name="folder" />
+                <span>Workspace</span>
+                <code>{workspace || 'No workspace selected'}</code>
+              </div>
+              <button
+                className="task-workspace-change"
+                disabled={isTaskRunning || isGoalActive}
+                onClick={chooseWorkspace}
+                title={isGoalActive ? 'Cannot switch workspace while a goal is active' : isTaskRunning ? 'Cannot switch workspace while task is running' : 'Choose different folder'}
+              >
+                Change folder
+              </button>
+            </div>
+
+            <div className="task-input-box">
+              <div className="task-textarea-container">
+                <textarea
+                  className="task-textarea"
+                  placeholder="Describe your task for Antigravity (e.g. Inspect git diff, review package.json, check test suite...)"
+                  value={taskPrompt}
+                  onChange={(e) => setTaskPrompt(e.target.value)}
+                  disabled={taskSubmitting || isTaskRunning}
+                  rows={4}
+                />
+                {promptBytes > 60000 && (
+                  <div className="task-size-warning">
+                    {promptBytes.toLocaleString()} / 65,536 bytes {promptBytes > 65536 ? '⚠️ Exceeds 64 KiB limit' : ''}
+                  </div>
+                )}
+              </div>
+              <div className="task-input-footer">
+                <div className="task-options-group">
+                  <div className="executor-indicator">
+                    <span className={`executor-status-dot ${executorStatus?.available ? 'connected' : 'unavailable'}`} />
+                    <span>Executor: <em>{executorStatus?.available ? 'Ready' : 'Unavailable'}</em></span>
+                  </div>
+                  <button
+                    className="task-perm-button"
+                    onClick={rotateAntigravityPerm}
+                    type="button"
+                    title="Click to cycle Antigravity permission (Ask / Allow / Blocked)"
+                  >
+                    <i style={{
+                      background: antigravityPerm === 'Allow' ? 'var(--sage)' : antigravityPerm === 'Blocked' ? 'var(--rose)' : '#9a7545'
+                    }} />
+                    <span>Permission: <strong>{antigravityPerm}</strong></span>
+                    <Icon name="chevron" />
+                  </button>
+                </div>
+                <button
+                  className="run-task-button"
+                  disabled={!taskPrompt.trim() || taskSubmitting || isTaskRunning || !executorStatus?.available || antigravityPerm === 'Blocked' || promptBytes > 65536}
+                  onClick={handleStartTask}
+                  type="button"
+                >
+                  <Icon name="console" />
+                  <span>{taskSubmitting ? 'Starting…' : isTaskRunning ? 'Running…' : 'Run Task'}</span>
+                </button>
+              </div>
+            </div>
+
+            {taskData ? (
+              <section className="active-task-section" aria-labelledby="active-task-heading">
+                <div className="task-header-row">
+                  <div className="task-header-title">
+                    <h2 id="active-task-heading">{taskData.title || `Task ${taskData.taskId}`}</h2>
+                    <p>Started at {new Date(taskData.createdAt).toLocaleTimeString()}</p>
+                  </div>
+                  <div className={`task-status-pill ${taskData.status}`}>
+                    <span />
+                    {taskData.status}
+                  </div>
+                </div>
+
+                <div className="task-meta-bar">
+                  <div className="task-meta-item"><span>Source</span><code>{activeTaskSource}</code></div>
+                  <div className="task-meta-item">
+                    <span>Task ID</span>
+                    <button className="task-id-copy" type="button" onClick={() => { void navigator.clipboard.writeText(taskData.taskId); flash('Task ID copied'); }}><code>{taskData.taskId.slice(0, 8)}…</code> Copy</button>
+                  </div>
+                  <div className="task-meta-item">
+                    <span>Conversation ID</span>
+                    <code>{taskData.conversationId || 'Pending…'}</code>
+                  </div>
+                  <div className="task-meta-item">
+                    <span>Status</span>
+                    <code>{taskData.status}</code>
+                  </div>
+                  <div className="task-meta-item">
+                    <span>Elapsed</span>
+                    <code>{formatElapsed(taskData.createdAt, ['done', 'error', 'waiting'].includes(taskData.status) ? taskData.updatedAt : undefined)}</code>
+                  </div>
+                </div>
+
+                <div className="task-live-summary"><strong>Latest</strong><span>{taskData.lastEvent?.summary || taskData.completion?.summary || (taskData.status === 'starting' ? 'Preparing executor…' : 'No progress update yet.')}</span><button type="button" onClick={() => document.querySelector('.task-progress-card')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })}>View Progress</button></div>
+
+                {taskData.status === 'recovery_required' && (
+                  <div className="task-recovery-box">
+                    <div className="task-recovery-header">
+                      <div className="task-recovery-title">
+                        <Icon name="terminal" />
+                        <span>INTERRUPTED TASK REQUIRES RECOVERY</span>
+                      </div>
+                      <span className="task-status-pill recovery_required">RECOVERY REQUIRED</span>
+                    </div>
+                    <p className="task-recovery-desc">
+                      This task was interrupted by an application or system shutdown. Process termination is never assumed to be successful. You can resume execution with the original conversation context, mark the task failed, or dismiss it.
+                    </p>
+                    <div className="task-recovery-actions">
+                      <button
+                        className="task-recovery-btn-resume"
+                        disabled={recoveryBusy || !executorStatus?.available || antigravityPerm === 'Blocked'}
+                        onClick={handleResumeTask}
+                        type="button"
+                      >
+                        {recoveryBusy ? 'Processing…' : 'Resume Task'}
+                      </button>
+                      <button
+                        className="task-recovery-btn-fail"
+                        disabled={recoveryBusy}
+                        onClick={handleMarkTaskFailed}
+                        type="button"
+                      >
+                        Mark Failed
+                      </button>
+                      <button
+                        className="task-recovery-btn-dismiss"
+                        disabled={recoveryBusy}
+                        onClick={handleDismissTask}
+                        type="button"
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {taskData.error && (
+                  <div className="task-error-box">
+                    <div className="task-error-message">
+                      <strong>Task Error:</strong> {taskData.error}
+                    </div>
+                  </div>
+                )}
+
+                {taskData.status === 'waiting' && taskData.completion?.interimReason && (
+                  <div className="task-error-box">
+                    <div className="task-error-message">
+                      <strong>Waiting:</strong> {taskData.completion.interimReason}
+                    </div>
+                  </div>
+                )}
+
+                <div className="task-progress-card">
+                  <span className="task-section-label">
+                    Progress Events ({taskData.recentEvents?.length ?? 0})
+                  </span>
+                  <div className="task-events-list">
+                    {(!taskData.recentEvents || taskData.recentEvents.length === 0) ? (
+                      <div style={{ color: '#718089', fontStyle: 'italic', padding: '6px 0' }}>
+                        {taskData.status === 'starting' ? 'Waiting for executor to initialize…' : 'No events recorded.'}
+                      </div>
+                    ) : (
+                      taskData.recentEvents.map((ev, i) => (
+                        <div key={`${ev.stepIndex ?? i}-${i}`} className="task-event-row">
+                          <span className="task-event-step">#{ev.stepIndex ?? i + 1}</span>
+                          <span className="task-event-type">{ev.type || 'PROGRESS'}</span>
+                          <span className="task-event-text">{ev.summary || ''}</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                {taskData.lastAnswer && (
+                  <div className="task-result-card">
+                    <div className="task-result-header">
+                      <span className="task-section-label">Executor Output</span>
+                      <button
+                        className="task-copy-button"
+                        type="button"
+                        onClick={async () => {
+                          if (taskData.lastAnswer) {
+                            await navigator.clipboard.writeText(taskData.lastAnswer);
+                            flash('Result copied to clipboard');
+                          }
+                        }}
+                      >
+                        <Icon name="copy" />
+                        <span>Copy Result</span>
+                      </button>
+                    </div>
+                    <div className="task-result-content">{taskData.lastAnswer}</div>
+                  </div>
+                )}
+
+                {(taskData.status === 'done' || taskData.status === 'waiting') && (
+                  <div className="task-followup-box">
+                    <input
+                      className="task-followup-input"
+                      placeholder="Send follow-up instruction to this conversation…"
+                      value={followUpInput}
+                      onChange={(e) => setFollowUpInput(e.target.value)}
+                      disabled={followUpSubmitting}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          void handleSendFollowUp();
+                        }
+                      }}
+                    />
+                    <button
+                      className="task-followup-button"
+                      disabled={!followUpInput.trim() || followUpSubmitting}
+                      onClick={handleSendFollowUp}
+                      type="button"
+                    >
+                      <span>{followUpSubmitting ? 'Sending…' : 'Send'}</span>
+                      <Icon name="chevron" />
+                    </button>
+                  </div>
+                )}
+              </section>
+            ) : (
+              <div className="task-empty-card">
+                <Icon name="console" />
+                <p>No active task</p>
+                <small>Compose an instruction above and click Run Task to dispatch work to Antigravity.</small>
+              </div>
+            )}
+
+            {/* REMOTE INBOX SECTION */}
+            <section className="remote-inbox-section" aria-labelledby="remote-inbox-heading">
+              <div className="remote-inbox-header">
+                <div>
+                  <p className="kicker">TASK QUEUE</p>
+                  <h2 id="remote-inbox-heading">Remote Inbox</h2>
+                </div>
+                <div className="remote-inbox-controls">
+                  <div className={`connection-pill ${bridgeState?.enabled ? (bridgeState?.connected ? 'online' : 'sand') : ''}`}>
+                    <span /> Bridge · {bridgeState?.enabled ? (bridgeState?.connected ? 'Connected' : 'Disconnected') : 'Disabled'}
+                  </div>
+                  {bridgeState?.deviceId && (
+                    <button
+                      className="device-id-chip"
+                      type="button"
+                      title="Click to copy full device UUID"
+                      onClick={async () => {
+                        await navigator.clipboard.writeText(bridgeState.deviceId);
+                        flash('Device ID copied to clipboard');
+                      }}
+                    >
+                      <Icon name="copy" />
+                      <span>Device: <code>{bridgeState.deviceId.slice(0, 8)}…</code></span>
+                    </button>
+                  )}
+                  {bridgeState?.signedIn && (
+                    <>
+                      <button className="device-id-chip" type="button" onClick={copyPairingSecret}>
+                        <Icon name="copy" />
+                        <span>Copy pairing secret</span>
+                      </button>
+                      <button className="bridge-signout-btn" type="button" disabled={bridgeBusy} onClick={handleBridgeSignOut}>
+                        Sign out
+                      </button>
+                    </>
+                  )}
+                  <button
+                    className={`bridge-toggle-btn ${bridgeState?.enabled ? 'enabled' : 'disabled'}`}
+                    type="button"
+                    disabled={bridgeBusy || !bridgeState?.signedIn}
+                    onClick={toggleBridge}
+                  >
+                    <span>Remote Bridge: <strong>{bridgeState?.enabled ? 'Enabled' : 'Disabled'}</strong></span>
+                  </button>
+                </div>
+              </div>
+
+              {!bridgeState?.signedIn ? (
+                <div className="bridge-auth-panel">
+                  <div className="bridge-auth-copy">
+                    <strong>Connect this Mac</strong>
+                    <span>Sign in with a dedicated Hearth account. Your session is protected by macOS Keychain.</span>
+                  </div>
+                  <div className="bridge-auth-fields">
+                    <input
+                      autoComplete="email"
+                      type="email"
+                      value={bridgeEmail}
+                      onChange={(event) => setBridgeEmail(event.target.value)}
+                      placeholder="Email"
+                    />
+                    <input
+                      autoComplete={bridgeAuthMode === 'sign-in' ? 'current-password' : 'new-password'}
+                      type="password"
+                      minLength={8}
+                      value={bridgePassword}
+                      onChange={(event) => setBridgePassword(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') void handleBridgeAuth();
+                      }}
+                      placeholder="Password (8+ characters)"
+                    />
+                    <button type="button" disabled={bridgeBusy || !bridgeEmail.trim() || bridgePassword.length < 8} onClick={handleBridgeAuth}>
+                      {bridgeBusy ? 'Connecting…' : bridgeAuthMode === 'sign-in' ? 'Sign in' : 'Create account'}
+                    </button>
+                  </div>
+                  <button
+                    className="bridge-auth-switch"
+                    type="button"
+                    onClick={() => setBridgeAuthMode((current) => current === 'sign-in' ? 'sign-up' : 'sign-in')}
+                  >
+                    {bridgeAuthMode === 'sign-in' ? 'Create a Hearth account' : 'I already have an account'}
+                  </button>
+                </div>
+              ) : !bridgeState.enabled ? (
+                <div className="remote-inbox-empty">
+                  <Icon name="radio" />
+                  <p>Remote Bridge is Disabled</p>
+                  <small>Signed in as {bridgeState.accountEmail}. Enable the bridge when you want Hearth to poll for tasks.</small>
+                </div>
+              ) : bridgeState.pendingTasks.length === 0 ? (
+                <div className="remote-inbox-empty">
+                  <Icon name="radio" />
+                  <p>No pending remote tasks</p>
+                  <small>Incoming tasks from connected clients will appear here for your review and approval.</small>
+                </div>
+              ) : (
+                <div className="remote-tasks-list">
+                  {bridgeState.pendingTasks.map((t) => (
+                    <div key={t.id} className="remote-task-card">
+                      <div className="remote-task-main">
+                        <div className="remote-task-meta">
+                          <span className="remote-source-tag">{t.source || 'chatgpt'}</span>
+                          <strong className="remote-task-title">{t.title || 'Remote Task'}</strong>
+                          <span className="remote-task-time">{new Date(t.createdAt).toLocaleTimeString()}</span>
+                        </div>
+                        <p className="remote-task-preview">{t.prompt.slice(0, 140)}{t.prompt.length > 140 ? '…' : ''}</p>
+                      </div>
+                      <div className="remote-task-actions">
+                        <button
+                          className="remote-action-btn review"
+                          type="button"
+                          onClick={() => setReviewTask(t)}
+                        >
+                          Review
+                        </button>
+                        <button
+                          className="remote-action-btn reject"
+                          type="button"
+                          disabled={bridgeBusy}
+                          onClick={() => handleRejectRemoteTask(t)}
+                        >
+                          Reject
+                        </button>
+                        <button
+                          className="remote-action-btn approve"
+                          type="button"
+                          disabled={bridgeBusy || isTaskRunning || !executorStatus?.available || antigravityPerm === 'Blocked'}
+                          onClick={() => handleApproveRemoteTask(t)}
+                          title={isTaskRunning ? 'Cannot run while another task is running' : 'Approve and dispatch to Antigravity'}
+                        >
+                          Approve & Run
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          </div>
+        ) : activeNav === 'Goals' ? (
+          <div className="goals-view">
+            <header className="page-header">
+              <div>
+                <p className="kicker">HEARTH GOAL RUNNER V1</p>
+                <h1>Goals.</h1>
+                <p className="intro">Multi-step goal orchestration with checkpoints, lock guards, and step tracking.</p>
+              </div>
+              <div className={`connection-pill ${isGoalActive ? 'online' : ''}`}>
+                <span /> Goal Runner · {isGoalActive ? 'Active' : 'Standing by'}
+              </div>
+            </header>
+
+            <div className="goals-workspace-bar">
+              <div className="goals-workspace-info">
+                <Icon name="folder" />
+                <span>Workspace:</span>
+                <code>{workspace || 'No workspace selected'}</code>
+                {isGoalActive && (
+                  <span className="workspace-lock-badge" title="Workspace is locked while any goal is running, waiting, or paused">
+                    🔒 Locked
+                  </span>
+                )}
+              </div>
+              <div className="goals-action-buttons">
+                <button
+                  className="task-workspace-change"
+                  disabled={isTaskRunning || isGoalActive}
+                  onClick={chooseWorkspace}
+                  title={isGoalActive ? 'Workspace is locked while goal is active' : 'Choose different folder'}
+                >
+                  Change folder
+                </button>
+                <button
+                  className="new-goal-btn"
+                  type="button"
+                  onClick={() => setShowNewGoalModal(true)}
+                >
+                  <Icon name="plus" />
+                  <span>New Goal</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="goals-layout">
+              {/* Left Column: Goals List */}
+              <div className="goals-list-panel">
+                <div className="goals-list-header">
+                  <h3>Goals</h3>
+                  <span className="goals-count-badge">{goals.length}</span>
+                </div>
+                {goals.length === 0 ? (
+                  <div className="task-empty-card" style={{ padding: '24px 12px' }}>
+                    <Icon name="flag" />
+                    <p>No goals created yet</p>
+                    <small>Click "New Goal" above to create your first multi-step goal.</small>
+                  </div>
+                ) : (
+                  goals.map((g) => {
+                    const completedSteps = g.steps.filter((s) => s.status === 'completed').length;
+                    return (
+                      <div
+                        key={g.id}
+                        className={`goal-card-item ${selectedGoal?.id === g.id ? 'active' : ''}`}
+                        onClick={() => setSelectedGoalId(g.id)}
+                      >
+                        <div className="goal-card-header">
+                          <strong className="goal-card-title">{g.title}</strong>
+                          <span className={`goal-status-pill ${g.status}`}>{g.status}</span>
+                        </div>
+                        <div className="goal-card-meta">
+                          <span>{completedSteps}/{g.steps.length} steps</span>
+                          <span>{new Date(g.createdAt).toLocaleDateString()}</span>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* Right Column: Goal Detail */}
+              {selectedGoal ? (
+                <div className="goal-detail-panel">
+                  <div className="goal-detail-header">
+                    <div className="goal-detail-title-group">
+                      <h2>{selectedGoal.title}</h2>
+                      <p className="goal-detail-objective">{selectedGoal.objective}</p>
+                    </div>
+                    <div className="goal-detail-controls">
+                      <span className={`goal-status-pill ${selectedGoal.status}`}>{selectedGoal.status}</span>
+                      {(selectedGoal.status === 'ready' || selectedGoal.status === 'draft' || selectedGoal.status === 'error') && (
+                        <button
+                          className="goal-btn-run"
+                          type="button"
+                          disabled={goalActionBusy || isGoalActive}
+                          onClick={() => handleRunGoal(selectedGoal.id)}
+                        >
+                          {goalActionBusy ? 'Running…' : 'Run Goal'}
+                        </button>
+                      )}
+                      {selectedGoal.status === 'running' && (
+                        <button
+                          className="goal-btn-pause"
+                          type="button"
+                          disabled={goalActionBusy}
+                          onClick={() => handlePauseGoal(selectedGoal.id)}
+                        >
+                          Pause
+                        </button>
+                      )}
+                      {selectedGoal.status === 'waiting' && selectedGoal.steps.find((s) => s.id === selectedGoal.currentStepId)?.route === 'manual' ? (
+                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                          <button
+                            className="goal-btn-run"
+                            type="button"
+                            disabled={goalActionBusy}
+                            onClick={() => {
+                              const activeStep = selectedGoal.steps.find((s) => s.id === selectedGoal.currentStepId);
+                              if (activeStep) void handleSignoffStep(selectedGoal.id, activeStep.id, 'complete');
+                            }}
+                          >
+                            <Icon name="check" />
+                            <span>Mark Step Complete</span>
+                          </button>
+                          <button
+                            className="remote-action-btn reject"
+                            type="button"
+                            disabled={goalActionBusy}
+                            onClick={() => {
+                              const activeStep = selectedGoal.steps.find((s) => s.id === selectedGoal.currentStepId);
+                              if (activeStep) void handleSignoffStep(selectedGoal.id, activeStep.id, 'fail');
+                            }}
+                          >
+                            <span>Fail Step</span>
+                          </button>
+                        </div>
+                      ) : (selectedGoal.status === 'paused' || selectedGoal.status === 'waiting') && (
+                        <button
+                          className="goal-btn-resume"
+                          type="button"
+                          disabled={goalActionBusy}
+                          onClick={() => handleResumeGoal(selectedGoal.id)}
+                        >
+                          {goalActionBusy ? 'Resuming…' : 'Resume'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {selectedGoal.constraints && selectedGoal.constraints.length > 0 && (
+                    <div className="goal-constraints-box">
+                      <strong>Constraints:</strong> {selectedGoal.constraints.join('; ')}
+                    </div>
+                  )}
+
+                  {/* Steps list */}
+                  <div className="goal-steps-container">
+                    <span className="task-section-label">Execution Steps ({selectedGoal.steps.length})</span>
+                    {selectedGoal.steps.map((step, idx) => (
+                      <div
+                        key={step.id}
+                        className={`goal-step-row ${step.status === 'running' ? 'step-running' : step.status === 'error' ? 'step-error' : ''}`}
+                      >
+                        <div className="goal-step-top">
+                          <div className="goal-step-title-wrap">
+                            <span className={`goal-step-badge ${step.status}`}>
+                              {step.status === 'completed' ? '✓' : step.status === 'running' ? '●' : step.status === 'waiting' ? '⏳' : step.status === 'paused' ? '⏸' : step.status === 'error' ? '✕' : step.status === 'skipped' ? '⊘' : idx + 1}
+                            </span>
+                            <strong className="goal-step-title">{step.title}</strong>
+                          </div>
+                          <div className="goal-step-tags">
+                            <span className="goal-route-tag">{step.route}</span>
+                            <span className="goal-req-tag">{step.required ? 'Required' : 'Optional'}</span>
+                            <span className={`goal-status-pill ${step.status}`}>{step.status}</span>
+                          </div>
+                        </div>
+                        {step.description && <p className="goal-step-desc">{step.description}</p>}
+                        {step.result && (
+                          <div className="goal-step-output">
+                            <strong>Result:</strong> {step.result}
+                          </div>
+                        )}
+                        {step.route === 'manual' && step.status === 'waiting' && (
+                          <div className="manual-signoff-actions" style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+                            <button
+                              className="goal-btn-run"
+                              type="button"
+                              disabled={goalActionBusy}
+                              onClick={() => void handleSignoffStep(selectedGoal.id, step.id, 'complete')}
+                            >
+                              <Icon name="check" />
+                              <span>Mark Step Complete</span>
+                            </button>
+                            <button
+                              className="remote-action-btn reject"
+                              type="button"
+                              disabled={goalActionBusy}
+                              onClick={() => void handleSignoffStep(selectedGoal.id, step.id, 'fail')}
+                            >
+                              <span>Fail Step</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Latest Checkpoint */}
+                  {selectedGoal.checkpoints && selectedGoal.checkpoints.length > 0 && (
+                    <div className="goal-checkpoint-card">
+                      <div className="goal-checkpoint-header">
+                        <span>Latest Checkpoint #{selectedGoal.checkpoints.length}</span>
+                        <span>{new Date(selectedGoal.checkpoints[selectedGoal.checkpoints.length - 1].timestamp).toLocaleTimeString()}</span>
+                      </div>
+                      <p className="goal-checkpoint-summary">
+                        {selectedGoal.checkpoints[selectedGoal.checkpoints.length - 1].summary}
+                      </p>
+                      <div className="goal-checkpoint-checks">
+                        <span>Steps: {selectedGoal.checkpoints[selectedGoal.checkpoints.length - 1].completedSteps} completed</span>
+                        {selectedGoal.checkpoints[selectedGoal.checkpoints.length - 1].route && (
+                          <span>Route: {selectedGoal.checkpoints[selectedGoal.checkpoints.length - 1].route}</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="task-empty-card">
+                  <Icon name="flag" />
+                  <p>Select a goal</p>
+                  <small>Choose a goal from the list or create a new one.</small>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <>
+            <header className="page-header" id="overview">
+              <div><p className="kicker">MCP CONTROL CENTER</p><h1>Good morning.</h1><p className="intro">Your local workspace is ready when you are.</p></div>
+              <div className={`connection-pill ${running ? 'online' : ''}`}><span /> MCP Server · {running ? 'Running' : 'Offline'}</div>
+            </header>
+
+            <section className={`power-console ${running ? 'is-running' : ''}`} aria-labelledby="server-title">
+              <div className="console-copy"><div className="console-icon"><Icon name="server" /><span className="pulse-ring" /></div><div><p className="section-kicker">SERVER STATUS</p><h2 id="server-title">{running ? 'MCP server is active' : 'MCP server is standing by'}</h2><p>{running ? `Streamable HTTP listening on 127.0.0.1:${port}.` : 'Start the server to expose 8 workspace tools locally.'}</p></div></div>
+              <div className="server-action"><label className="port-readout"><span>PORT</span><input aria-label="Server port" inputMode="numeric" disabled={running || busy} value={port} onChange={(event) => setPort(Number(event.target.value.replace(/\D/g, '').slice(0, 5)) || 3001)} onBlur={() => void window.controlApp.saveSettings({ port })} /></label><button className={`power-button ${running ? 'stop' : ''}`} disabled={busy} onClick={toggleServer}><span className="power-symbol" />{busy ? 'Working…' : running ? 'Stop Server' : 'Start Server'}</button></div>
+            </section>
+
+            <section className="metrics" aria-label="System overview">
+              <article><div className="metric-icon sage"><Icon name="activity" /></div><div><span>Connection</span><strong>{busy ? 'Changing' : running ? 'Healthy' : 'Idle'}</strong><small>{running ? `Process ${pid ?? 'active'} · local` : 'No active process'}</small></div></article>
+              <article><div className="metric-icon sand"><Icon name="lock" /></div><div><span>Permissions</span><strong>{allowed} allowed</strong><small>{permissions.length - allowed} require attention</small></div></article>
+              <article><div className="metric-icon blue"><Icon name="folder" /></div><div><span>Workspace</span><strong>{workspaceValid === null ? 'Checking…' : workspaceValid ? 'Connected' : 'Not found'}</strong><small>{workspaceValid ? 'Local filesystem' : workspace ? 'Path not accessible' : 'No workspace configured'}</small></div></article>
+              <article><div className="metric-icon purple"><Icon name="console" /></div><div><span>Executor</span><strong>{executorStatus?.available ? 'Connected' : 'Unavailable'}</strong><small>{isTaskRunning ? `Task running (${taskData?.status})` : activeTaskId ? 'Task ready' : 'Standing by'}</small></div></article>
+            </section>
+
+            <div className="dashboard-grid">
+              <section className="soft-panel workspace-panel" id="workspace">
+                <div className="panel-title"><div><p className="section-kicker">WORKSPACE</p><h2>Working directory</h2></div><button className="round-button" aria-label="Copy workspace path" onClick={async () => { await navigator.clipboard.writeText(workspace); flash('Workspace path copied'); }}><Icon name="copy" /></button></div>
+                <div className="folder-well"><div className="folder-tab" /><div className="folder-icon"><Icon name="folder" /></div><label htmlFor="workspace-path">Current folder</label><input id="workspace-path" value={workspace} onChange={(event) => setWorkspace(event.target.value)} onBlur={() => void window.controlApp.saveSettings({ workspace })} disabled={isTaskRunning || isGoalActive} /><button onClick={chooseWorkspace} disabled={isTaskRunning || isGoalActive}>Choose folder <Icon name="chevron" /></button></div>
+                <p className="panel-note">{isGoalActive ? <span style={{ color: '#8a724f' }}>🔒 Workspace is locked while a goal is active.</span> : <><span /> Changes are restricted to this directory.</>}</p>
+              </section>
+
+              <section className="soft-panel permission-panel" id="permissions">
+                <div className="panel-title"><div><p className="section-kicker">PERMISSIONS</p><h2>Tool access</h2></div><span className="panel-meta">Click to change</span></div>
+                <div className="permission-list">{permissions.map((permission, index) => <button className={`permission-row${permission.disabled ? ' disabled' : ''}`} onClick={() => rotatePermission(index)} key={permission.name} disabled={permission.disabled} aria-disabled={permission.disabled}><span className="permission-copy"><strong>{permission.name}</strong><small>{permission.detail}</small></span><em className={`permission-value value-${permission.value.toLowerCase()}`}><i />{permission.value}{!permission.disabled && <Icon name="chevron" />}</em></button>)}</div>
+              </section>
+
+              <section className="soft-panel update-panel" aria-labelledby="updates-title">
+                <div className="panel-title">
+                  <div><p className="section-kicker">LOCAL UPDATE</p><h2 id="updates-title">Hearth updates</h2></div>
+                  <span className={`update-status ${updateCheck?.state ?? 'idle'}`}><i />{updateStatusText[updateCheck?.state ?? 'idle']}</span>
+                </div>
+                <dl className="update-facts">
+                  <div><dt>Current version</dt><dd>v{updaterInfo?.currentVersion ?? '—'}</dd></div>
+                  <div><dt>Current build</dt><dd title={updaterInfo?.currentBuildId}>{updaterInfo?.currentBuildId ?? '—'}</dd></div>
+                  <div><dt>Build time</dt><dd>{updaterInfo?.builtAt ? new Date(updaterInfo.builtAt).toLocaleString() : 'Development build'}</dd></div>
+                  {updateCheck?.available && <div><dt>New build</dt><dd>v{updateCheck.available.version} · {updateCheck.available.buildId}</dd></div>}
+                </dl>
+                {updateCheck?.error && <p className="update-error">{updateCheck.error}</p>}
+                <div className="update-actions">
+                  <button type="button" className="subtle-action" disabled={updateBusy} onClick={checkForUpdate}>{updateBusy && updateCheck?.state === 'checking' ? 'Checking…' : 'Check for Update'}</button>
+                  <button type="button" className="update-install" disabled={updateBusy || updateCheck?.state !== 'update_ready'} onClick={installUpdate}>{updateCheck?.state === 'installing' ? 'Installing…' : 'Install Update'}</button>
+                  <button type="button" className="text-action" onClick={() => setShowUpdateDetails((visible) => !visible)}>{showUpdateDetails ? 'Hide Details' : 'View Details'}</button>
+                </div>
+                {showUpdateDetails && <div className="update-details">
+                  <p><strong>Trusted folder</strong><code>{updaterInfo?.updateDirectory ?? '—'}</code></p>
+                  <p>Only a verified <code>update-manifest.json</code> and <code>Hearth Control.app</code> from this folder can be installed.</p>
+                  <button type="button" className="text-action" disabled={updateBusy} onClick={chooseUpdateDirectory}>Choose trusted folder</button>
+                </div>}
+              </section>
+
+              <section className="soft-panel logs-panel" id="logs">
+                <div className="panel-title"><div><p className="section-kicker">ACTIVITY</p><h2>System log</h2></div><div className="log-actions"><span className="live-indicator"><i /> LIVE</span><button onClick={() => setLogs([])}>Clear log</button></div></div>
+                <div className="log-well" aria-live="polite">{logs.length === 0 ? <div className="empty-state"><Icon name="terminal" /><p>No activity recorded</p><small>New system events will appear here.</small></div> : logs.map((log, index) => <div className={`log-line ${log.tone}`} key={`${log.time}-${index}`}><time>{log.time}</time><span className="log-source">{log.source}</span><p>{log.message}</p></div>)}</div>
+              </section>
+            </div>
+          </>
+        )}
+        <footer><span>System operates locally on this Mac</span><span>8 MCP tools · 1 Executor registered</span></footer>
+      </main>
+
+      {showNewGoalModal && (
+        <div className="approval-backdrop" role="presentation">
+          <section className="approval-dialog goal-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="new-goal-heading">
+            <div className="approval-icon"><Icon name="flag" /></div>
+            <p className="section-kicker">GOAL CREATION</p>
+            <h2 id="new-goal-heading">Create New Goal</h2>
+            
+            <div className="goal-form-group">
+              <label>Goal Title</label>
+              <input
+                placeholder="e.g. Audit Repository and Verify Tests"
+                value={newGoalTitle}
+                onChange={(e) => setNewGoalTitle(e.target.value)}
+              />
+            </div>
+
+            <div className="goal-form-group">
+              <label>Objective</label>
+              <textarea
+                placeholder="Describe the ultimate objective of this multi-step goal..."
+                rows={3}
+                value={newGoalObjective}
+                onChange={(e) => setNewGoalObjective(e.target.value)}
+              />
+            </div>
+
+            <div className="goal-form-group">
+              <label>Constraints (optional, comma-separated)</label>
+              <input
+                placeholder="e.g. No git commit, strictly read-only, tests must pass"
+                value={newGoalConstraints}
+                onChange={(e) => setNewGoalConstraints(e.target.value)}
+              />
+            </div>
+
+            <div className="goal-form-group">
+              <label>Execution Steps ({newGoalSteps.length})</label>
+              {newGoalSteps.map((st, i) => (
+                <div key={i} className="goal-step-editor-item">
+                  <div className="goal-step-editor-row">
+                    <input
+                      placeholder={`Step ${i + 1} Title`}
+                      value={st.title}
+                      onChange={(e) => {
+                        const next = [...newGoalSteps];
+                        next[i] = { ...next[i], title: e.target.value };
+                        setNewGoalSteps(next);
+                      }}
+                    />
+                    <select
+                      value={st.route}
+                      onChange={(e) => {
+                        const next = [...newGoalSteps];
+                        next[i] = { ...next[i], route: e.target.value as StepRoute };
+                        setNewGoalSteps(next);
+                      }}
+                    >
+                      <option value="antigravity">Antigravity</option>
+                      <option value="mcp">MCP Tool</option>
+                      <option value="manual">Manual</option>
+                    </select>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '10px', textTransform: 'none' }}>
+                      <input
+                        type="checkbox"
+                        checked={st.required}
+                        onChange={(e) => {
+                          const next = [...newGoalSteps];
+                          next[i] = { ...next[i], required: e.target.checked };
+                          setNewGoalSteps(next);
+                        }}
+                      />
+                      Req
+                    </label>
+                    {newGoalSteps.length > 1 && (
+                      <button
+                        type="button"
+                        className="goal-step-remove-btn"
+                        onClick={() => setNewGoalSteps(newGoalSteps.filter((_, idx) => idx !== i))}
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                  <input
+                    placeholder="Step description or instruction..."
+                    value={st.description}
+                    onChange={(e) => {
+                      const next = [...newGoalSteps];
+                      next[i] = { ...next[i], description: e.target.value };
+                      setNewGoalSteps(next);
+                    }}
+                  />
+                </div>
+              ))}
+              <button
+                type="button"
+                className="remote-action-btn review"
+                style={{ alignSelf: 'flex-start', marginTop: '4px' }}
+                onClick={() => setNewGoalSteps([...newGoalSteps, { title: '', description: '', route: 'antigravity', required: true }])}
+              >
+                + Add Step
+              </button>
+            </div>
+
+            <div className="approval-actions">
+              <button className="deny-button" type="button" onClick={() => setShowNewGoalModal(false)}>Cancel</button>
+              <button className="allow-button" type="button" onClick={handleCreateGoal}>Create Goal</button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {reviewTask && (
+        <div className="approval-backdrop" role="presentation">
+          <section className="approval-dialog review-dialog" role="dialog" aria-modal="true" aria-labelledby="review-task-title">
+            <div className="approval-icon"><Icon name="radio" /></div>
+            <p className="section-kicker">REMOTE TASK REVIEW</p>
+            <h2 id="review-task-title">{reviewTask.title || 'Remote Task'}</h2>
+            <div className="review-meta-row">
+              <span>Source: <strong>{reviewTask.source}</strong></span>
+              <span>Received: <strong>{new Date(reviewTask.createdAt).toLocaleTimeString()}</strong></span>
+              {reviewTask.requestId && <span>Request ID: <code>{reviewTask.requestId}</code></span>}
+            </div>
+            <div className="review-prompt-container">
+              <label>Full Prompt ({new TextEncoder().encode(reviewTask.prompt).length.toLocaleString()} bytes)</label>
+              <div className="review-prompt-text">{reviewTask.prompt}</div>
+            </div>
+            <div className="approval-actions">
+              <button className="deny-button" onClick={() => setReviewTask(null)}>Close</button>
+              <button
+                className="deny-button"
+                style={{ borderColor: 'var(--rose)', color: 'var(--rose)' }}
+                disabled={bridgeBusy}
+                onClick={() => handleRejectRemoteTask(reviewTask)}
+              >
+                Reject Task
+              </button>
+              <button
+                className="allow-button"
+                autoFocus
+                disabled={bridgeBusy || isTaskRunning || !executorStatus?.available || antigravityPerm === 'Blocked'}
+                onClick={() => handleApproveRemoteTask(reviewTask)}
+              >
+                Approve & Run
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {approval && <div className="approval-backdrop" role="presentation">
+        <section className="approval-dialog" role="alertdialog" aria-modal="true" aria-labelledby="approval-title">
+          <div className="approval-icon"><Icon name="lock" /></div>
+          <p className="section-kicker">PERMISSION REQUEST</p>
+          <h2 id="approval-title">Allow {approval.permission} access?</h2>
+          <p className="approval-action">{approval.action}</p>
+          <p className="approval-note">This approval applies to this request only.</p>
+          <div className="approval-actions"><button className="deny-button" onClick={() => answerApproval(false)}>Deny</button><button className="allow-button" autoFocus onClick={() => answerApproval(true)}>Allow once</button></div>
+        </section>
+      </div>}
+      <div className={`toast ${notice ? 'visible' : ''}`} role="status">{notice}</div>
+    </div>
+  );
+}

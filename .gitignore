@@ -1,0 +1,42 @@
+# Dependencies and reproducible build artifacts
+node_modules/
+dist/
+release/
+outputs/
+/index-x2L1zvPw.js
+/work/lnwjud-slides/
+
+# Operating-system, editor, and temporary files
+.DS_Store
+*.log
+*.tmp
+*.temp
+*.cache
+.cache/
+tmp/
+temp/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials/
+sessions/
+tokens/
+
+# Local runtime state and private task material
+jobs.json
+jobs.json.bak
+tasks.json
+tasks.json.bak
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+transcript.jsonl
+transcripts/
+
+# Local agent-only material
+PERSONAL_INTELLIGENCE.md
