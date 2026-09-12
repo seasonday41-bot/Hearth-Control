@@ -12,6 +12,7 @@ test('CHAT1 local selection invokes Provider Selection', async () => {
   assert.equal(result.response, 'local');
   assert.equal(request.provider, 'local');
   assert.equal(request.messages[0].role, 'system');
+  assert.deepEqual(request.messages[1], { role: 'user', content: 'x' });
 });
 
 test('CHAT2 external selection invokes the existing provider path', async () => {

@@ -17,14 +17,14 @@ export class LocalChatCaller {
   }
 }
 
-const COMPACT_LOCAL_CONTEXT = 'Answer directly with short paragraphs and minimal preamble. Do not repeat the request. For coding tasks, introduce the approach briefly, provide code promptly, then add only a short explanation. Do not reveal hidden reasoning.';
 const withCompactContext = (request = {}) => request.provider === 'local' && Array.isArray(request.messages)
   ? {
       ...request,
-      messages: request.messages.some((message) => message?.role === 'system')
-        ? request.messages
-        : [{ role: 'system', content: COMPACT_LOCAL_CONTEXT }, ...request.messages],
+      messages: request.messages[0]?.role === 'system'
+        ? [{ ...request.messages[0], content: `${buildLocalContext(request)}\n\n${request.messages[0].content || ''}` }, ...request.messages.slice(1)]
+        : [{ role: 'system', content: buildLocalContext(request) }, ...request.messages],
     }
   : request;
 
 export const createLocalChatCaller = (options) => new LocalChatCaller(options);
+import { buildLocalContext } from '../context/builder.mjs';

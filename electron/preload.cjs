@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld('controlApp', {
   getSettings: () => ipcRenderer.invoke('settings:get'),
   saveSettings: (settings) => ipcRenderer.invoke('settings:save', settings),
   localChatStatus: () => ipcRenderer.invoke('local-chat:status'),
+  localChatContext: (request) => ipcRenderer.invoke('local-chat:context', request),
   storageAuditScan: () => ipcRenderer.invoke('storage-audit:scan'),
   storageAuditReveal: (id) => ipcRenderer.invoke('storage-audit:reveal', id),
   onStorageAuditProgress: (callback) => {

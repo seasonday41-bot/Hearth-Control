@@ -133,11 +133,12 @@ interface Window { controlApp: {
   getSettings: () => Promise<ControlSettings>;
   saveSettings: (settings: Partial<ControlSettings>) => Promise<ControlSettings>;
   localChatStatus: () => Promise<{ health: any; models: any }>;
+  localChatContext: (request?: { model?: string; profile?: string; longResponse?: boolean; ollamaAvailable?: boolean }) => Promise<{ runtime: string; capabilities: { available: string[]; unavailable: string[] }; project: string; safety: string; responseStyle: string }>;
   storageAuditScan: () => Promise<any>;
   storageAuditReveal: (id: string) => Promise<{ ok: boolean; error?: string }>;
   onStorageAuditProgress: (callback: (progress: { area: string; path: string }) => void) => () => void;
   localChatSend: (request: { provider: 'local' | 'external'; messages: Array<{ role: string; content: string }>; model?: string; profile?: 'fast' | 'normal' | 'deep' | 'light' | 'medium' | 'high'; longResponse?: boolean; timeoutMs?: number; options?: Record<string, unknown>; think?: boolean; num_ctx?: number; num_predict?: number; temperature?: number }) => Promise<any>;
-  localChatStreamStart: (request: { requestId: string; provider: 'local'; messages: Array<{ role: string; content: string }>; model?: string; profile?: 'fast' | 'normal' | 'deep' | 'light' | 'medium' | 'high'; longResponse?: boolean; timeoutMs?: number }) => void;
+  localChatStreamStart: (request: { requestId: string; provider: 'local'; messages: Array<{ role: string; content: string }>; model?: string; profile?: 'fast' | 'normal' | 'deep' | 'light' | 'medium' | 'high'; longResponse?: boolean; timeoutMs?: number; ollamaAvailable?: boolean }) => void;
   localChatStreamStop: (requestId: string) => void;
   onLocalChatStream: (callback: (event: { type: 'chunk' | 'done' | 'error'; requestId: string; content?: string; result?: any }) => void) => () => void;
   chooseWorkspace: () => Promise<string | null>;

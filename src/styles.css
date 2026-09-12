@@ -294,6 +294,14 @@ footer { color: var(--faint); display: flex; font-size: 8px; justify-content: sp
 /* Experimental Local Chat */
 .local-chat-view { display: flex; flex-direction: column; gap: 20px; }
 .local-chat-panel { background: var(--panel); border: 1px solid var(--highlight); border-radius: 18px; box-shadow: 10px 13px 24px var(--shadow-soft), -7px -7px 18px var(--highlight); padding: 22px; display: flex; flex-direction: column; gap: 18px; max-width: 900px; }
+.local-chat-header-actions { align-items: center; display: flex; gap: 10px; }
+.context-button { background: transparent; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); cursor: pointer; font-size: 11px; padding: 8px 10px; }
+.context-button:hover { border-color: var(--sage); color: var(--text); }
+.local-chat-context-inspector { background: var(--well); border: 1px solid var(--line); border-radius: 10px; color: var(--text); padding: 14px 16px; }
+.local-chat-context-inspector header { align-items: center; display: flex; justify-content: space-between; margin-bottom: 12px; }
+.local-chat-context-inspector header button { background: transparent; border: 0; color: var(--muted); cursor: pointer; }
+.local-chat-context-inspector h3 { color: var(--faint); font-size: 10px; letter-spacing: .06em; margin: 14px 0 6px; text-transform: uppercase; }
+.local-chat-context-inspector p, .local-chat-context-inspector pre { font-size: 11px; line-height: 1.5; margin: 4px 0; white-space: pre-wrap; }
 .local-chat-controls { display: grid; grid-template-columns: 180px minmax(180px, 1fr) 150px; gap: 16px; align-items: end; }
 .local-chat-field { display: flex; flex-direction: column; gap: 7px; }
 .local-chat-field label { color: var(--faint); font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }

@@ -121,6 +121,10 @@ export default function App() {
   const [chatElapsedMs, setChatElapsedMs] = useState(0);
   const [chatFollowOutput, setChatFollowOutput] = useState(true);
   const [chatExpandedCode, setChatExpandedCode] = useState<{ code: string; language: string } | null>(null);
+  const [showChatContext, setShowChatContext] = useState(false);
+  const [chatContext, setChatContext] = useState<any>(null);
+  const [chatContextLoading, setChatContextLoading] = useState(false);
+  const [chatContextError, setChatContextError] = useState('');
   const chatRequestIdRef = useRef<string | null>(null);
   const chatStreamStartedRef = useRef(0);
   const chatResponseRef = useRef<HTMLDivElement | null>(null);
@@ -240,6 +244,29 @@ export default function App() {
     });
     return () => { active = false; };
   }, [activeNav, chatProvider]);
+
+  useEffect(() => {
+    if (activeNav !== 'Local Chat') return;
+    void window.controlApp.localChatContext({ model: chatModel, profile: chatProfile, longResponse: chatLongResponse, ollamaAvailable: chatHealth?.ok }).then(setChatContext).catch(() => setChatContext(null));
+  }, [activeNav, chatModel, chatProfile, chatLongResponse, chatHealth?.ok]);
+
+  const toggleChatContext = async () => {
+    if (showChatContext) {
+      setShowChatContext(false);
+      return;
+    }
+    setShowChatContext(true);
+    setChatContextError('');
+    setChatContextLoading(true);
+    try {
+      const context = await window.controlApp.localChatContext({ model: chatModel, profile: chatProfile, longResponse: chatLongResponse, ollamaAvailable: chatHealth?.ok });
+      setChatContext(context);
+    } catch (error: any) {
+      setChatContextError(error?.message || 'Context is unavailable.');
+    } finally {
+      setChatContextLoading(false);
+    }
+  };
 
   useEffect(() => window.controlApp.onLocalChatStream((event) => {
     if (!event.requestId || event.requestId !== chatRequestIdRef.current) return;
@@ -521,7 +548,7 @@ export default function App() {
       const requestId = crypto.randomUUID();
       chatRequestIdRef.current = requestId;
       setChatStreaming(true);
-      window.controlApp.localChatStreamStart({ requestId, provider: 'local', messages: [{ role: 'user', content: chatPrompt.trim() }], model: chatModel, profile: chatProfile, longResponse: chatLongResponse });
+      window.controlApp.localChatStreamStart({ requestId, provider: 'local', messages: [{ role: 'user', content: chatPrompt.trim() }], model: chatModel, profile: chatProfile, longResponse: chatLongResponse, ollamaAvailable: Boolean(chatHealth?.ok) });
       return;
     }
     try {
@@ -868,9 +895,7 @@ export default function App() {
                 <h1>Local Chat.</h1>
                 <p className="intro">Choose a provider explicitly for this request. No task or durable job is created by Local Chat.</p>
               </div>
-              <div className={`connection-pill ${chatProvider === 'local' && chatHealth?.ok ? 'online' : ''}`}>
-                <span /> {chatProvider === 'local' ? `Ollama · ${chatHealth?.ok ? 'Available' : 'Unavailable'}` : 'External provider'}
-              </div>
+              <div className="local-chat-header-actions"><button type="button" className="context-button" aria-expanded={showChatContext} onClick={() => void toggleChatContext()}>Context</button><div className={`connection-pill ${chatProvider === 'local' && chatHealth?.ok ? 'online' : ''}`}><span /> {chatProvider === 'local' ? `Ollama · ${chatHealth?.ok ? 'Available' : 'Unavailable'}` : 'External provider'}</div></div>
             </header>
 
             <section className="local-chat-panel">
@@ -914,6 +939,7 @@ export default function App() {
               {chatStreaming && <div className="local-chat-generating" aria-live="polite">Generating… {Math.round(chatElapsedMs / 1000)}s</div>}
               {chatError && <div className="local-chat-error" role="alert">{chatError}</div>}
               {(chatStreamText || chatResult) && <section className="local-chat-result" aria-live="polite"><div className="local-chat-result-meta"><span>{chatResult?.provider || 'ollama'}</span><span>{chatResult?.model || chatModel}</span><span>{chatProvider === 'local' ? chatProfile.toUpperCase() : 'EXTERNAL'}</span><span>{chatStreaming ? `${Math.round(chatElapsedMs / 1000)}s` : `${chatResult?.elapsedMs || chatElapsedMs} ms`}</span></div><div ref={chatResponseRef} className="local-chat-response-viewer" onScroll={handleChatResponseScroll}><LocalChatResponse text={chatStreamText || chatResult?.response || ''} onExpand={(code, language) => setChatExpandedCode({ code, language })} /></div>{!chatFollowOutput && chatStreaming && <button type="button" className="local-chat-bottom-button" onClick={() => { setChatFollowOutput(true); if (chatResponseRef.current) chatResponseRef.current.scrollTop = chatResponseRef.current.scrollHeight; }}>↓ Bottom</button>}{chatResult?.doneReason === 'length' && <small className="local-chat-output-warning">Response reached the output limit.</small>}</section>}
+              {showChatContext && <section className="local-chat-context-inspector" aria-label="Local AI context"><header><strong>Context supplied to Local AI</strong><button type="button" onClick={() => setShowChatContext(false)}>Close</button></header>{chatContextLoading ? <p>Loading current context…</p> : chatContextError ? <p role="alert">{chatContextError}</p> : chatContext && <div><h3>Runtime</h3><pre>{chatContext.runtime}</pre><h3>Capabilities</h3><p><strong>Available:</strong> {chatContext.capabilities.available.join('; ')}</p><p><strong>Not available:</strong> {chatContext.capabilities.unavailable.join('; ')}</p><h3>Project</h3><pre>{chatContext.project}</pre><h3>Safety</h3><p>{chatContext.safety}</p><h3>Response Style</h3><p>{chatContext.responseStyle}</p></div>}</section>}
               {chatExpandedCode && <div className="local-chat-code-modal" role="dialog" aria-modal="true"><div className="local-chat-code-modal-header"><span>{chatExpandedCode.language || 'code'}</span><button type="button" onClick={() => setChatExpandedCode(null)}>Close</button></div><pre><code>{chatExpandedCode.code}</code></pre></div>}
             </section>
           </div>

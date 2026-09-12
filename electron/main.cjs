@@ -400,6 +400,23 @@ app.whenReady().then(async () => {
     const models = health.ok ? await local.adapter.listModels() : { ok: false, provider: 'ollama', error: health.error };
     return { health, models };
   });
+  ipcMain.handle('local-chat:context', async (_event, request = {}) => {
+    const { buildContextPreview } = await importFromHere('../mcp/context/builder.mjs');
+    const settings = readSettings();
+    return buildContextPreview({
+      version: buildMetadata.version,
+      buildId: buildMetadata.buildId,
+      model: request.model || process.env.OLLAMA_MODEL || 'qwen3.5:9b-hermes',
+      profile: request.profile || 'normal',
+      longResponse: Boolean(request.longResponse),
+      ollamaAvailable: typeof request.ollamaAvailable === 'boolean' ? request.ollamaAvailable : undefined,
+      workspace: settings.workspace || null,
+      projectName: settings.workspace ? path.basename(settings.workspace) : null,
+      gitBranch: null,
+      gitCommit: null,
+      gitState: null,
+    });
+  });
   ipcMain.handle('storage-audit:scan', async (event) => {
     if (storageAuditWorker) return { ok: false, error: 'A storage scan is already running.' };
     const worker = new Worker(path.join(__dirname, 'storage-audit-worker.mjs'), {
@@ -437,6 +454,7 @@ app.whenReady().then(async () => {
     return revealAuditedItem({ id, items: storageAuditItems, reveal: (value) => shell.showItemInFolder(value) });
   });
   ipcMain.handle('local-chat:send', async (_event, request = {}) => {
+    const settings = readSettings();
     const provider = request.provider === 'external' ? 'external' : request.provider === 'local' ? 'local' : request.provider;
     const messages = Array.isArray(request.messages) ? request.messages : [];
     if (!provider || messages.length === 0) {
@@ -499,11 +517,20 @@ app.whenReady().then(async () => {
         temperature: request.temperature,
         longResponse: request.longResponse,
         timeoutMs: request.timeoutMs,
+        version: buildMetadata.version,
+        buildId: buildMetadata.buildId,
+        ollamaAvailable: request.ollamaAvailable,
+        workspace: settings.workspace || null,
+        projectName: settings.workspace ? path.basename(settings.workspace) : null,
+        gitBranch: null,
+        gitCommit: null,
+        gitState: null,
       } : {}),
     });
     return { ...result, elapsedMs: Date.now() - startedAt };
   });
   ipcMain.on('local-chat:stream-start', async (event, { requestId, ...request } = {}) => {
+    const settings = readSettings();
     if (!requestId || request.provider !== 'local') {
       event.sender.send('local-chat:stream-error', { requestId, result: { ok: false, provider: request.provider || null, error: { code: 'CONFIGURATION_ERROR', message: 'Streaming is available for explicit Local provider requests only', status: null, retryable: false } } });
       return;
@@ -530,6 +557,14 @@ app.whenReady().then(async () => {
         num_predict: request.num_predict,
         temperature: request.temperature,
         timeoutMs: request.timeoutMs,
+        version: buildMetadata.version,
+        buildId: buildMetadata.buildId,
+        ollamaAvailable: request.ollamaAvailable,
+        workspace: settings.workspace || null,
+        projectName: settings.workspace ? path.basename(settings.workspace) : null,
+        gitBranch: null,
+        gitCommit: null,
+        gitState: null,
         signal: controller.signal,
         onChunk: async (content) => {
           if (localChatStreams.get(requestId) !== controller || event.sender.isDestroyed()) return;
