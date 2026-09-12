@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 type Permission = 'Allow' | 'Ask' | 'Blocked';
-type NavItem = 'Overview' | 'Task Console' | 'Goals' | 'Workspace' | 'Permissions' | 'Logs';
+type NavItem = 'Overview' | 'Local Chat' | 'Task Console' | 'Goals' | 'Workspace' | 'Permissions' | 'Logs';
 type IconName = 'grid' | 'folder' | 'lock' | 'terminal' | 'moon' | 'sun' | 'chevron' | 'activity' | 'copy' | 'server' | 'console' | 'radio' | 'flag' | 'check' | 'plus';
 
 const Icon = ({ name }: { name: IconName }) => {
@@ -38,6 +38,7 @@ const initialPermissions: Array<{ name: string; detail: string; value: Permissio
 
 const nav: Array<{ name: NavItem; icon: IconName }> = [
   { name: 'Overview', icon: 'grid' },
+  { name: 'Local Chat', icon: 'radio' },
   { name: 'Task Console', icon: 'console' },
   { name: 'Goals', icon: 'flag' },
   { name: 'Workspace', icon: 'folder' },
@@ -84,6 +85,17 @@ export default function App() {
   const [followUpSubmitting, setFollowUpSubmitting] = useState(false);
   const [pollTrigger, setPollTrigger] = useState(0);
   const [, setNowTick] = useState(Date.now());
+
+  // Experimental Local Chat states; isolated from Task Console lifecycle.
+  const [chatProvider, setChatProvider] = useState<'local' | 'external'>('local');
+  const [chatModel, setChatModel] = useState('qwen3.5:9b-hermes');
+  const [chatProfile, setChatProfile] = useState<'light' | 'medium' | 'high'>('light');
+  const [chatPrompt, setChatPrompt] = useState('');
+  const [chatModels, setChatModels] = useState<string[]>([]);
+  const [chatHealth, setChatHealth] = useState<any>(null);
+  const [chatResult, setChatResult] = useState<any>(null);
+  const [chatError, setChatError] = useState('');
+  const [chatBusy, setChatBusy] = useState(false);
 
   // Goals states
   const [goals, setGoals] = useState<Goal[]>([]);
@@ -184,6 +196,22 @@ export default function App() {
 
     return () => { active = false; unsubscribe(); };
   }, []);
+
+  useEffect(() => {
+    if (activeNav !== 'Local Chat' || chatProvider !== 'local') return;
+    let active = true;
+    void window.controlApp.localChatStatus().then((status) => {
+      if (!active) return;
+      setChatHealth(status.health);
+      setChatModels(status.models?.ok ? status.models.models : []);
+      if (status.models?.ok && status.models.models.length > 0 && !status.models.models.includes(chatModel)) {
+        setChatModel(status.models.models[0]);
+      }
+    }).catch((error: any) => {
+      if (active) { setChatHealth({ ok: false, error: { code: 'UNAVAILABLE', message: error?.message || 'Ollama is unavailable' } }); setChatModels([]); }
+    });
+    return () => { active = false; };
+  }, [activeNav, chatProvider]);
 
   // Local manifest checks are deliberately infrequent and never install by
   // themselves. A manual check is always available below.
@@ -414,6 +442,33 @@ export default function App() {
       setTimeout(() => {
         document.getElementById(item.toLowerCase())?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }, 50);
+    }
+  };
+
+  const handleChatProviderChange = (provider: 'local' | 'external') => {
+    setChatProvider(provider);
+    setChatResult(null);
+    setChatError('');
+    if (provider === 'local') setChatHealth(null);
+  };
+
+  const handleLocalChatSend = async () => {
+    if (chatBusy || !chatPrompt.trim()) return;
+    setChatBusy(true);
+    setChatResult(null);
+    setChatError('');
+    try {
+      const result = await window.controlApp.localChatSend({
+        provider: chatProvider,
+        messages: [{ role: 'user', content: chatPrompt.trim() }],
+        ...(chatProvider === 'local' ? { model: chatModel, profile: chatProfile } : {}),
+      });
+      if (!result?.ok) setChatError(result?.error?.message || 'Provider request failed');
+      else setChatResult(result);
+    } catch (error: any) {
+      setChatError(error?.message || 'Provider request failed');
+    } finally {
+      setChatBusy(false);
     }
   };
 
@@ -731,7 +786,61 @@ export default function App() {
       </aside>
 
       <main className="main-content">
-        {activeNav === 'Task Console' ? (
+        {activeNav === 'Local Chat' ? (
+          <div className="local-chat-view">
+            <header className="page-header">
+              <div>
+                <p className="kicker">EXPERIMENTAL LOCAL CHAT</p>
+                <h1>Local Chat.</h1>
+                <p className="intro">Choose a provider explicitly for this request. No task or durable job is created by Local Chat.</p>
+              </div>
+              <div className={`connection-pill ${chatProvider === 'local' && chatHealth?.ok ? 'online' : ''}`}>
+                <span /> {chatProvider === 'local' ? `Ollama · ${chatHealth?.ok ? 'Available' : 'Unavailable'}` : 'External provider'}
+              </div>
+            </header>
+
+            <section className="local-chat-panel">
+              <div className="local-chat-controls">
+                <div className="local-chat-field">
+                  <label>Provider</label>
+                  <div className="local-chat-toggle" role="group" aria-label="Chat provider">
+                    <button type="button" className={chatProvider === 'local' ? 'selected' : ''} onClick={() => handleChatProviderChange('local')}>Local</button>
+                    <button type="button" className={chatProvider === 'external' ? 'selected' : ''} onClick={() => handleChatProviderChange('external')}>External</button>
+                  </div>
+                </div>
+                {chatProvider === 'local' ? (
+                  <>
+                    <div className="local-chat-field">
+                      <label htmlFor="local-chat-model">Model</label>
+                      <select id="local-chat-model" value={chatModel} onChange={(event) => setChatModel(event.target.value)} disabled={!chatHealth?.ok || chatModels.length === 0}>
+                        {chatModels.length === 0 ? <option value={chatModel}>{chatHealth?.ok ? 'No local models found' : 'Ollama unavailable'}</option> : chatModels.map((model) => <option key={model} value={model}>{model}</option>)}
+                      </select>
+                    </div>
+                    <div className="local-chat-field">
+                      <label htmlFor="local-chat-profile">Profile</label>
+                      <select id="local-chat-profile" value={chatProfile} onChange={(event) => setChatProfile(event.target.value as 'light' | 'medium' | 'high')}>
+                        <option value="light">LIGHT</option>
+                        <option value="medium">MEDIUM</option>
+                        <option value="high">HIGH</option>
+                      </select>
+                    </div>
+                  </>
+                ) : <p className="local-chat-external-note">External uses the existing provider path and its configured permission.</p>}
+              </div>
+
+              <div className="local-chat-field">
+                <label htmlFor="local-chat-prompt">Prompt</label>
+                <textarea id="local-chat-prompt" rows={6} value={chatPrompt} onChange={(event) => setChatPrompt(event.target.value)} placeholder="Write a message for the selected provider…" />
+              </div>
+              <div className="local-chat-actions">
+                <span className={`local-chat-status ${chatProvider === 'local' && chatHealth?.ok ? 'available' : ''}`}>{chatProvider === 'local' ? (chatHealth?.ok ? 'Ollama available' : 'Ollama unavailable') : 'External selected'}</span>
+                <button type="button" className="run-task-button" disabled={chatBusy || !chatPrompt.trim() || (chatProvider === 'local' && !chatHealth?.ok)} onClick={() => void handleLocalChatSend()}>{chatBusy ? 'Sending…' : 'Send'}</button>
+              </div>
+              {chatError && <div className="local-chat-error" role="alert">{chatError}</div>}
+              {chatResult && <section className="local-chat-result" aria-live="polite"><div className="local-chat-result-meta"><span>{chatResult.provider}</span><span>{chatResult.model || 'existing provider'}</span><span>{chatProfile.toUpperCase()}</span><span>{chatResult.elapsedMs} ms</span></div><p>{chatResult.response}</p></section>}
+            </section>
+          </div>
+        ) : activeNav === 'Task Console' ? (
           <div className="task-console-view">
             <header className="page-header">
               <div>

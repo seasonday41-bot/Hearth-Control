@@ -387,6 +387,80 @@ app.whenReady().then(async () => {
     if (serverProcess && settings.permissions) serverProcess.send({ type: 'settings:update', permissions: saved.permissions });
     return saved;
   });
+  ipcMain.handle('local-chat:status', async () => {
+    const { createProviderSelection } = await importFromHere('../mcp/providers/selection.mjs');
+    const selection = createProviderSelection();
+    const local = selection.getProvider('local');
+    if (!local.ok) return { health: local, models: local };
+    const health = await local.adapter.health();
+    const models = health.ok ? await local.adapter.listModels() : { ok: false, provider: 'ollama', error: health.error };
+    return { health, models };
+  });
+  ipcMain.handle('local-chat:send', async (_event, request = {}) => {
+    const provider = request.provider === 'external' ? 'external' : request.provider === 'local' ? 'local' : request.provider;
+    const messages = Array.isArray(request.messages) ? request.messages : [];
+    if (!provider || messages.length === 0) {
+      return { ok: false, provider: provider || null, error: { code: 'CONFIGURATION_ERROR', message: 'A provider and at least one message are required', status: null, retryable: false } };
+    }
+
+    const { createProviderSelection } = await importFromHere('../mcp/providers/selection.mjs');
+    let externalProvider = null;
+    if (provider === 'external') {
+      externalProvider = {
+        chat: async ({ messages: externalMessages }) => {
+          const settings = readSettings();
+          const permission = settings.permissions?.Antigravity ?? 'Ask';
+          if (permission === 'Blocked') {
+            return { ok: false, provider: 'external', error: { code: 'PERMISSION_BLOCKED', message: 'Antigravity permission is Blocked', status: null, retryable: false } };
+          }
+          if (permission !== 'Allow') {
+            return { ok: false, provider: 'external', error: { code: 'PERMISSION_REQUIRED', message: 'Set Antigravity permission to Allow before using External Chat', status: null, retryable: false } };
+          }
+          if (!settings.workspace) {
+            return { ok: false, provider: 'external', error: { code: 'CONFIGURATION_ERROR', message: 'No workspace configured for the external provider', status: null, retryable: false } };
+          }
+          const { startAntigravityTask } = await importFromHere('../mcp/executors/antigravity.mjs');
+          const prompt = externalMessages.map((message) => `${message.role || 'user'}: ${message.content || ''}`).join('\n');
+          const result = await startAntigravityTask({
+            workspace: settings.workspace,
+            prompt,
+            title: 'Local Chat · External Provider',
+            userApproved: true,
+            awaitCompletion: true,
+            source: 'local',
+            metadata: { experimentalLocalChat: true },
+          });
+          const completion = result.completion;
+          if (!completion || completion.status !== 'completed') {
+            return { ok: false, provider: 'external', error: { code: completion?.status === 'waiting' ? 'WAITING' : 'PROVIDER_ERROR', message: completion?.summary || 'External provider did not complete', status: null, retryable: completion?.status === 'waiting' } };
+          }
+          return { ok: true, provider: 'external', response: completion.summary || '', done: true };
+        },
+      };
+    }
+
+    const selection = createProviderSelection({
+      externalProvider,
+      localProviderOptions: provider === 'local' ? { model: request.model, profile: request.profile } : undefined,
+    });
+    const { createLocalChatCaller } = await importFromHere('../mcp/providers/local-chat.mjs');
+    const caller = createLocalChatCaller({ selection });
+    const startedAt = Date.now();
+    const result = await caller.send({
+      provider,
+      messages,
+      ...(provider === 'local' ? {
+        model: request.model,
+        profile: request.profile,
+        options: request.options,
+        think: request.think,
+        num_ctx: request.num_ctx,
+        num_predict: request.num_predict,
+        temperature: request.temperature,
+      } : {}),
+    });
+    return { ...result, elapsedMs: Date.now() - startedAt };
+  });
   ipcMain.handle('workspace:choose', async () => {
     const { hasRunningTask } = await importFromHere('../mcp/executors/antigravity.mjs');
     if (goalRunner?.is_goal_active() || (hasRunningTask && hasRunningTask())) {

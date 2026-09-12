@@ -3,6 +3,8 @@ contextBridge.exposeInMainWorld('controlApp', {
   platform: process.platform,
   getSettings: () => ipcRenderer.invoke('settings:get'),
   saveSettings: (settings) => ipcRenderer.invoke('settings:save', settings),
+  localChatStatus: () => ipcRenderer.invoke('local-chat:status'),
+  localChatSend: (request) => ipcRenderer.invoke('local-chat:send', request),
   chooseWorkspace: () => ipcRenderer.invoke('workspace:choose'),
   validateWorkspace: (path) => ipcRenderer.invoke('workspace:validate', path),
   getServerState: () => ipcRenderer.invoke('server:get-state'),

@@ -132,6 +132,8 @@ interface Window { controlApp: {
   platform: string;
   getSettings: () => Promise<ControlSettings>;
   saveSettings: (settings: Partial<ControlSettings>) => Promise<ControlSettings>;
+  localChatStatus: () => Promise<{ health: any; models: any }>;
+  localChatSend: (request: { provider: 'local' | 'external'; messages: Array<{ role: string; content: string }>; model?: string; profile?: 'light' | 'medium' | 'high'; options?: Record<string, unknown>; think?: boolean; num_ctx?: number; num_predict?: number; temperature?: number }) => Promise<any>;
   chooseWorkspace: () => Promise<string | null>;
   validateWorkspace: (path: string) => Promise<{ valid: boolean; reason?: string }>;
   getServerState: () => Promise<ServerState>;

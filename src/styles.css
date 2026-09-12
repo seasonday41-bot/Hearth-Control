@@ -291,6 +291,28 @@ footer { color: var(--faint); display: flex; font-size: 8px; justify-content: sp
 .remote-action-btn.approve:hover { opacity: 0.92; }
 .remote-action-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
+/* Experimental Local Chat */
+.local-chat-view { display: flex; flex-direction: column; gap: 20px; }
+.local-chat-panel { background: var(--panel); border: 1px solid var(--highlight); border-radius: 18px; box-shadow: 10px 13px 24px var(--shadow-soft), -7px -7px 18px var(--highlight); padding: 22px; display: flex; flex-direction: column; gap: 18px; max-width: 900px; }
+.local-chat-controls { display: grid; grid-template-columns: 180px minmax(180px, 1fr) 150px; gap: 16px; align-items: end; }
+.local-chat-field { display: flex; flex-direction: column; gap: 7px; }
+.local-chat-field label { color: var(--faint); font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.local-chat-field select, .local-chat-field textarea { background: var(--well); border: 1px solid var(--line); border-radius: 9px; color: var(--text); font: inherit; font-size: 12px; outline: none; padding: 10px 12px; }
+.local-chat-field textarea { line-height: 1.5; resize: vertical; min-height: 120px; }
+.local-chat-field select:focus, .local-chat-field textarea:focus { border-color: var(--sage); }
+.local-chat-field select:disabled { cursor: not-allowed; opacity: .65; }
+.local-chat-toggle { display: flex; gap: 6px; }
+.local-chat-toggle button { background: var(--well); border: 1px solid var(--line); border-radius: 8px; color: var(--muted); cursor: pointer; font-size: 11px; font-weight: 700; padding: 9px 14px; }
+.local-chat-toggle button.selected { background: var(--sage-pale); border-color: var(--sage); color: var(--sage-deep); }
+.local-chat-external-note { align-self: center; color: var(--muted); font-size: 11px; line-height: 1.4; margin: 0; }
+.local-chat-actions { align-items: center; display: flex; justify-content: space-between; gap: 12px; }
+.local-chat-status { color: var(--muted); font-size: 11px; }
+.local-chat-status.available { color: var(--sage-deep); }
+.local-chat-error { background: color-mix(in srgb, var(--rose) 12%, var(--panel)); border: 1px solid color-mix(in srgb, var(--rose) 40%, var(--line)); border-radius: 9px; color: var(--rose); font-size: 11px; padding: 10px 12px; }
+.local-chat-result { background: var(--ink-well); border: 1px solid var(--line); border-radius: 10px; color: #dce3e6; padding: 14px 16px; }
+.local-chat-result-meta { color: #aab8bd; display: flex; flex-wrap: wrap; gap: 12px; font-family: "SFMono-Regular", Consolas, monospace; font-size: 10px; margin-bottom: 10px; }
+.local-chat-result p { font-size: 13px; line-height: 1.55; margin: 0; white-space: pre-wrap; word-break: break-word; }
+
 .review-dialog { max-width: 580px; width: 92%; }
 .review-meta-row { display: flex; gap: 14px; font-size: 11px; color: var(--muted); margin-bottom: 8px; flex-wrap: wrap; }
 .review-prompt-container { margin: 12px 0 18px; display: flex; flex-direction: column; gap: 6px; }
@@ -379,4 +401,4 @@ footer { color: var(--faint); display: flex; font-size: 8px; justify-content: sp
 .goal-step-remove-btn { background: transparent; border: 0; color: var(--rose); font-size: 11px; cursor: pointer; padding: 4px; }
 
 @media (max-width: 900px) { .app-frame { grid-template-columns: 76px 1fr; } .sidebar { padding-left: 12px; padding-right: 12px; } .brand { justify-content: center; padding-left: 0; padding-right: 0; } .brand>div:last-child,.nav-label,nav button span,.sidebar-bottom>p,.local-badge { display: none; } nav button { display: flex; justify-content: center; padding: 12px; } nav button.active i { display: none; } .sidebar-bottom { padding: 0; } .theme-switch { display: flex; flex-direction: column; height: 74px; } .theme-switch span { flex: 1; } .theme-switch>i { height: 32px; width: calc(100% - 6px); } .theme-switch>i.to-dark { transform: translateY(100%); } .main-content { padding-left: 28px; padding-right: 28px; } }
-@media (max-width: 700px) { body { overflow: auto; } .app-frame { display: block; height: auto; } .sidebar { align-items: center; bottom: 0; flex-direction: row; height: 64px; left: 0; padding: 7px 12px; position: fixed; right: 0; top: auto; } .brand,.sidebar-bottom { display: none; } nav { display: flex; justify-content: space-around; width: 100%; } nav button { width: 52px; } .main-content { height: auto; margin-top: 38px; overflow: visible; padding: 16px 18px 85px; } .page-header { gap: 20px; } .connection-pill { align-self: flex-start; white-space: nowrap; } .power-console { align-items: flex-start; flex-direction: column; gap: 24px; } .server-action { justify-content: space-between; width: 100%; } .metrics,.dashboard-grid { grid-template-columns: 1fr; } .logs-panel { grid-column: auto; } .log-line { gap: 8px; grid-template-columns: 50px 50px 1fr; } .bridge-auth-panel { grid-template-columns: 1fr; align-items: stretch; } .bridge-auth-fields { grid-template-columns: 1fr; } .bridge-auth-switch { grid-column: 1; } .task-meta-bar { grid-template-columns: repeat(2, 1fr); } .task-live-summary { grid-template-columns: 1fr; } }
+@media (max-width: 700px) { body { overflow: auto; } .app-frame { display: block; height: auto; } .sidebar { align-items: center; bottom: 0; flex-direction: row; height: 64px; left: 0; padding: 7px 12px; position: fixed; right: 0; top: auto; } .brand,.sidebar-bottom { display: none; } nav { display: flex; justify-content: space-around; width: 100%; } nav button { width: 52px; } .main-content { height: auto; margin-top: 38px; overflow: visible; padding: 16px 18px 85px; } .page-header { gap: 20px; } .connection-pill { align-self: flex-start; white-space: nowrap; } .power-console { align-items: flex-start; flex-direction: column; gap: 24px; } .server-action { justify-content: space-between; width: 100%; } .metrics,.dashboard-grid { grid-template-columns: 1fr; } .logs-panel { grid-column: auto; } .log-line { gap: 8px; grid-template-columns: 50px 50px 1fr; } .bridge-auth-panel { grid-template-columns: 1fr; align-items: stretch; } .bridge-auth-fields { grid-template-columns: 1fr; } .bridge-auth-switch { grid-column: 1; } .task-meta-bar { grid-template-columns: repeat(2, 1fr); } .task-live-summary { grid-template-columns: 1fr; } .local-chat-controls { grid-template-columns: 1fr; } .local-chat-external-note { align-self: start; } }
