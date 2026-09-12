@@ -46,6 +46,23 @@ const nav: Array<{ name: NavItem; icon: IconName }> = [
   { name: 'Logs', icon: 'terminal' },
 ];
 
+const LocalChatResponse = ({ text, onExpand }: { text: string; onExpand: (code: string, language: string) => void }) => {
+  const parts: ReactNode[] = [];
+  const pattern = /```([^\n`]*)\n?([\s\S]*?)```/g;
+  let cursor = 0;
+  let match;
+  let key = 0;
+  while ((match = pattern.exec(text)) !== null) {
+    if (match.index > cursor) parts.push(<span key={`text-${key++}`}>{text.slice(cursor, match.index)}</span>);
+    const language = match[1].trim();
+    const code = match[2].replace(/^\n/, '').replace(/\n$/, '');
+    parts.push(<div className="local-chat-code-block" key={`code-${key++}`}><div className="local-chat-code-toolbar"><span>{language || 'code'}</span><span><button type="button" onClick={() => void navigator.clipboard.writeText(code)}>Copy</button><button type="button" onClick={() => onExpand(code, language)}>Expand</button></span></div><pre><code>{code}</code></pre></div>);
+    cursor = match.index + match[0].length;
+  }
+  if (cursor < text.length) parts.push(<span key={`text-${key++}`}>{text.slice(cursor)}</span>);
+  return <div className="local-chat-response-content">{parts}</div>;
+};
+
 export default function App() {
   const [running, setRunning] = useState(false);
   const [workspace, setWorkspace] = useState('');
@@ -89,13 +106,22 @@ export default function App() {
   // Experimental Local Chat states; isolated from Task Console lifecycle.
   const [chatProvider, setChatProvider] = useState<'local' | 'external'>('local');
   const [chatModel, setChatModel] = useState('qwen3.5:9b-hermes');
-  const [chatProfile, setChatProfile] = useState<'light' | 'medium' | 'high'>('light');
+  const [chatProfile, setChatProfile] = useState<'fast' | 'normal' | 'deep'>('normal');
+  const [chatLongResponse, setChatLongResponse] = useState(false);
   const [chatPrompt, setChatPrompt] = useState('');
   const [chatModels, setChatModels] = useState<string[]>([]);
   const [chatHealth, setChatHealth] = useState<any>(null);
   const [chatResult, setChatResult] = useState<any>(null);
   const [chatError, setChatError] = useState('');
   const [chatBusy, setChatBusy] = useState(false);
+  const [chatStreaming, setChatStreaming] = useState(false);
+  const [chatStreamText, setChatStreamText] = useState('');
+  const [chatElapsedMs, setChatElapsedMs] = useState(0);
+  const [chatFollowOutput, setChatFollowOutput] = useState(true);
+  const [chatExpandedCode, setChatExpandedCode] = useState<{ code: string; language: string } | null>(null);
+  const chatRequestIdRef = useRef<string | null>(null);
+  const chatStreamStartedRef = useRef(0);
+  const chatResponseRef = useRef<HTMLDivElement | null>(null);
 
   // Goals states
   const [goals, setGoals] = useState<Goal[]>([]);
@@ -212,6 +238,34 @@ export default function App() {
     });
     return () => { active = false; };
   }, [activeNav, chatProvider]);
+
+  useEffect(() => window.controlApp.onLocalChatStream((event) => {
+    if (!event.requestId || event.requestId !== chatRequestIdRef.current) return;
+    if (event.type === 'chunk' && event.content) {
+      setChatStreamText((current) => current + event.content);
+      return;
+    }
+    if (event.type === 'done' || event.type === 'error') {
+      const result = event.result || { ok: false, error: { message: 'Provider stream failed' } };
+      setChatBusy(false);
+      setChatStreaming(false);
+      setChatElapsedMs(result.elapsedMs || (Date.now() - chatStreamStartedRef.current));
+      if (result.response) setChatStreamText(result.response);
+      setChatResult(result);
+      if (!result.ok) setChatError(result.error?.code === 'CANCELLED' ? 'Generation stopped.' : (result.error?.message || 'Provider stream failed'));
+      chatRequestIdRef.current = null;
+    }
+  }), []);
+
+  useEffect(() => {
+    if (!chatStreaming) return;
+    const timer = window.setInterval(() => setChatElapsedMs(Date.now() - chatStreamStartedRef.current), 250);
+    return () => window.clearInterval(timer);
+  }, [chatStreaming]);
+
+  useEffect(() => {
+    if (chatFollowOutput && chatResponseRef.current) chatResponseRef.current.scrollTop = chatResponseRef.current.scrollHeight;
+  }, [chatStreamText, chatFollowOutput]);
 
   // Local manifest checks are deliberately infrequent and never install by
   // themselves. A manual check is always available below.
@@ -457,19 +511,37 @@ export default function App() {
     setChatBusy(true);
     setChatResult(null);
     setChatError('');
+    setChatStreamText('');
+    setChatElapsedMs(0);
+    setChatFollowOutput(true);
+    chatStreamStartedRef.current = Date.now();
+    if (chatProvider === 'local') {
+      const requestId = crypto.randomUUID();
+      chatRequestIdRef.current = requestId;
+      setChatStreaming(true);
+      window.controlApp.localChatStreamStart({ requestId, provider: 'local', messages: [{ role: 'user', content: chatPrompt.trim() }], model: chatModel, profile: chatProfile, longResponse: chatLongResponse });
+      return;
+    }
     try {
-      const result = await window.controlApp.localChatSend({
-        provider: chatProvider,
-        messages: [{ role: 'user', content: chatPrompt.trim() }],
-        ...(chatProvider === 'local' ? { model: chatModel, profile: chatProfile } : {}),
-      });
+      const result = await window.controlApp.localChatSend({ provider: 'external', messages: [{ role: 'user', content: chatPrompt.trim() }] });
       if (!result?.ok) setChatError(result?.error?.message || 'Provider request failed');
       else setChatResult(result);
-    } catch (error: any) {
-      setChatError(error?.message || 'Provider request failed');
-    } finally {
-      setChatBusy(false);
-    }
+      if (result?.response) setChatStreamText(result.response);
+      setChatElapsedMs(result?.elapsedMs || (Date.now() - chatStreamStartedRef.current));
+    } catch (error: any) { setChatError(error?.message || 'Provider request failed'); }
+    finally { setChatBusy(false); }
+  };
+
+  const handleLocalChatStop = () => {
+    const requestId = chatRequestIdRef.current;
+    if (requestId) window.controlApp.localChatStreamStop(requestId);
+  };
+
+  const handleChatResponseScroll = () => {
+    const element = chatResponseRef.current;
+    if (!element) return;
+    const nearBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 48;
+    setChatFollowOutput(nearBottom);
   };
 
   useEffect(() => {
@@ -818,10 +890,10 @@ export default function App() {
                     </div>
                     <div className="local-chat-field">
                       <label htmlFor="local-chat-profile">Profile</label>
-                      <select id="local-chat-profile" value={chatProfile} onChange={(event) => setChatProfile(event.target.value as 'light' | 'medium' | 'high')}>
-                        <option value="light">LIGHT</option>
-                        <option value="medium">MEDIUM</option>
-                        <option value="high">HIGH</option>
+                      <select id="local-chat-profile" value={chatProfile} onChange={(event) => setChatProfile(event.target.value as 'fast' | 'normal' | 'deep')}>
+                        <option value="fast">FAST</option>
+                        <option value="normal">NORMAL</option>
+                        <option value="deep">DEEP</option>
                       </select>
                     </div>
                   </>
@@ -834,10 +906,13 @@ export default function App() {
               </div>
               <div className="local-chat-actions">
                 <span className={`local-chat-status ${chatProvider === 'local' && chatHealth?.ok ? 'available' : ''}`}>{chatProvider === 'local' ? (chatHealth?.ok ? 'Ollama available' : 'Ollama unavailable') : 'External selected'}</span>
-                <button type="button" className="run-task-button" disabled={chatBusy || !chatPrompt.trim() || (chatProvider === 'local' && !chatHealth?.ok)} onClick={() => void handleLocalChatSend()}>{chatBusy ? 'Sending…' : 'Send'}</button>
+                {chatStreaming ? <button type="button" className="local-chat-stop-button" onClick={handleLocalChatStop}>Stop</button> : <button type="button" className="run-task-button" disabled={chatBusy || !chatPrompt.trim() || (chatProvider === 'local' && !chatHealth?.ok)} onClick={() => void handleLocalChatSend()}>{chatBusy ? 'Sending…' : 'Send'}</button>}
               </div>
+              {chatProvider === 'local' && <label className="local-chat-long-response"><input type="checkbox" checked={chatLongResponse} onChange={(event) => setChatLongResponse(event.target.checked)} /> Long response</label>}
+              {chatStreaming && <div className="local-chat-generating" aria-live="polite">Generating… {Math.round(chatElapsedMs / 1000)}s</div>}
               {chatError && <div className="local-chat-error" role="alert">{chatError}</div>}
-              {chatResult && <section className="local-chat-result" aria-live="polite"><div className="local-chat-result-meta"><span>{chatResult.provider}</span><span>{chatResult.model || 'existing provider'}</span><span>{chatProfile.toUpperCase()}</span><span>{chatResult.elapsedMs} ms</span></div><p>{chatResult.response}</p></section>}
+              {(chatStreamText || chatResult) && <section className="local-chat-result" aria-live="polite"><div className="local-chat-result-meta"><span>{chatResult?.provider || 'ollama'}</span><span>{chatResult?.model || chatModel}</span><span>{chatProvider === 'local' ? chatProfile.toUpperCase() : 'EXTERNAL'}</span><span>{chatStreaming ? `${Math.round(chatElapsedMs / 1000)}s` : `${chatResult?.elapsedMs || chatElapsedMs} ms`}</span></div><div ref={chatResponseRef} className="local-chat-response-viewer" onScroll={handleChatResponseScroll}><LocalChatResponse text={chatStreamText || chatResult?.response || ''} onExpand={(code, language) => setChatExpandedCode({ code, language })} /></div>{!chatFollowOutput && chatStreaming && <button type="button" className="local-chat-bottom-button" onClick={() => { setChatFollowOutput(true); if (chatResponseRef.current) chatResponseRef.current.scrollTop = chatResponseRef.current.scrollHeight; }}>↓ Bottom</button>}{chatResult?.doneReason === 'length' && <small className="local-chat-output-warning">Response reached the output limit.</small>}</section>}
+              {chatExpandedCode && <div className="local-chat-code-modal" role="dialog" aria-modal="true"><div className="local-chat-code-modal-header"><span>{chatExpandedCode.language || 'code'}</span><button type="button" onClick={() => setChatExpandedCode(null)}>Close</button></div><pre><code>{chatExpandedCode.code}</code></pre></div>}
             </section>
           </div>
         ) : activeNav === 'Task Console' ? (

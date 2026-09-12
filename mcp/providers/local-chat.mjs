@@ -11,6 +11,10 @@ export class LocalChatCaller {
   async send(request = {}) {
     return this.selection.chat(request);
   }
+
+  async stream(request = {}) {
+    return this.selection.chatStream(request);
+  }
 }
 
 export const createLocalChatCaller = (options) => new LocalChatCaller(options);

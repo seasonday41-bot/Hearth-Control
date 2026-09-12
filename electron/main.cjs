@@ -46,6 +46,7 @@ let bridgeState = {
 };
 const taskNotifier = createTaskNotifier({ Notification, app });
 const taskMonitors = new Map();
+const localChatStreams = new Map();
 let isStartingTask = false;
 const monitorTaskTransition = async (taskId) => {
   if (!taskId || taskMonitors.has(taskId)) return;
@@ -457,9 +458,56 @@ app.whenReady().then(async () => {
         num_ctx: request.num_ctx,
         num_predict: request.num_predict,
         temperature: request.temperature,
+        longResponse: request.longResponse,
+        timeoutMs: request.timeoutMs,
       } : {}),
     });
     return { ...result, elapsedMs: Date.now() - startedAt };
+  });
+  ipcMain.on('local-chat:stream-start', async (event, { requestId, ...request } = {}) => {
+    if (!requestId || request.provider !== 'local') {
+      event.sender.send('local-chat:stream-error', { requestId, result: { ok: false, provider: request.provider || null, error: { code: 'CONFIGURATION_ERROR', message: 'Streaming is available for explicit Local provider requests only', status: null, retryable: false } } });
+      return;
+    }
+    const prior = localChatStreams.get(requestId);
+    if (prior) prior.abort();
+    const controller = new AbortController();
+    localChatStreams.set(requestId, controller);
+    const startedAt = Date.now();
+    try {
+      const { createProviderSelection } = await importFromHere('../mcp/providers/selection.mjs');
+      const { createLocalChatCaller } = await importFromHere('../mcp/providers/local-chat.mjs');
+      const selection = createProviderSelection({ localProviderOptions: { model: request.model, profile: request.profile } });
+      const caller = createLocalChatCaller({ selection });
+      const result = await caller.stream({
+        provider: 'local',
+        messages: request.messages,
+        model: request.model,
+        profile: request.profile,
+        longResponse: request.longResponse,
+        options: request.options,
+        think: request.think,
+        num_ctx: request.num_ctx,
+        num_predict: request.num_predict,
+        temperature: request.temperature,
+        timeoutMs: request.timeoutMs,
+        signal: controller.signal,
+        onChunk: async (content) => {
+          if (localChatStreams.get(requestId) !== controller || event.sender.isDestroyed()) return;
+          event.sender.send('local-chat:stream-chunk', { requestId, content });
+        },
+      });
+      if (event.sender.isDestroyed()) return;
+      event.sender.send('local-chat:stream-done', { requestId, result: { ...result, elapsedMs: Date.now() - startedAt } });
+    } catch (error) {
+      if (!event.sender.isDestroyed()) event.sender.send('local-chat:stream-error', { requestId, result: { ok: false, provider: 'ollama', error: { code: 'PROVIDER_ERROR', message: error?.message || 'Provider stream failed', status: null, retryable: false } } });
+    } finally {
+      if (localChatStreams.get(requestId) === controller) localChatStreams.delete(requestId);
+    }
+  });
+  ipcMain.on('local-chat:stream-stop', (_event, requestId) => {
+    const controller = localChatStreams.get(requestId);
+    if (controller) controller.abort();
   });
   ipcMain.handle('workspace:choose', async () => {
     const { hasRunningTask } = await importFromHere('../mcp/executors/antigravity.mjs');

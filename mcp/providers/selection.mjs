@@ -49,6 +49,19 @@ export class ProviderSelection {
       return providerCallError(provider, 'PROVIDER_ERROR', error?.message || 'Provider request failed');
     }
   }
+
+  async chatStream({ provider, ...request } = {}) {
+    const selected = this.getProvider(provider);
+    if (!selected.ok) return selected;
+    if (typeof selected.adapter.chatStream !== 'function') {
+      return { ok: false, provider, error: { code: 'UNSUPPORTED', message: 'Selected provider does not support streaming', status: null, retryable: false } };
+    }
+    try {
+      return await selected.adapter.chatStream(request);
+    } catch (error) {
+      return { ok: false, provider, error: { code: 'PROVIDER_ERROR', message: error?.message || 'Provider stream failed', status: null, retryable: false } };
+    }
+  }
 }
 
 export const createProviderSelection = (options = {}) => new ProviderSelection(options);

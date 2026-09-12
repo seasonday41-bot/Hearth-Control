@@ -5,6 +5,18 @@ contextBridge.exposeInMainWorld('controlApp', {
   saveSettings: (settings) => ipcRenderer.invoke('settings:save', settings),
   localChatStatus: () => ipcRenderer.invoke('local-chat:status'),
   localChatSend: (request) => ipcRenderer.invoke('local-chat:send', request),
+  localChatStreamStart: (request) => ipcRenderer.send('local-chat:stream-start', request),
+  localChatStreamStop: (requestId) => ipcRenderer.send('local-chat:stream-stop', requestId),
+  onLocalChatStream: (callback) => {
+    const events = ['chunk', 'done', 'error'];
+    const listeners = events.map((kind) => {
+      const channel = `local-chat:stream-${kind}`;
+      const listener = (_event, payload) => callback({ type: kind, ...payload });
+      ipcRenderer.on(channel, listener);
+      return [channel, listener];
+    });
+    return () => listeners.forEach(([channel, listener]) => ipcRenderer.removeListener(channel, listener));
+  },
   chooseWorkspace: () => ipcRenderer.invoke('workspace:choose'),
   validateWorkspace: (path) => ipcRenderer.invoke('workspace:validate', path),
   getServerState: () => ipcRenderer.invoke('server:get-state'),
