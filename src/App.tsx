@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import StorageAudit from './StorageAudit';
 
 type Permission = 'Allow' | 'Ask' | 'Blocked';
-type NavItem = 'Overview' | 'Local Chat' | 'Task Console' | 'Goals' | 'Workspace' | 'Permissions' | 'Logs';
+type NavItem = 'Overview' | 'Local Chat' | 'Storage Audit' | 'Task Console' | 'Goals' | 'Workspace' | 'Permissions' | 'Logs';
 type IconName = 'grid' | 'folder' | 'lock' | 'terminal' | 'moon' | 'sun' | 'chevron' | 'activity' | 'copy' | 'server' | 'console' | 'radio' | 'flag' | 'check' | 'plus';
 
 const Icon = ({ name }: { name: IconName }) => {
@@ -39,6 +40,7 @@ const initialPermissions: Array<{ name: string; detail: string; value: Permissio
 const nav: Array<{ name: NavItem; icon: IconName }> = [
   { name: 'Overview', icon: 'grid' },
   { name: 'Local Chat', icon: 'radio' },
+  { name: 'Storage Audit', icon: 'folder' },
   { name: 'Task Console', icon: 'console' },
   { name: 'Goals', icon: 'flag' },
   { name: 'Workspace', icon: 'folder' },
@@ -858,7 +860,7 @@ export default function App() {
       </aside>
 
       <main className="main-content">
-        {activeNav === 'Local Chat' ? (
+        {activeNav === 'Storage Audit' ? <StorageAudit /> : activeNav === 'Local Chat' ? (
           <div className="local-chat-view">
             <header className="page-header">
               <div>

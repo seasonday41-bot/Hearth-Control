@@ -133,6 +133,9 @@ interface Window { controlApp: {
   getSettings: () => Promise<ControlSettings>;
   saveSettings: (settings: Partial<ControlSettings>) => Promise<ControlSettings>;
   localChatStatus: () => Promise<{ health: any; models: any }>;
+  storageAuditScan: () => Promise<any>;
+  storageAuditReveal: (id: string) => Promise<{ ok: boolean; error?: string }>;
+  onStorageAuditProgress: (callback: (progress: { area: string; path: string }) => void) => () => void;
   localChatSend: (request: { provider: 'local' | 'external'; messages: Array<{ role: string; content: string }>; model?: string; profile?: 'fast' | 'normal' | 'deep' | 'light' | 'medium' | 'high'; longResponse?: boolean; timeoutMs?: number; options?: Record<string, unknown>; think?: boolean; num_ctx?: number; num_predict?: number; temperature?: number }) => Promise<any>;
   localChatStreamStart: (request: { requestId: string; provider: 'local'; messages: Array<{ role: string; content: string }>; model?: string; profile?: 'fast' | 'normal' | 'deep' | 'light' | 'medium' | 'high'; longResponse?: boolean; timeoutMs?: number }) => void;
   localChatStreamStop: (requestId: string) => void;

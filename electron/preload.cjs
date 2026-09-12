@@ -4,6 +4,13 @@ contextBridge.exposeInMainWorld('controlApp', {
   getSettings: () => ipcRenderer.invoke('settings:get'),
   saveSettings: (settings) => ipcRenderer.invoke('settings:save', settings),
   localChatStatus: () => ipcRenderer.invoke('local-chat:status'),
+  storageAuditScan: () => ipcRenderer.invoke('storage-audit:scan'),
+  storageAuditReveal: (id) => ipcRenderer.invoke('storage-audit:reveal', id),
+  onStorageAuditProgress: (callback) => {
+    const listener = (_event, progress) => callback(progress);
+    ipcRenderer.on('storage-audit:progress', listener);
+    return () => ipcRenderer.removeListener('storage-audit:progress', listener);
+  },
   localChatSend: (request) => ipcRenderer.invoke('local-chat:send', request),
   localChatStreamStart: (request) => ipcRenderer.send('local-chat:stream-start', request),
   localChatStreamStop: (requestId) => ipcRenderer.send('local-chat:stream-stop', requestId),

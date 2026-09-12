@@ -11,6 +11,7 @@ test('CHAT1 local selection invokes Provider Selection', async () => {
   const result = await caller.send({ provider: 'local', messages: [{ role: 'user', content: 'x' }] });
   assert.equal(result.response, 'local');
   assert.equal(request.provider, 'local');
+  assert.equal(request.messages[0].role, 'system');
 });
 
 test('CHAT2 external selection invokes the existing provider path', async () => {
@@ -19,6 +20,15 @@ test('CHAT2 external selection invokes the existing provider path', async () => 
   const result = await caller.send({ provider: 'external', messages: [{ role: 'user', content: 'x' }] });
   assert.equal(called, true);
   assert.equal(result.response, 'external');
+});
+
+test('CHAT9 local compact context is additive and external messages are unchanged', async () => {
+  const requests = [];
+  const caller = callerWith(async (value) => { requests.push(value); return { ok: true, response: 'ok' }; });
+  await caller.send({ provider: 'local', messages: [{ role: 'user', content: 'write code' }] });
+  await caller.send({ provider: 'external', messages: [{ role: 'user', content: 'write code' }] });
+  assert.match(requests[0].messages[0].content, /short paragraphs/i);
+  assert.deepEqual(requests[1].messages, [{ role: 'user', content: 'write code' }]);
 });
 
 test('CHAT3 local model/profile/runtime options pass through', async () => {

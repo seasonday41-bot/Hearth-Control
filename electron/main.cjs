@@ -1,4 +1,5 @@
-const { app, BrowserWindow, dialog, ipcMain, safeStorage, Notification } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, safeStorage, Notification, shell } = require('electron');
+const { Worker } = require('node:worker_threads');
 const { fork, spawn } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -48,6 +49,8 @@ const taskNotifier = createTaskNotifier({ Notification, app });
 const taskMonitors = new Map();
 const localChatStreams = new Map();
 let isStartingTask = false;
+let storageAuditWorker = null;
+let storageAuditItems = new Map();
 const monitorTaskTransition = async (taskId) => {
   if (!taskId || taskMonitors.has(taskId)) return;
   let lastSyncedConversationId = null;
@@ -396,6 +399,42 @@ app.whenReady().then(async () => {
     const health = await local.adapter.health();
     const models = health.ok ? await local.adapter.listModels() : { ok: false, provider: 'ollama', error: health.error };
     return { health, models };
+  });
+  ipcMain.handle('storage-audit:scan', async (event) => {
+    if (storageAuditWorker) return { ok: false, error: 'A storage scan is already running.' };
+    const worker = new Worker(path.join(__dirname, 'storage-audit-worker.mjs'), {
+      workerData: {
+        home: app.getPath('home'),
+        workspace: readSettings().workspace || null,
+        hearthDataPath: app.getPath('userData'),
+        hearthProjectPath: app.isPackaged ? null : path.join(__dirname, '..'),
+      },
+    });
+    storageAuditWorker = worker;
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (result) => {
+        if (settled) return;
+        settled = true;
+        if (storageAuditWorker === worker) storageAuditWorker = null;
+        worker.removeAllListeners();
+        resolve(result);
+      };
+      worker.on('message', (message) => {
+        if (message.type === 'progress') {
+          if (!event.sender.isDestroyed()) event.sender.send('storage-audit:progress', message.progress);
+        } else if (message.type === 'done') {
+          storageAuditItems = new Map(message.result.items.map((item) => [item.id, item]));
+          finish({ ok: true, ...message.result });
+        } else if (message.type === 'error') finish({ ok: false, error: message.error });
+      });
+      worker.on('error', (error) => finish({ ok: false, error: error.message || 'Storage scan failed.' }));
+      worker.on('exit', (code) => finish({ ok: false, error: `Storage scan ended unexpectedly (${code}).` }));
+    });
+  });
+  ipcMain.handle('storage-audit:reveal', async (_event, id) => {
+    const { revealAuditedItem } = await importFromHere('../mcp/storage/reveal.mjs');
+    return revealAuditedItem({ id, items: storageAuditItems, reveal: (value) => shell.showItemInFolder(value) });
   });
   ipcMain.handle('local-chat:send', async (_event, request = {}) => {
     const provider = request.provider === 'external' ? 'external' : request.provider === 'local' ? 'local' : request.provider;
