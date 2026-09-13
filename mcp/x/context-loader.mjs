@@ -120,28 +120,32 @@ const truncateToByteLimit = (text, maxBytes) => {
 const boundDetail = (detail) => (typeof detail === 'string' ? truncateToByteLimit(detail, MAX_DETAIL_BYTES).text : detail);
 const boundPath = (value) => (typeof value === 'string' ? truncateToByteLimit(value, MAX_PATH_BYTES).text : value);
 
-const normalizePathString = (raw) => {
+// normalizePathString/isTraversal/scopeCheck/isAuthorized are exported so
+// mcp/x/edit-writer.mjs (the Phase 5B write boundary) enforces the exact
+// same scope semantics as this read boundary, rather than a second,
+// possibly-diverging reimplementation.
+export const normalizePathString = (raw) => {
   if (typeof raw !== 'string') return '';
   const trimmed = raw.trim();
   if (!trimmed) return '';
   return path.posix.normalize(trimmed.replaceAll('\\', '/'));
 };
 
-const isTraversal = (normalized) =>
+export const isTraversal = (normalized) =>
   !normalized || normalized === '.' || normalized === '..' || normalized.startsWith('../') ||
   path.posix.isAbsolute(normalized) || normalized.includes('\0');
 
 const isWithinAnyPrefix = (relativePath, prefixes) =>
   Array.isArray(prefixes) && prefixes.some((prefix) => relativePath === prefix || relativePath.startsWith(`${prefix}/`));
 
-const scopeCheck = (relativePath, scope) => {
+export const scopeCheck = (relativePath, scope) => {
   if (!isWithinAnyPrefix(relativePath, scope.allowed_paths)) return { ok: false, reason: 'scope_violation' };
   if (isWithinAnyPrefix(relativePath, scope.forbidden_paths || [])) return { ok: false, reason: 'forbidden_path' };
   return { ok: true, reason: null };
 };
 
 /** The single authoritative "may this path appear anywhere in output" check: in scope AND not a protected/secret path. Used for files, directory recursion, AND git output filtering alike. */
-const isAuthorized = (relativePath, scope) => Boolean(relativePath) && scopeCheck(relativePath, scope).ok && !isProtectedPath(relativePath);
+export const isAuthorized = (relativePath, scope) => Boolean(relativePath) && scopeCheck(relativePath, scope).ok && !isProtectedPath(relativePath);
 
 const looksLikeRepoPath = (value) => {
   if (typeof value !== 'string') return false;
@@ -150,7 +154,7 @@ const looksLikeRepoPath = (value) => {
   return trimmed.includes('/') || /\.[A-Za-z0-9]{1,8}$/.test(trimmed);
 };
 
-const assertValidatedTaskShape = (task) => {
+export const assertValidatedTaskShape = (task) => {
   if (!task || typeof task !== 'object') throw new XContextScopeError('task is required');
   if (!task.workspace || typeof task.workspace.root !== 'string' || !task.workspace.root.trim()) {
     throw new XContextScopeError('task.workspace.root is required');
