@@ -46,6 +46,14 @@ test('LOCAL4 chat returns normalized response', async () => {
   assert.equal(JSON.parse(request.options.body).stream, false);
 });
 
+test('SKILL_PROVIDER1 chat forwards read-only tool definitions and normalizes tool calls', async () => {
+  let request;
+  const provider = new OllamaProvider({ model: 'local', fetchFn: mockFetch((_url, options) => { request = JSON.parse(options.body); return response(200, { message: { content: '', tool_calls: [{ function: { name: 'repo_list', arguments: '{}' } }] }, done: true }); }) });
+  const result = await provider.chat({ messages: [{ role: 'user', content: 'inspect' }], tools: [{ type: 'function', function: { name: 'repo_list' } }] });
+  assert.equal(request.tools[0].function.name, 'repo_list');
+  assert.equal(result.toolCalls[0].function.name, 'repo_list');
+});
+
 test('UX1 FAST sends think=false and 4096 context', async () => {
   let request;
   const provider = new OllamaProvider({ model: 'local', profile: 'fast', fetchFn: mockFetch((_url, options) => { request = JSON.parse(options.body); return response(200, { message: { content: 'ok' } }); }) });
@@ -230,6 +238,13 @@ test('STREAM3 length remains successful and exposes output limit', async () => {
   assert.equal(result.ok, true);
   assert.equal(result.response, 'partial');
   assert.equal(result.outputLimitReached, true);
+});
+
+test('STREAM_TOOL1 stream normalizes tool calls without leaking raw output', async () => {
+  const provider = new OllamaProvider({ model: 'local', fetchFn: mockFetch(() => streamResponse([{ message: { tool_calls: [{ function: { name: 'file_search', arguments: '{"query":"partial"}' } }] }, done: true, done_reason: 'stop' }])) });
+  const result = await provider.chatStream({ tools: [{ type: 'function', function: { name: 'file_search' } }], messages: [{ role: 'user', content: 'search' }], onChunk: async () => {} });
+  assert.equal(result.toolCalls[0].function.name, 'file_search');
+  assert.equal(result.response, '');
 });
 
 test('STREAM4 AbortSignal stops streaming cleanly', async () => {

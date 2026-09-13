@@ -123,6 +123,7 @@ export class OllamaProvider {
     temperature,
     longResponse = false,
     timeoutMs,
+    tools,
   } = {}) {
     if (!Array.isArray(messages) || messages.length === 0) {
       return providerError({ code: 'INVALID_REQUEST', message: 'messages must be a non-empty array' });
@@ -150,6 +151,7 @@ export class OllamaProvider {
         stream: false,
         think: think === undefined ? runtimeProfile.think : Boolean(think),
         options: runtimeOptions,
+        ...(Array.isArray(tools) && tools.length > 0 ? { tools } : {}),
       },
       signal,
       timeoutMs: requestTimeoutMs,
@@ -162,6 +164,7 @@ export class OllamaProvider {
     const doneReason = typeof result.payload.done_reason === 'string' && result.payload.done_reason.trim()
       ? result.payload.done_reason.trim()
       : 'unknown';
+    const toolCalls = Array.isArray(result.payload?.message?.tool_calls) ? result.payload.message.tool_calls : [];
     return {
       ok: true,
       provider: 'ollama',
@@ -172,6 +175,7 @@ export class OllamaProvider {
       doneReason,
       done_reason: doneReason,
       outputLimitReached: doneReason === 'length',
+      ...(toolCalls.length > 0 ? { toolCalls } : {}),
     };
   }
 
@@ -188,6 +192,7 @@ export class OllamaProvider {
     longResponse = false,
     timeoutMs,
     onChunk,
+    tools,
   } = {}) {
     if (!Array.isArray(messages) || messages.length === 0) return providerError({ code: 'INVALID_REQUEST', message: 'messages must be a non-empty array' });
     if (!model || typeof model !== 'string' || !model.trim()) return providerError({ code: 'MODEL_REQUIRED', message: 'An Ollama model is required' });
@@ -214,6 +219,7 @@ export class OllamaProvider {
     }
     let responseText = '';
     let doneReason = 'unknown';
+    const toolCalls = [];
     let reader;
     try {
       const response = await this.fetchFn(`${this.baseUrl}/api/chat`, {
@@ -223,6 +229,7 @@ export class OllamaProvider {
           model: model.trim(), messages, stream: true,
           think: think === undefined ? runtimeProfile.think : Boolean(think),
           options: runtimeOptions,
+          ...(Array.isArray(tools) && tools.length > 0 ? { tools } : {}),
         }),
         signal: controller.signal,
       });
@@ -246,6 +253,7 @@ export class OllamaProvider {
           responseText += content;
           await onChunk(content);
         }
+        if (Array.isArray(event?.message?.tool_calls)) toolCalls.push(...event.message.tool_calls);
         if (typeof event?.done_reason === 'string' && event.done_reason) doneReason = event.done_reason;
         return Boolean(event?.done);
       };
@@ -274,6 +282,7 @@ export class OllamaProvider {
         doneReason,
         done_reason: doneReason,
         outputLimitReached: doneReason === 'length',
+        ...(toolCalls.length > 0 ? { toolCalls } : {}),
       };
     } catch (error) {
       if (signal?.aborted) return { ...providerError({ code: 'CANCELLED', message: 'chat request was cancelled', retryable: false }), response: responseText, doneReason };

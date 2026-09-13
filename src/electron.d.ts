@@ -140,7 +140,7 @@ interface Window { controlApp: {
   localChatSend: (request: { provider: 'local' | 'external'; messages: Array<{ role: string; content: string }>; model?: string; profile?: 'fast' | 'normal' | 'deep' | 'light' | 'medium' | 'high'; longResponse?: boolean; timeoutMs?: number; options?: Record<string, unknown>; think?: boolean; num_ctx?: number; num_predict?: number; temperature?: number }) => Promise<any>;
   localChatStreamStart: (request: { requestId: string; provider: 'local'; messages: Array<{ role: string; content: string }>; model?: string; profile?: 'fast' | 'normal' | 'deep' | 'light' | 'medium' | 'high'; longResponse?: boolean; timeoutMs?: number; ollamaAvailable?: boolean }) => void;
   localChatStreamStop: (requestId: string) => void;
-  onLocalChatStream: (callback: (event: { type: 'chunk' | 'done' | 'error'; requestId: string; content?: string; result?: any }) => void) => () => void;
+  onLocalChatStream: (callback: (event: { type: 'chunk' | 'done' | 'error' | 'activity'; requestId: string; content?: string; result?: any; activity?: { type: string; skill: string; elapsedMs?: number; resultCount?: number } }) => void) => () => void;
   chooseWorkspace: () => Promise<string | null>;
   validateWorkspace: (path: string) => Promise<{ valid: boolean; reason?: string }>;
   getServerState: () => Promise<ServerState>;

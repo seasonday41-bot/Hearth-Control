@@ -121,6 +121,7 @@ export default function App() {
   const [chatElapsedMs, setChatElapsedMs] = useState(0);
   const [chatFollowOutput, setChatFollowOutput] = useState(true);
   const [chatExpandedCode, setChatExpandedCode] = useState<{ code: string; language: string } | null>(null);
+  const [chatActivity, setChatActivity] = useState<Array<{ type: string; skill: string; elapsedMs?: number; resultCount?: number; stage?: string; relativePath?: string }>>([]);
   const [showChatContext, setShowChatContext] = useState(false);
   const [chatContext, setChatContext] = useState<any>(null);
   const [chatContextLoading, setChatContextLoading] = useState(false);
@@ -270,6 +271,10 @@ export default function App() {
 
   useEffect(() => window.controlApp.onLocalChatStream((event) => {
     if (!event.requestId || event.requestId !== chatRequestIdRef.current) return;
+    if (event.type === 'activity' && event.activity) {
+      setChatActivity((current) => [...current, event.activity!]);
+      return;
+    }
     if (event.type === 'chunk' && event.content) {
       setChatStreamText((current) => current + event.content);
       return;
@@ -541,6 +546,7 @@ export default function App() {
     setChatResult(null);
     setChatError('');
     setChatStreamText('');
+    setChatActivity([]);
     setChatElapsedMs(0);
     setChatFollowOutput(true);
     chatStreamStartedRef.current = Date.now();
@@ -937,6 +943,7 @@ export default function App() {
               </div>
               {chatProvider === 'local' && <label className="local-chat-long-response"><input type="checkbox" checked={chatLongResponse} onChange={(event) => setChatLongResponse(event.target.checked)} /> Long response</label>}
               {chatStreaming && <div className="local-chat-generating" aria-live="polite">Generating… {Math.round(chatElapsedMs / 1000)}s</div>}
+              {chatActivity.length > 0 && <section className="local-chat-activity" aria-label="Local AI activity"><strong>{chatStreaming ? 'Working' : 'Activity'}</strong>{chatActivity.map((item, index) => <div key={`${item.skill}-${index}`} className="local-chat-activity-row"><span>{item.type === 'skill_completed' || item.type === 'evidence_complete' ? '✓' : item.type === 'skill_failed' || item.type === 'evidence_incomplete' ? '!' : '●'}</span><span>{item.type === 'evidence_complete' ? 'Evidence trace complete' : item.type === 'evidence_incomplete' ? 'Evidence trace incomplete' : item.type === 'evidence_progress' ? `${item.stage || 'SOURCE'} · ${item.relativePath || item.skill}` : item.type === 'skill_started' ? `Running ${item.skill}` : `${item.skill}${item.resultCount === undefined ? '' : ` · ${item.resultCount} results`}`}</span></div>)}</section>}
               {chatError && <div className="local-chat-error" role="alert">{chatError}</div>}
               {(chatStreamText || chatResult) && <section className="local-chat-result" aria-live="polite"><div className="local-chat-result-meta"><span>{chatResult?.provider || 'ollama'}</span><span>{chatResult?.model || chatModel}</span><span>{chatProvider === 'local' ? chatProfile.toUpperCase() : 'EXTERNAL'}</span><span>{chatStreaming ? `${Math.round(chatElapsedMs / 1000)}s` : `${chatResult?.elapsedMs || chatElapsedMs} ms`}</span></div><div ref={chatResponseRef} className="local-chat-response-viewer" onScroll={handleChatResponseScroll}><LocalChatResponse text={chatStreamText || chatResult?.response || ''} onExpand={(code, language) => setChatExpandedCode({ code, language })} /></div>{!chatFollowOutput && chatStreaming && <button type="button" className="local-chat-bottom-button" onClick={() => { setChatFollowOutput(true); if (chatResponseRef.current) chatResponseRef.current.scrollTop = chatResponseRef.current.scrollHeight; }}>↓ Bottom</button>}{chatResult?.doneReason === 'length' && <small className="local-chat-output-warning">Response reached the output limit.</small>}</section>}
               {showChatContext && <section className="local-chat-context-inspector" aria-label="Local AI context"><header><strong>Context supplied to Local AI</strong><button type="button" onClick={() => setShowChatContext(false)}>Close</button></header>{chatContextLoading ? <p>Loading current context…</p> : chatContextError ? <p role="alert">{chatContextError}</p> : chatContext && <div><h3>Runtime</h3><pre>{chatContext.runtime}</pre><h3>Capabilities</h3><p><strong>Available:</strong> {chatContext.capabilities.available.join('; ')}</p><p><strong>Not available:</strong> {chatContext.capabilities.unavailable.join('; ')}</p><h3>Project</h3><pre>{chatContext.project}</pre><h3>Safety</h3><p>{chatContext.safety}</p><h3>Response Style</h3><p>{chatContext.responseStyle}</p></div>}</section>}

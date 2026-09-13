@@ -503,6 +503,7 @@ app.whenReady().then(async () => {
     });
     const { createLocalChatCaller } = await importFromHere('../mcp/providers/local-chat.mjs');
     const caller = createLocalChatCaller({ selection });
+    const gateway = provider === 'local' && settings.workspace ? createReadOnlyToolGateway({ workspace: settings.workspace, maxToolSteps: 6 }) : null;
     const startedAt = Date.now();
     const result = await caller.send({
       provider,
@@ -525,6 +526,8 @@ app.whenReady().then(async () => {
         gitBranch: null,
         gitCommit: null,
         gitState: null,
+        gateway,
+        localEndpoint: selection.localProvider?.baseUrl,
       } : {}),
     });
     return { ...result, elapsedMs: Date.now() - startedAt };
@@ -543,8 +546,10 @@ app.whenReady().then(async () => {
     try {
       const { createProviderSelection } = await importFromHere('../mcp/providers/selection.mjs');
       const { createLocalChatCaller } = await importFromHere('../mcp/providers/local-chat.mjs');
+      const { createReadOnlyToolGateway } = await importFromHere('../mcp/skills/gateway.mjs');
       const selection = createProviderSelection({ localProviderOptions: { model: request.model, profile: request.profile } });
       const caller = createLocalChatCaller({ selection });
+      const gateway = settings.workspace ? createReadOnlyToolGateway({ workspace: settings.workspace, maxToolSteps: 6 }) : null;
       const result = await caller.stream({
         provider: 'local',
         messages: request.messages,
@@ -565,10 +570,16 @@ app.whenReady().then(async () => {
         gitBranch: null,
         gitCommit: null,
         gitState: null,
+        gateway,
+        localEndpoint: selection.localProvider?.baseUrl,
         signal: controller.signal,
         onChunk: async (content) => {
           if (localChatStreams.get(requestId) !== controller || event.sender.isDestroyed()) return;
           event.sender.send('local-chat:stream-chunk', { requestId, content });
+        },
+        onActivity: async (activity) => {
+          if (localChatStreams.get(requestId) !== controller || event.sender.isDestroyed()) return;
+          event.sender.send('local-chat:stream-activity', { requestId, activity });
         },
       });
       if (event.sender.isDestroyed()) return;

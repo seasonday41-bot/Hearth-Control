@@ -16,7 +16,7 @@ contextBridge.exposeInMainWorld('controlApp', {
   localChatStreamStart: (request) => ipcRenderer.send('local-chat:stream-start', request),
   localChatStreamStop: (requestId) => ipcRenderer.send('local-chat:stream-stop', requestId),
   onLocalChatStream: (callback) => {
-    const events = ['chunk', 'done', 'error'];
+    const events = ['chunk', 'done', 'error', 'activity'];
     const listeners = events.map((kind) => {
       const channel = `local-chat:stream-${kind}`;
       const listener = (_event, payload) => callback({ type: kind, ...payload });
