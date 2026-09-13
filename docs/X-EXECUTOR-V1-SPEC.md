@@ -1,12 +1,14 @@
-# X Executor v1 — Master Implementation Spec
+# X Executor v1 — Canonical Implementation Spec
 
-Status: **LOCKED FOR IMPLEMENTATION**  
+Status: **DESIGN FROZEN — AUDIT BEFORE IMPLEMENTATION**  
 Date: 2026-09-13  
 Repository: `seasonday41-bot/Hearth-Control`  
 Implementation branch: `feature/x-executor-v1`  
 Baseline source commit: `6f9baa073aeba9c77c23756d5493daff65837dad`
 
-> **IMPLEMENT THIS SPEC. DO NOT REDESIGN STABLE HEARTH COMPONENTS UNLESS NEW RUNTIME EVIDENCE PROVES A REGRESSION.**
+> **AUDIT TO CONFIRM. DO NOT REIMPLEMENT VALIDATED HEARTH LIFECYCLE BEHAVIOR. BUILD X AROUND THE STABLE RUNTIME, NOT THROUGH IT.**
+
+> **IMPLEMENT THIS SPEC. DO NOT REDESIGN STABLE HEARTH COMPONENTS UNLESS NEW FAILING RUNTIME EVIDENCE PROVES A REGRESSION.**
 
 > **AUDIT THE ACTUAL CURRENT SOURCE BEFORE CODING. Existing implementation and validated runtime evidence win over assumptions in this document. Report mismatches before changing stable architecture.**
 
@@ -16,8 +18,6 @@ Baseline source commit: `6f9baa073aeba9c77c23756d5493daff65837dad`
 
 X is a **Local Coding Executor**, not a general chat assistant.
 
-Final role split:
-
 ```text
 User
   ↓
@@ -26,7 +26,7 @@ Brain / Architect / Supervisor / Teacher
   ↓
 x-task-v1
   ↓
-Remote / Hearth Supabase
+Remote / Supabase task queue
   ↓
 Hearth
 Trusted Execution Layer
@@ -42,33 +42,47 @@ Review / Revision / Teaching
 User
 ```
 
-Primary objective:
-
-- move routine coding execution off cloud models
-- allow coding work to continue while cloud quota is unavailable
-- keep high-level reasoning, architecture, ambiguous decisions, and review with ChatGPT / Sol / Astra
-- keep Hearth as the trusted runtime, safety boundary, process owner, and recovery layer
-
 Core rule:
 
 > **ChatGPT / Sol / Astra = THINK**  
 > **X = CODE**  
 > **Hearth = EXECUTE + CONTROL**  
-> **Supabase = TRANSPORT / STATE**  
+> **Supabase = TASK TRANSPORT / PERSISTED TASK STATE**  
+> **Hearth local durable store = IN-FLIGHT PROCESS / JOB / CONTINUATION TRUTH**  
 > **Tests + Evidence = TRUTH**
+
+Primary objective:
+
+- move routine coding execution off cloud models
+- allow coding work to continue while cloud quota is unavailable
+- keep high-level reasoning, architecture, ambiguity and review with supervisors
+- keep Hearth as the trusted runtime, safety boundary, process owner and recovery layer
 
 ---
 
-## 2. Stable Hearth Baseline — Preserve
+## 2. Stable Hearth Baseline — Validated, Preserve
 
-Validated stable baseline:
+Validated baseline:
 
 - Hearth version: `v0.4.3`
 - build: `0.4.3-20260912150720-3bd6ad`
-- Local AI Test Runner v0.2 branch: `feature/local-ai-test-runner-v0.2`
+- Local AI Test Runner branch: `feature/local-ai-test-runner-v0.2`
 - validated commit: `6f9baa073aeba9c77c23756d5493daff65837dad`
 
-Final validation at that baseline:
+### Evidence of record
+
+Canonical baseline evidence is stored in:
+
+`docs/STABLE_BASELINE.md`
+
+That artifact records validation on **2026-09-12**:
+
+- targeted continuation/recovery: **18/18 PASS**
+- full regression: **316/316 PASS**
+- Native Smoke #9 durable worker: **460089 ms, exit code 0, PASS**
+- baseline build/artifact hashes are recorded in the same file
+
+The Local AI Test Runner v0.2 validation associated with the baseline also recorded:
 
 - Test Runner: `37/37`
 - Local Chat: `9/9`
@@ -80,9 +94,15 @@ Final validation at that baseline:
 - production build / typecheck: PASS
 - `git diff --check`: PASS
 - no stale test processes
-- working tree: clean
+- working tree clean
 
-### Stable components that must not be casually redesigned
+### Status
+
+**Continuation/recovery is treated as VALIDATED, not as an open design task.**
+
+The implementation agent must audit that the validated invariants still exist in the actual source and tests, but must not reimplement or redesign them unless a new failing runtime test provides evidence of regression.
+
+Stable components that must not be casually redesigned:
 
 - Durable Job Runtime
 - JobManager ownership
@@ -90,10 +110,10 @@ Final validation at that baseline:
 - heartbeat lifecycle
 - persisted durable-job state
 - continuation bridge
-- recovery / reconciliation behavior already proven by runtime tests
+- startup/historical recovery and reconciliation behavior already proven by runtime tests
 - existing Remote transport that already works
 
-The validated continuation path must remain conceptually intact:
+Validated continuation path to preserve conceptually:
 
 ```text
 job_completed
@@ -106,15 +126,17 @@ same taskId / conversationId
   ↓
 durableJobEvidence
   ↓
-parent task reaches final state
+parent reaches final outcome
 ```
 
-Important lifecycle invariant:
+Lifecycle invariants to audit and preserve:
 
-- while a durable job is still running, a provider-level interim `waiting` response must **not** incorrectly move the parent task to `WAITING`
-- startup recovery must reconcile persisted non-terminal parents whose durable jobs are already terminal
+- while a durable worker is still running, provider-level interim `waiting` must not incorrectly move its parent task to `WAITING`; parent remains `RUNNING`
+- startup recovery reconciles persisted non-terminal parents whose durable jobs are already terminal
+- continuation is claimed before `resumeAntigravityTask` so a terminal durable job is not resumed twice
+- persisted recovery evidence, not replay of an already-lost historical event, drives missed-event recovery
 
-Do not reopen these designs unless new runtime evidence demonstrates a regression.
+If the audit needs to prove a more detailed sub-case than the baseline evidence artifact states, inspect the actual targeted tests/runtime evidence before claiming it is proven.
 
 ---
 
@@ -125,8 +147,8 @@ Supervisor
   ↓ x-task-v1
 Supabase task queue
   ↓ realtime event
-Hearth
-  ↓ atomic claim + lease
+Hearth Serial Dispatcher
+  ↓ task execution claim + lease
 X Local Executor
   ↓
 INSPECT
@@ -147,13 +169,13 @@ GIT DIFF
   ↓
 CHECKPOINT / RESULT
   ↓ x-result-v1
-Result Gate
+Deterministic Result Gate
   ├─ COMPLETED
   ├─ NEEDS_REVIEW
   └─ FAILED
 ```
 
-Concurrency for v1:
+Concurrency policy for v1:
 
 ```text
 MAX_ACTIVE_TASKS = 1
@@ -161,21 +183,28 @@ MAX_LLM_WORKERS = 1
 MAX_REPAIR_TASKS = 1
 ```
 
-A new task must not begin until the current task reaches a safe state:
-
-- `completed`
-- `needs_review`
-- `waiting`
-- `failed`
-- `cancelled`
+A new task may begin only after the active task reaches a safe state.
 
 Correctness and recoverability are more important than throughput.
+
+### Two different claims — do not conflate them
+
+1. **Task execution claim/lease**
+   - belongs to the serial dispatcher / queue
+   - prevents the same queued coding task from executing twice
+   - enforces `MAX_ACTIVE_TASKS = 1` across duplicate realtime delivery, restart or competing dispatcher processes
+
+2. **Durable continuation claim**
+   - belongs to validated Hearth continuation/recovery
+   - prevents duplicate `resumeAntigravityTask` for the same completed durable job
+
+The continuation claim does **not** replace the task execution claim, and the serial policy does **not** replace continuation correctness.
 
 ---
 
 ## 4. Executor Interface
 
-Hearth should depend on an executor contract rather than hard-code one provider implementation.
+Hearth depends on an executor contract rather than hard-coding one provider implementation.
 
 Conceptual interface:
 
@@ -187,7 +216,7 @@ interface Executor {
 }
 ```
 
-Normalized executor terminal outcomes:
+Normalized executor outcomes remain compatible with Hearth:
 
 - `completed`
 - `waiting`
@@ -203,39 +232,38 @@ Purpose:
 
 ## 5. ModelAdapter and Local Model Policy
 
-X must sit behind a `ModelAdapter` so model choice is replaceable without changing the executor contract.
+X sits behind a `ModelAdapter`; changing the local model must not change the Executor contract.
 
-Current preferred direction:
+Bring-up policy:
 
 - primary target: coding-focused model around **14B**, quantized appropriately for the current Mac
-- existing 8B model remains temporary fallback
-- final selection is based on **runtime evidence**, not model-name preference
+- existing Qwen 8B remains temporary fallback
+- exact 14B default is pinned only after runtime evidence on the target M5 16GB machine
+- do not benchmark many models before Core E2E works
 
-Runtime selection evidence should include:
+Runtime selection evidence:
 
 - task completion quality
-- required repair count
+- repair count
 - latency
 - memory pressure
 - swap usage
 - stability during long serial runs
 
-Initial runtime policy:
+Runtime policy:
 
 - one local model instance at a time
 - one coding task at a time
-- avoid large context unless required
-- start with targeted repository context instead of loading the entire repository
-
-Do not benchmark many models before Core E2E works.
+- targeted repository context, not whole-repo dumping
+- start with moderate context and expand only when evidence requires it
 
 ---
 
-## 6. x-task-v1
+## 6. x-task-v1 Contract
 
-Supervisor must send a structured task, not a vague instruction such as "fix this file".
+Supervisor sends structured tasks, not vague instructions.
 
-Required fields:
+Required contract:
 
 ```yaml
 version: x-task-v1
@@ -255,6 +283,10 @@ why_this_matters: string
 known_evidence: []
 suspected_area: []
 
+workspace:
+  repo: string
+  root: string
+
 scope:
   allowed_paths: []
   preferred_files: []
@@ -271,8 +303,11 @@ verification:
   optional: []
 
 done_criteria: []
-
 teaching_notes: []
+
+uncertainty:
+  policy: bounded_autonomy
+  stop_conditions: []
 
 commit_policy:
   mode: never | require_user_approval | after_tests
@@ -284,28 +319,20 @@ timing:
   hard_timeout_minutes: integer
 ```
 
-### Task-writing principles
+Task-writing rules:
 
-A task must explain:
-
-- what the user wants
-- what is currently wrong
-- what correct behavior looks like
-- why the behavior matters
-- what evidence is already known
-- where X should inspect first
-- what X may change
-- what X must preserve
-- how success will be verified
-- what counts as DONE
-
-The supervisor should specify desired behavior, not force a guessed implementation unless implementation itself is a requirement.
+- explain user intent
+- explain current incorrect behavior
+- define expected behavior
+- explain why it matters
+- include known evidence and suspected area
+- define what X may change and what it must preserve
+- define required validation and DONE criteria
+- specify desired behavior rather than forcing a guessed implementation unless implementation itself is a requirement
 
 ---
 
-## 7. X Execution Loop
-
-Required high-level loop:
+## 7. LocalExecutor Loop
 
 ```text
 INSPECT
@@ -327,104 +354,89 @@ GIT DIFF
 RESULT / CHECKPOINT
 ```
 
-### Evidence before modification
-
-Before meaningful edits, X should be able to state machine-verifiable observations such as:
+Before meaningful edits, X records concise auditable observations:
 
 - current behavior observed
 - likely root cause
 - relevant files
 - whether planned edits remain inside scope
 
-Do not store hidden reasoning or chain-of-thought. Store only concise, auditable observations and evidence.
+Do not store hidden chain-of-thought. Store only evidence and auditable observations.
 
-### Repair budget
-
-Interpretation:
+Repair budget:
 
 - initial implementation = attempt 1
-- repair attempt 1 = attempt 2
-- repair attempt 2 = attempt 3
+- repair 1 = attempt 2
+- repair 2 = attempt 3
 - maximum total implementation attempts = **3**
 
-After the repair budget is exhausted, do not keep widening scope or refactoring unrelated code.
+After budget exhaustion, do not widen scope or refactor unrelated code merely to make tests green.
 
 ---
 
 ## 8. Tool and Workspace Safety
 
-X tools are intentionally constrained.
-
-Allowed tool families for v1:
+Allowed v1 tool families:
 
 - workspace-scoped filesystem read
 - workspace-scoped search
-- workspace-scoped edit / patch
+- workspace-scoped edit/patch
 - approved Test Runner profiles
-- approved build / typecheck / lint profiles where explicitly registered
+- explicitly registered build/typecheck/lint profiles
 - Git inspection
 - bounded local Git mutation according to commit policy
 
 ### Workspace boundary
 
-Every filesystem path must be resolved to a real path and validated against the configured workspace root.
+Every path must be resolved to a real path and validated against the configured workspace root.
 
-Must defend against:
+Defend against:
 
 - `../` traversal
-- absolute paths outside the workspace
+- absolute paths outside workspace
 - symlink escape
-- implicit cwd changes outside workspace
+- implicit cwd escape
 
 ### Command execution
 
-Do not execute arbitrary model-generated shell strings.
+Never execute arbitrary model-generated shell strings.
 
-Preferred safety model:
+Use:
 
 - registered command profiles
-- structured executable + argument arrays
+- executable + argv arrays
 - `execFile` / `spawn`
 - no shell interpolation by default
 - explicit cwd
 - bounded environment
 - output and timeout limits
 
-### Permanent destructive-action rule
+`npm run` is permitted only for pre-registered script names. If `npx` is ever required, use a pre-registered profile that cannot install arbitrary packages (for example, an audited `--no-install` profile); never expose free-form `npx` to the model.
 
-Automatic deletion is never allowed.
+### Permanent owner-only actions
 
-The following always require explicit owner approval and must never be auto-approved by Autopilot:
+These are never automatically approved, including during Autopilot:
 
-- delete important files or data
-- destructive Git reset
+- delete important files/data
+- destructive reset
 - force push
 - push
-- merge to stable/main
-- deploy / publish
-- secrets changes
-- credential changes
+- merge to main/stable
+- deploy/publish
+- secrets/credential changes
 - destructive database actions
 
 ---
 
 ## 9. Secret Guard
 
-Before any content leaves the local machine or is included in an external escalation bundle, redact or block likely secrets.
+Before anything leaves the machine or enters an external escalation bundle, block or redact likely secrets.
 
-Minimum guard patterns:
+Minimum controls:
 
-- `.env*`
-- `*.pem`
-- `*.key`
-- private keys
-- tokens
-- passwords
-- credentials files
-- common API key formats
-- provider session data
-
-Use path-based blocking plus content-based detection.
+- path rules: `.env*`, `*.pem`, `*.key`, credentials/secrets files
+- content rules: private keys, passwords, tokens, common provider/API key patterns, session data
+- prefer bounded sanitized snippets over whole files
 
 Do not rely on the model to remember secret handling.
 
@@ -432,42 +444,37 @@ Do not rely on the model to remember secret handling.
 
 ## 10. Decision Boundary
 
-X may decide implementation details autonomously only when all are true:
+X may decide implementation details only when all are true:
 
-1. change remains inside approved scope
-2. change is reversible
-3. public behavior outside acceptance criteria is unchanged
+1. inside approved scope
+2. reversible
+3. no public behavior change outside acceptance criteria
 4. repository/test evidence supports the decision
 
-### X may decide itself
+X may decide:
 
-Examples:
-
-- local implementation choice inside scope
-- variable/function naming following project conventions
-- small reversible refactor necessary for the scoped fix
-- test additions that prove specified behavior
-- fixing lint/type/test failures introduced by X's own change
+- local implementation details inside scope
+- naming following project conventions
+- small reversible scoped refactors
+- tests that prove specified behavior
+- fixing lint/type/test failures introduced by X
 - inspecting more files inside allowed scope
 
-### X must stop and escalate
+X must stop/escalate for:
 
-Examples:
-
-- public API or contract change
+- public API/contract change
 - architecture decision
 - business-logic ambiguity
 - security/auth/RLS decision
 - database schema/migration decision
 - new dependency requirement
 - root cause outside allowed scope
-- materially different interpretations of requirement
-- destructive action
-- external action requiring owner authorization
-- repair budget exhausted
-- missing evidence needed to safely continue
+- materially different requirement interpretations
+- destructive/external owner-only action
+- repair budget exhaustion
+- missing evidence needed to continue safely
 
-Suggested reason codes:
+Reason codes:
 
 ```text
 AMBIGUOUS_REQUIREMENT
@@ -491,44 +498,51 @@ HARD_TIMEOUT_CHECKPOINT
 
 ## 11. Deterministic Result Gate
 
-The model does not get to declare itself successful.
+The model does not declare itself successful.
 
-Command exit codes, actual Git diff, Hearth runtime state, registered validation results, and task criteria are the evidence of record.
+Evidence of record:
+
+- command exit codes
+- bounded stdout/stderr evidence
+- actual Git diff
+- registered validation results
+- Hearth runtime/process state
+- task acceptance/DONE criteria
 
 ### COMPLETED
 
-All required conditions must be true:
+All must be true:
 
-- all required validation commands actually ran
-- all required validation commands passed
-- DONE criteria are satisfied
-- diff remains within approved scope
-- no forbidden or destructive action occurred
-- no unresolved blocker remains
+- all required validations actually ran
+- all required validations passed
+- DONE criteria satisfied
+- diff inside approved scope
+- no forbidden/destructive action
+- no unresolved blocker
 - required diff checks pass
-- result evidence is internally consistent
+- result evidence internally consistent
 
 ### NEEDS_REVIEW
 
-Use when implementation may be usable but supervisor judgment is required, including:
+Use when supervisor judgment is required, including:
 
 - root cause not sufficiently proven
-- diff or scope is suspicious
-- a relevant failure appears pre-existing
-- hard timeout occurred but safe checkpoint succeeded
-- requirement remains ambiguous
+- suspicious diff/scope
+- relevant pre-existing failure
+- hard timeout with safe checkpoint
+- requirement ambiguity
 - correct fix requires scope expansion
-- architecture/security/business decision is required
-- validation evidence is incomplete for reasons not caused by X's patch
+- architecture/security/business decision
+- incomplete validation evidence for reasons not caused by X's patch
 
 ### FAILED
 
-Use when execution objectively failed, including:
+Use for objective execution failure:
 
 - required validation fails because of X's change
 - repair budget exhausted
-- required build/typecheck/test remains failing
-- executor/tool error prevents continuation
+- required build/typecheck/test remains red
+- executor/tool error blocks continuation
 - repository state cannot be safely verified
 - task cannot produce a safe checkpoint/result
 
@@ -536,28 +550,55 @@ Use when execution objectively failed, including:
 
 A failure that existed before X's change must not automatically classify the task as FAILED.
 
-X must record evidence distinguishing:
+Record each relevant failure origin as:
 
-- caused by this task
-- clearly pre-existing
-- unknown / insufficient evidence
+- `introduced`
+- `pre_existing`
+- `unknown`
 
-Unknown or material pre-existing failures usually lead to `NEEDS_REVIEW`, not false blame on X.
+Material `pre_existing` or `unknown` evidence normally routes to NEEDS_REVIEW rather than falsely blaming X.
+
+### Result Gate → Hearth Executor mapping
+
+```text
+COMPLETED    → hearth_outcome = completed
+NEEDS_REVIEW → hearth_outcome = waiting
+FAILED       → hearth_outcome = error
+```
+
+This mapping is allowed only with the waiting semantics in §13. A bare Hearth `waiting` value must never be treated as sufficient evidence that a durable continuation should run.
+
+Cancellation is a Hearth task-lifecycle action, not a Result Gate branch. If the owner/system cancels a task, Hearth persists cancellation/checkpoint state separately; X must not fabricate COMPLETED/NEEDS_REVIEW/FAILED for a cancelled task.
 
 ---
 
-## 12. x-result-v1
+## 12. x-result-v1 Contract
 
-Required result structure:
+There is one explicit result schema; status semantics are not implicit.
 
 ```yaml
 version: x-result-v1
 
+result_id: string
 task_id: string
 parent_task_id: string | null
 revision: integer
 attempt: integer
-status: completed | needs_review | waiting | failed | cancelled
+
+# Deterministic Result Gate decision
+gate_status: COMPLETED | NEEDS_REVIEW | FAILED
+
+# Normalized Executor outcome returned to Hearth
+hearth_outcome: completed | waiting | error
+
+# Required when hearth_outcome=waiting; otherwise null
+waiting_reason:
+  supervisor_review |
+  owner_approval |
+  external_dependency |
+  null
+
+reason_code: string | null
 
 root_cause: string | null
 evidence_found: []
@@ -566,9 +607,14 @@ files_changed: []
 change_summary: []
 why_fix_works: string | null
 
-tests_run: []
-tests_passed: []
-tests_failed: []
+validation:
+  - name: string
+    required: boolean
+    status: passed | failed | not_run
+    exit_code: integer | null
+    failure_origin: introduced | pre_existing | unknown | null
+    stdout_ref: string | null
+    stderr_ref: string | null
 
 repair_attempts: integer
 
@@ -594,15 +640,40 @@ timing:
   repair_minutes: number | null
 ```
 
-Do not dump full terminal logs into the result object. Store concise evidence and reference bounded local artifacts/log paths when needed.
+Deterministic invariants:
+
+- `gate_status=COMPLETED` iff `hearth_outcome=completed`
+- `gate_status=NEEDS_REVIEW` iff `hearth_outcome=waiting`
+- `gate_status=FAILED` iff `hearth_outcome=error`
+- `waiting_reason` is non-null only for `hearth_outcome=waiting`
+- full terminal logs are not embedded; use bounded local artifact references
 
 ---
 
-## 13. Supabase Task Queue and Source of Truth
+## 13. Supabase Task Queue, Hearth Durable State, and Waiting Semantics
 
-Supabase is the persistent task/state transport layer.
+### Source-of-truth split
 
-Expected task states:
+Supabase is the source of truth for:
+
+- remote task queue
+- persisted task state
+- result
+- escalation
+- revision chain
+
+Hearth local durable storage is the source of truth for:
+
+- owned in-flight process state
+- durable job state/evidence
+- continuation claim/recovery state
+- local watchdog/checkpoint evidence needed for restart reconciliation
+
+Do not infer process truth from Supabase task status alone.
+
+### Task states
+
+Supabase task states remain compatible with the existing task model:
 
 - `queued`
 - `running`
@@ -611,35 +682,98 @@ Expected task states:
 - `failed`
 - `cancelled`
 
-`needs_review` may be represented either as a dedicated state if schema evolves, or as `waiting` plus deterministic review metadata. Do not create incompatible state duplication without an audit first.
+For v0.1, `NEEDS_REVIEW` is represented as:
 
-### Atomic claim + lease
+```yaml
+task_status: waiting
+waiting_reason: supervisor_review
+pending_continuation: false
+```
 
-Even with one active task, atomic claim/lease remains required because:
+Owner approval is represented as:
 
-- app restart can briefly create multiple processes
-- recovery can race with normal dispatch
+```yaml
+task_status: waiting
+waiting_reason: owner_approval
+pending_continuation: false
+```
+
+A durable job still running must remain conceptually:
+
+```yaml
+task_status: running
+waiting_reason: null
+pending_continuation: true
+```
+
+A provider-level interim `waiting` while the durable job still runs must not rewrite the parent task to `waiting`.
+
+### Required semantic axes
+
+Exact persisted field names must be confirmed by source audit, but the implementation must preserve equivalent independent semantics for:
+
+```text
+task_status
+waiting_reason
+pending_continuation
+continuation_claim_state
+```
+
+Conceptual continuation claim states:
+
+```text
+none | not_started | in_progress | completed
+```
+
+### Reconciliation eligibility
+
+Startup/historical continuation reconciliation must be driven by continuation evidence, not by `task_status == waiting`.
+
+Conceptual eligibility:
+
+```text
+parent is non-terminal
+AND persisted durable job is terminal
+AND pending_continuation == true
+AND continuation_claim_state != completed
+```
+
+A review wait such as:
+
+```yaml
+task_status: waiting
+waiting_reason: supervisor_review
+pending_continuation: false
+```
+
+must never enter the durable continuation path.
+
+### Atomic task claim + lease
+
+Even with one active coding task, task execution claim/lease remains required because:
+
 - duplicate Realtime delivery is possible
-- multiple dispatchers must not execute one task twice
+- restart/recovery can race with normal dispatch
+- multiple dispatcher processes can briefly exist
+
+This claim is separate from the validated durable continuation claim described in §3.
 
 ### Minimal Supabase writes
 
-Normal operation should not persist every progress step.
+Normal operation does not persist every progress step.
 
-Typical important writes:
+Typical writes:
 
-- task created / queued
-- task claimed / running
-- final completed / waiting / failed
-- recovery checkpoint only when necessary
+- queued/task creation
+- claimed/running
+- final completed/waiting/failed
+- recovery checkpoint only when required
 
-Local progress events stay local unless persistence is required for recovery.
+Local progress stays local unless recovery requires persistence.
 
 ---
 
 ## 14. Event-Driven Task Timing v1
-
-Normal operation is event-driven.
 
 Principle:
 
@@ -648,14 +782,12 @@ Principle:
 > **Supabase = persistence + recovery**  
 > **Query = exception, not heartbeat**
 
-Conceptual flow:
-
 ```text
 TASK CREATED
   ↓
 Realtime Event
   ↓
-HEARTH CLAIM + LEASE
+HEARTH TASK CLAIM + LEASE
   ↓
 RUNNING + local timers
   ↓
@@ -666,55 +798,34 @@ X EXECUTES
   └─ hard-timeout timer
 ```
 
-### First Check
-
-Purpose:
+First Check:
 
 - confirm real progress
 - confirm worker health
 - estimate remaining work
+- inspect local runtime state; do not poll Supabase to ask if the owned worker is alive
 
-Do not query Supabase merely to ask whether the worker is still running. Hearth already owns the process and should inspect local runtime state.
+Soft Deadline:
 
-### Soft Deadline
+- assess healthy-but-slow work
+- allow bounded extension when evidence shows progress
+- detect repeated failure loops or inactivity
+- soft deadline is not failure
 
-Purpose:
+Hard Timeout:
 
-- assess whether work is healthy but slower than expected
-- allow a reasonable local extension when evidence shows progress
-- detect repeated failed loops or no activity
-
-Soft deadline is not failure.
-
-### Hard Timeout
-
-Hard timeout must not kill X in the middle of a file write or transaction unless there is no safer recovery option.
-
-Request a safe checkpoint containing:
-
-- current stage
-- progress
-- root cause/evidence discovered so far
-- files changed
-- current diff
-- validation completed
-- validation remaining
-- repair attempts
-- next recommended action
-
-Then classify deterministically as `needs_review`, `waiting`, or `failed`.
-
-Hard timeout does **not** automatically mean FAILED.
+- do not blindly kill X in the middle of a file write/transaction
+- request a safe checkpoint containing stage, progress, evidence/root cause, files/diff, completed/remaining validations, repair attempts and next action
+- classify as NEEDS_REVIEW or FAILED based on evidence
+- if an owned process is still running, explicitly record that fact; a timer event alone never proves the process stopped
 
 ---
 
 ## 15. Autopilot v1
 
-Autopilot is part of v1 because unattended execution is a core reason X exists.
+Autopilot is in v1 because unattended execution is a core reason X exists.
 
-However:
-
-> **Do not implement or enable Autopilot until Core E2E and safety gates are proven.**
+**Do not implement or enable Autopilot until Core E2E and safety gates are proven.**
 
 States:
 
@@ -722,40 +833,30 @@ States:
 - `DRAINING`
 - `OFF`
 
-### ON
+ON:
 
 - may claim new runnable tasks
 - execute serially
-- completed task → next task
-- waiting/needs_review/failed task → persist evidence and move to next runnable independent task
+- completed → next task
+- waiting/needs-review/failed → persist evidence and move to next independent runnable task
 
-### DRAINING
-
-Entered when owner returns or Autopilot is asked to stop gracefully.
-
-Behavior:
+DRAINING:
 
 - stop claiming new tasks
-- allow current operation to reach safe checkpoint
+- let current operation reach safe checkpoint
 - persist checkpoint/result
-- transition to OFF
+- then OFF
 
-### OFF
+OFF:
 
 - no unattended claims
 - owner/supervisor review mode
 
-### Owner-return command
-
-The phrase / command concept:
+Owner-return command concept:
 
 ```text
-"ผมมาแล้ว"
+"ผมมาแล้ว" → OWNER_RETURNED
 ```
-
-maps to an `OWNER_RETURNED` event.
-
-Behavior:
 
 ```text
 ON
@@ -764,34 +865,25 @@ DRAINING
   ↓
 stop new claims
   ↓
-current task reaches safe checkpoint
+current task → safe checkpoint
   ↓
 OFF
   ↓
 one batch query for unresolved tasks
 ```
 
-Unresolved batch should include only relevant states/reasons such as:
-
-- needs review
-- waiting
-- failed
-- timed out / checkpointed
-
-Do not poll Supabase continuously for these during Autopilot.
+No continuous Supabase polling during Autopilot.
 
 ---
 
 ## 16. Escalation Bundle
 
-When X cannot safely continue, store a concise supervisor handoff.
-
-Required information:
+When X cannot safely continue:
 
 ```yaml
 task_id: string
 revision: integer
-status: waiting | needs_review | failed
+status: waiting | failed
 
 escalation:
   required: true
@@ -809,20 +901,17 @@ current_diff_summary: object
 recommended_action: string | null
 ```
 
-Goal:
+If `gate_status=NEEDS_REVIEW`, persist `status=waiting` with an explicit `waiting_reason` such as `supervisor_review` or `owner_approval`.
 
-- supervisor must not restart investigation from zero
-- supervisor sees what X inspected, changed, tried, and proved
+Goal: supervisor sees what X inspected, changed, tried and proved without restarting investigation from zero.
 
-During unattended execution, do not automatically call cloud models for every escalation. Keep unresolved work and batch-review it when appropriate.
+During unattended execution, do not automatically call cloud models for every escalation; keep unresolved tasks for batched review.
 
 ---
 
 ## 17. Revision Chain
 
-A revised task must preserve ancestry.
-
-Example:
+Meaningful supervisor revisions create a new revision rather than overwriting history.
 
 ```text
 TASK-008 rev1
@@ -842,27 +931,27 @@ Persist:
 - `attempt`
 - `based_on_result_id`
 
-X should be able to see:
-
-- what failed previously
-- what was already tried
-- why supervisor changed the task
-- what new evidence/constraints now apply
-
-Do not overwrite history in place when a meaningful supervisor revision is created.
+X should see previous attempts, why they failed, what was tried, and what changed in the revised task.
 
 ---
 
 ## 18. Commit Policy
 
-Initial policy during bring-up:
+Bring-up:
 
 ```yaml
 commit_policy:
   mode: require_user_approval
 ```
 
-After all of the following are proven:
+Selected Autopilot tasks may switch to:
+
+```yaml
+commit_policy:
+  mode: after_tests
+```
+
+only after:
 
 - Core E2E PASS
 - serial multi-task smoke PASS
@@ -870,19 +959,11 @@ After all of the following are proven:
 - safety tests PASS
 - recovery stable
 
-then selected Autopilot tasks may use:
-
-```yaml
-commit_policy:
-  mode: after_tests
-```
-
-Even when local auto-commit is allowed, the following remain blocked automatically:
+Always blocked automatically:
 
 - push
 - merge main/stable
-- deploy
-- publish
+- deploy/publish
 - force push
 - destructive reset
 - delete important files/data
@@ -893,9 +974,7 @@ Prefer one task = one bounded local commit when auto-commit is enabled.
 
 ## 19. Learning and Project Knowledge
 
-X must learn **why**, not only patches.
-
-Desired learning loop:
+X learns **why**, not only patches.
 
 ```text
 Execute
@@ -904,7 +983,7 @@ Verify
   ↓
 Explain Root Cause
   ↓
-Record Lesson Candidate
+Lesson Candidate
   ↓
 Supervisor Review
   ↓
@@ -913,61 +992,34 @@ Validated Lesson
 Reuse
 ```
 
-A patch that happens to make symptoms disappear is not a validated lesson.
+A symptom disappearing is not a validated lesson.
 
-A reusable lesson requires:
+Reusable lesson requires:
 
-- user intent / expected behavior
+- expected behavior / user intent
 - actual failure
 - root cause
-- why the fix is correct
+- why fix is correct
 - evidence
-- tests that prove it
-- general reusable rule
+- proving tests
+- reusable rule
 - supervisor validation
 
-### v1 storage direction
-
-X does not need a large personal-assistant memory system.
-
-Useful long-term coding knowledge includes:
-
-- architecture
-- project conventions
-- fragile areas
-- validated root causes
-- validated fixes
-- test map
-- build commands
-- do-not-touch rules
-- checkpoints
-- lessons
-
-A separate X knowledge store may be added later.
-
-Do not mix long-term validated knowledge with noisy Hearth execution state unless deliberately referenced.
-
-`lesson_candidate` belongs in `x-result-v1` from the beginning, but full automated lesson promotion is **not** required for Core v1 E2E.
+`lesson_candidate` exists in x-result-v1 from the beginning, but automated lesson promotion and a separate X knowledge database are not Core E2E requirements.
 
 ---
 
 ## 20. X Consult
 
-X Consult is a high-cost/manual review path, not the default coding loop.
+X Consult is a high-cost/manual review path for important decisions, not routine implementation.
 
-Current direction:
+Direction:
 
-- Round 1: independent review
-- Round 2: cross-review
-- consolidate into:
-  - CONSENSUS
-  - ONLY
-  - DISAGREEMENT
-  - FINAL ACTIONS (P0/P1/P2)
+- Round 1 independent review
+- Round 2 cross-review
+- consolidate into CONSENSUS / ONLY / DISAGREEMENT / FINAL ACTIONS (P0/P1/P2)
 
-Use for important decisions, not routine implementation.
-
-When automated later, it may route through existing XGEN/LiteLLM infrastructure after a separate audit.
+Automated XGEN/LiteLLM routing is a later, separately audited capability.
 
 ---
 
@@ -975,19 +1027,17 @@ When automated later, it may route through existing XGEN/LiteLLM infrastructure 
 
 Do not remove Anti before LocalExecutor proves reliability.
 
-Migration phases:
-
-1. freeze validated Hearth baseline
+1. preserve/freeze validated Hearth baseline
 2. add Executor interface
 3. implement LocalExecutor v0.1
 4. Local becomes default; Anti remains fallback
-5. remove Anti only after evidence threshold is reached
+5. remove Anti only after evidence threshold
 
-Suggested removal threshold:
+Removal evidence target:
 
-- Local completion rate: `>= 80–90%` on representative real tasks
-- false completion: `0`
-- destructive change: `0`
+- representative local completion rate `>= 80–90%`
+- false completion `0`
+- destructive change `0`
 - unattended serial runs stable
 - recovery stable
 
@@ -995,9 +1045,7 @@ Suggested removal threshold:
 
 ## 22. Resource Policy for Current Mac
 
-The current machine must prioritize stability over throughput.
-
-Required v1 behavior:
+Prioritize stability over throughput:
 
 ```text
 one task at a time
@@ -1005,7 +1053,7 @@ one local coding model at a time
 no parallel coding workers
 ```
 
-Before starting the next task, Hearth may perform a lightweight local resource guard:
+Before next task, Hearth may check locally:
 
 - memory pressure acceptable
 - disk free space acceptable
@@ -1013,67 +1061,62 @@ Before starting the next task, Hearth may perform a lightweight local resource g
 - repository state safe
 - local model healthy
 
-If resource pressure is unsafe, pause rather than forcing another task.
+Pause rather than forcing another task under unsafe resource pressure.
 
-Do not make resource thresholds permanent constants before observing real runtime behavior on the machine.
+Do not hard-code permanent thresholds before collecting real runtime evidence.
 
 ---
 
 ## 23. Implementation Order
 
-Prioritize finish over features.
+### P0 — required before X is usable
 
-### P0 — must finish before calling X usable
-
-1. audit actual current source and branch state
-2. preserve/freeze validated Hearth runtime behavior
+1. audit actual branch/source/test state
+2. confirm validated Hearth lifecycle invariants and evidence; do not reimplement them
 3. Executor interface
 4. ModelAdapter
-5. `x-task-v1` parser + validator
+5. x-task-v1 parser/validator
 6. serial dispatcher (`MAX_ACTIVE_TASKS=1`)
-7. atomic claim + lease
-8. scoped Context / Repo Loader
+7. task execution claim + lease
+8. scoped Context/Repo Loader
 9. LocalExecutor inspect/diagnose/edit loop
 10. approved validation runner integration
 11. repair budget
 12. Decision Boundary
 13. deterministic Result Gate
-14. `x-result-v1`
-15. escalation bundle
-16. revision chain
-17. event-driven timing + watchdog
-18. safe checkpoint behavior
-19. Remote → Supabase → Hearth → X → Result E2E
-20. commit policy enforcement
-21. Autopilot `ON → DRAINING → OFF`
-22. owner-return (`"ผมมาแล้ว"`) flow
-23. serial unattended smoke
-24. final regression/build/diff validation
-25. freeze new stable baseline
+14. x-result-v1
+15. waiting-reason / continuation semantic separation
+16. escalation bundle
+17. revision chain
+18. event-driven timing/watchdog
+19. safe checkpoint
+20. Remote → Supabase → Hearth → X → Result Core E2E
+21. commit policy enforcement
+22. Autopilot `ON → DRAINING → OFF`
+23. owner-return (`"ผมมาแล้ว"`) flow
+24. serial unattended smoke
+25. final regression/build/diff validation
+26. freeze new stable baseline
 
-### Not on the critical path
+Not on critical path:
 
 - full long-term memory
 - automated lesson promotion
-- separate X Supabase knowledge database
+- separate X knowledge database
 - multi-agent
 - browser/computer use
-- mobile client
+- mobile
 - voice/JARVIS
 - parallel workers
 - broad UI redesign
 - multi-user expansion
-- multi-model benchmark suite
+- broad multi-model benchmark suite
 
 ---
 
 ## 24. Required E2E Proof
 
-X is not considered usable because unit tests pass alone.
-
-At minimum prove:
-
-### Case A — successful coding task
+### A — successful coding task
 
 ```text
 Remote
@@ -1082,13 +1125,13 @@ x-task-v1
   ↓
 Supabase queued
   ↓
-Hearth claim
+Hearth task claim
   ↓
 X inspects real repo
   ↓
 X edits real source
   ↓
-required validation runs
+required validation
   ↓
 repair if required
   ↓
@@ -1101,30 +1144,28 @@ completed
 Remote sees result
 ```
 
-### Case B — unresolved task does not block queue
+### B — unresolved task does not block queue
 
 ```text
 Task A → completed
-Task B → needs_review / waiting
+Task B → waiting + waiting_reason=supervisor_review
 Task C → completed
 ```
 
-Task B must not prevent independent Task C from running.
+### C — owner-only action
 
-### Case C — owner-only action
+Push/deploy/destructive action stops for owner approval.
 
-Task requiring push/deploy/destructive action must stop and request owner approval.
+### D — hard timeout
 
-### Case D — hard timeout
+Hard timeout produces a safe checkpoint and deterministic state; it does not blindly kill work or lose evidence.
 
-Hard timeout must produce a safe checkpoint and deterministic state, not blindly kill work and lose evidence.
-
-### Case E — Autopilot drain
+### E — Autopilot drain
 
 ```text
 Autopilot ON
   ↓
-serial tasks execute
+serial tasks
   ↓
 OWNER_RETURNED / "ผมมาแล้ว"
   ↓
@@ -1136,57 +1177,82 @@ current task safe checkpoint
   ↓
 OFF
   ↓
-unresolved batch available for supervisor
+unresolved batch available
 ```
+
+### F — waiting semantic isolation
+
+Prove all three independently:
+
+1. durable worker still running → parent remains `running`, no review wait
+2. terminal durable job with pending continuation → reconciliation may resume exactly once
+3. X NEEDS_REVIEW → `waiting + waiting_reason=supervisor_review + pending_continuation=false` and must **not** enter durable continuation reconciliation
 
 ---
 
 ## 25. Definition of Done
 
-X Executor v1 is DONE only when all are true:
+X Executor v1 is DONE only when:
 
 - stable Hearth runtime behavior preserved
-- actual source audit completed
-- LocalExecutor can read/inspect scoped repository context
-- LocalExecutor can make bounded edits
-- required tests/build/typecheck can run through approved tools
+- baseline evidence linked and source audit completed
+- LocalExecutor reads scoped repository context
+- LocalExecutor makes bounded edits
+- required validation runs through approved tools
 - repair budget enforced
 - deterministic Result Gate works
+- x-result-v1 schema and mapping are enforced
 - false model-declared success is impossible without evidence
 - serial execution enforced
-- atomic claim prevents duplicate task execution
+- task execution claim prevents duplicate task execution
+- durable continuation claim remains independently correct
+- review waiting cannot trigger durable continuation
 - timing/watchdog works without Supabase polling loops
 - safe checkpoint works
-- escalation bundle persists useful evidence
+- escalation bundle contains useful evidence
 - revision chain works
-- Remote can submit and observe final result
+- Remote submits and observes final result
 - unresolved task does not halt independent queued work
 - owner-only actions remain blocked
 - Autopilot ON/DRAINING/OFF works after Core E2E
-- final regression suite passes
+- final regression passes
 - production build/typecheck passes
 - `git diff --check` passes
 - no stale owned processes remain
-- stable baseline is documented/frozen
+- new baseline documented/frozen
+
+Representative acceptance target after bring-up:
+
+- run 10 representative coding tasks
+- `>= 7/10` completed locally
+- unresolved tasks correctly escalated
+- false completion `0`
+- unintended destructive changes `0`
+- secret leakage `0`
+- restart/resume correct
+- every task produces diff + validation + result evidence
 
 ---
 
 ## 26. Implementation Guardrails for Agents
 
-When Anti, Codex, Claude Code, Sol, Astra, or another coding agent implements this spec:
+When Anti, Codex, Claude Code, Sol, Astra or another agent implements this spec:
 
-1. **Audit actual source first.**
-2. **Do not restart architecture design from scratch.**
-3. **Do not rewrite Durable Job Runtime without new failing runtime evidence.**
-4. **Prefer adapters and narrow interfaces over invasive rewrites.**
-5. **Keep changes scoped and reversible.**
-6. **Run targeted tests after each bounded phase.**
-7. **Run broader regression before declaring a phase complete.**
-8. **Do not claim a test/build ran unless it actually ran.**
-9. **Distinguish pre-existing failures from introduced failures.**
-10. **Do not merge to main merely to begin X work.**
-11. **Do not push/deploy/delete unless explicitly approved.**
-12. **Use runtime evidence to resolve uncertainty.**
+1. audit actual source first
+2. do not restart architecture design from scratch
+3. do not rewrite Durable Job Runtime without new failing runtime evidence
+4. treat `docs/STABLE_BASELINE.md` as the baseline evidence index and inspect actual tests/source for any detailed invariant being claimed
+5. keep task execution claim and durable continuation claim separate
+6. never use bare `status=waiting` as a continuation trigger
+7. prefer adapters/narrow interfaces over invasive rewrites
+8. keep changes scoped and reversible
+9. run targeted tests after each bounded phase
+10. run broader regression before declaring a phase complete
+11. never claim a test/build ran unless it actually ran
+12. distinguish pre-existing failures from introduced failures
+13. do not merge to main merely to begin X work
+14. do not push/deploy/delete unless explicitly approved
+15. use runtime evidence to resolve uncertainty
 
 If this document conflicts with proven current runtime behavior, stop, record the mismatch and evidence, and request a decision before modifying stable architecture.
 
@@ -1194,16 +1260,14 @@ If this document conflicts with proven current runtime behavior, stop, record th
 
 ## 27. Final Principle
 
-The system is successful when the user can hand over a queue of coding tasks, leave the machine unattended, and return to:
+The system succeeds when the user can hand over a queue of coding tasks, leave the machine unattended, and return to:
 
 - completed tasks with real test evidence
 - bounded local commits when policy allows
-- unresolved tasks preserved with useful diagnostic evidence
+- unresolved tasks preserved with useful evidence
 - no silent destructive actions
 - no false completion
 - no need for continuous cloud-model supervision
-
-The intended steady-state workflow is:
 
 ```text
 User sets goal
