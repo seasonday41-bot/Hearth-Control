@@ -32,6 +32,7 @@ const MAX_EVENT_TEXT_LENGTH = 1000;
 
 // In-memory Task Registry (V1 lifecycle: valid for this process lifetime)
 export const taskRegistry = new Map();
+const taskStopPromises = new Map();
 
 let globalTaskStore = null;
 
@@ -1585,6 +1586,7 @@ export const startAntigravityTask = async ({
 
           const handleParsedEvent = (event) => {
             if (!event || typeof event !== 'object') return;
+            if (task.stopRequestedAt) return;
 
             if (isStreamInterruptionEvent(event, { task })) {
               const msg = extractInterruptionMessage(event);
@@ -2238,6 +2240,111 @@ export const getAntigravityTask = (taskId) => {
 export const getAuthoritativeAntigravityTask = (taskId) =>
   taskRegistry.get(taskId) || (globalTaskStore ? globalTaskStore.getTask(taskId) : null);
 
+const stopError = (code, message) => Object.assign(new Error(message), { code });
+const childHasExited = (child) => Number.isInteger(child?.exitCode) || typeof child?.signalCode === 'string';
+
+/**
+ * Requests cancellation through the existing Antigravity and JobManager owners.
+ * A cancelled status or a sent SIGTERM is not, by itself, proof of process exit.
+ */
+export const stopAntigravityTask = (taskId, { verificationTimeoutMs = 10000 } = {}) => {
+  if (typeof taskId !== 'string' || !taskId.trim()) {
+    return Promise.reject(stopError('NOT_FOUND', 'Antigravity task ID is required.'));
+  }
+  if (taskStopPromises.has(taskId)) return taskStopPromises.get(taskId);
+
+  const operation = (async () => {
+    const liveTask = taskRegistry.get(taskId);
+    const task = liveTask || globalTaskStore?.getTask(taskId);
+    if (!task) throw stopError('NOT_FOUND', `Antigravity task '${taskId}' was not found.`);
+
+    const manager = getJobManager();
+    const linkedIds = new Set([task.jobId, ...(task.jobIds || [])].filter(Boolean));
+    const jobs = manager.listJobs({ taskId });
+    for (const job of jobs) linkedIds.add(job.id);
+    const linkedJobs = [...linkedIds].map((id) => manager.getJob(id));
+    const unverifiableJob = linkedJobs.some((job) => !job || job.taskId !== taskId ||
+      job.status === 'recovery_required' ||
+      (['running', 'queued', 'cancelled'].includes(job.status) &&
+        !manager.children.has(job.id) && !manager.isJobProcessStopped(job.id)));
+    if (unverifiableJob) throw stopError('STOP_UNVERIFIED', `Owned job termination cannot be verified for task '${taskId}'.`);
+
+    const child = liveTask?.child || null;
+    if (['done', 'error'].includes(task.status)) {
+      if (!child || childHasExited(child)) {
+        if (linkedJobs.every((job) => manager.isJobProcessStopped(job.id))) return;
+      }
+      throw stopError('STOP_UNVERIFIED', `Task '${taskId}' is terminal but an owned process has not been verified stopped.`);
+    }
+    if (!liveTask && ['starting', 'running', 'recovery_required'].includes(task.status)) {
+      throw stopError('STOP_UNVERIFIED', `Task '${taskId}' has no live controller owner after restart.`);
+    }
+    if (!child && !['disconnected', 'exited', 'closed'].includes(task.controllerState)) {
+      throw stopError('STOP_UNVERIFIED', `Task '${taskId}' has no verifiable controller process.`);
+    }
+
+    const persist = () => {
+      task.updatedAt = new Date().toISOString();
+      if (globalTaskStore) globalTaskStore.saveTask(task);
+      emitTaskTransition(task);
+    };
+    task.intentionalCancel = true;
+    task.stopRequestedAt ||= new Date().toISOString();
+    task.pendingContinuation = false;
+    task.status = 'recovery_required';
+    task.error = 'Stop requested; owned process termination has not yet been verified.';
+    persist();
+
+    // A running continuation must lose its claim before its old attempt can
+    // persist a final response. The stop marker also blocks future claims.
+    if (task.continuationState === 'in_progress' && task.continuationAttemptId) {
+      const fenced = globalTaskStore?.finishContinuation({
+        taskId, jobId: task.continuationJobId, attemptId: task.continuationAttemptId,
+        state: 'failed', error: 'Explicit stop requested by Hearth.',
+      });
+      if (!fenced) throw stopError('STOP_UNVERIFIED', `Continuation ownership could not be fenced for task '${taskId}'.`);
+      Object.assign(task, fenced, { status: 'recovery_required', stopRequestedAt: task.stopRequestedAt });
+      persist();
+    }
+
+    if (typeof liveTask?.cancel === 'function') liveTask.cancel();
+    else if (child && !childHasExited(child)) {
+      throw stopError('STOP_UNVERIFIED', `Task '${taskId}' has no owned controller cancellation method.`);
+    }
+    // The run cleanup already cancels linked jobs. This also covers resumed
+    // tasks, whose ordinary cleanup deliberately does not own durable jobs.
+    for (const job of linkedJobs) {
+      if (['running', 'queued'].includes(job.status)) manager.cancelJob(job.id, 'Explicit Hearth task stop');
+    }
+
+    const stopped = () => (!child || childHasExited(child)) &&
+      linkedJobs.every((job) => manager.isJobProcessStopped(job.id));
+    if (!stopped()) {
+      const limit = Number.isFinite(verificationTimeoutMs) && verificationTimeoutMs > 0 ? verificationTimeoutMs : 10000;
+      const verified = await new Promise((resolve) => {
+        const interval = setInterval(() => {
+          if (stopped()) { clearInterval(interval); clearTimeout(timer); resolve(true); }
+        }, 25);
+        const timer = setTimeout(() => { clearInterval(interval); resolve(stopped()); }, limit);
+      });
+      if (!verified) throw stopError('STOP_UNVERIFIED', `Task '${taskId}' stop was requested but process exit could not be verified.`);
+    }
+
+    task.status = 'error';
+    task.error = 'Stopped by Hearth; owned execution resources verified stopped.';
+    task.completion = null;
+    persist();
+  })().catch((err) => {
+    if (err?.code === 'NOT_FOUND' || err?.code === 'STOP_UNVERIFIED') throw err;
+    throw stopError('STOP_UNVERIFIED', `Task '${taskId}' stop could not be verified: ${redactSecrets(err?.message || String(err))}`);
+  });
+  taskStopPromises.set(taskId, operation);
+  void operation.finally(() => {
+    if (taskStopPromises.get(taskId) === operation) taskStopPromises.delete(taskId);
+  }).catch(() => {});
+  return operation;
+};
+
 /**
  * Sends a follow-up message to an existing task conversation.
  * @param {{ taskId: string, message: string, runner?: typeof defaultRunner, customAgentApiPath?: string, customAgyPath?: string }} params
@@ -2625,6 +2732,12 @@ export const resumeAntigravityTask = async ({
     task.cancel = () => {
       task.intentionalCancel = true;
       if (task.cleanup) task.cleanup();
+      // Explicit cancellation owns durable jobs in both run and resume paths.
+      // Ordinary resume cleanup above remains provider-only on disconnect.
+      const ids = task.jobIds || (task.jobId ? [task.jobId] : []);
+      for (const id of ids) {
+        try { getJobManager().cancelJob(id, 'Task cancellation'); } catch {}
+      }
     };
 
     // Overall execution watchdog (resets on active streaming / progress / background heartbeats)
@@ -2819,6 +2932,7 @@ export const resumeAntigravityTask = async ({
 
     const handleParsedEvent = (event) => {
       if (!event || typeof event !== 'object') return;
+      if (task.stopRequestedAt) return;
 
       if (isStreamInterruptionEvent(event, { task })) {
         const msg = extractInterruptionMessage(event);
@@ -3338,7 +3452,7 @@ export const createTaskContinuationRunner = ({
     if (!job?.id || !job.taskId || !taskStore) return null;
     const taskId = job.taskId;
     const status = evidence?.status || job.status;
-    if (!['completed', 'error', 'cancelled'].includes(status)) return null;
+    if (!['completed', 'error'].includes(status)) return null;
     const jobEvidence = {
       ...(jobManager?.getJobResult?.(job.id) || {}),
       ...(evidence || {}),
@@ -3472,10 +3586,11 @@ export const reconcileDurableContinuations = async ({ taskStore, jobManager, con
   const pending = [];
   for (const task of taskStore.listTasks()) {
     if (['done', 'error'].includes(task.status)) continue;
+    if (task.stopRequestedAt) continue;
     const jobIds = Array.from(new Set([task.jobId, ...(task.jobIds || [])].filter(Boolean)));
     for (const jobId of jobIds) {
       const job = jobManager.getJob(jobId);
-      if (!job || job.taskId !== task.taskId || !['completed', 'error', 'cancelled'].includes(job.status)) continue;
+      if (!job || job.taskId !== task.taskId || !['completed', 'error'].includes(job.status)) continue;
       if (task.continuationJobId === jobId && task.continuationState === 'completed') continue;
       const evidence = jobManager.getJobResult(jobId);
       if (!evidence) continue;

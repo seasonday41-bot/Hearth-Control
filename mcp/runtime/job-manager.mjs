@@ -598,6 +598,15 @@ export class JobManager extends EventEmitter {
     return true;
   }
 
+  /** A cancelled status alone is not proof that its owned process exited. */
+  isJobProcessStopped(jobId) {
+    const job = this.getJob(jobId);
+    if (!job || !['completed', 'error', 'cancelled'].includes(job.status)) return false;
+    const child = this.children.get(jobId);
+    if (child) return Number.isInteger(child.exitCode) || typeof child.signalCode === 'string';
+    return Boolean(job.completedAt);
+  }
+
   /**
    * Handles child process termination exactly once.
    * Captures evidence, cleans up resources, emits job_completed, and optionally
@@ -702,7 +711,7 @@ export class JobManager extends EventEmitter {
 
         // Trigger reasoning continuation if available
         let continued = false;
-        if (!this.continuationRunner && task.pendingContinuation && typeof task.continueSession === 'function') {
+        if (job.status !== 'cancelled' && !this.continuationRunner && task.pendingContinuation && typeof task.continueSession === 'function') {
           const continuePrompt = [
             'The durable background job has completed.',
             `Job ID: ${job.id}`,
@@ -724,7 +733,7 @@ export class JobManager extends EventEmitter {
           }
         }
 
-        if (!continued && typeof this.continuationRunner === 'function') {
+        if (job.status !== 'cancelled' && !continued && typeof this.continuationRunner === 'function') {
           void Promise.resolve().then(() => this.continuationRunner({ task, job, evidence }))
             .catch((continuationErr) => {
               console.error(`[JobManager] Continuation runner error for task ${job.taskId}:`, redactSecrets(continuationErr?.message || String(continuationErr)));
@@ -734,7 +743,7 @@ export class JobManager extends EventEmitter {
     }
 
     // Trigger parent task continuation handler if registered
-    if (job.taskId && this.taskContinuationHandlers.has(job.taskId)) {
+    if (job.status !== 'cancelled' && job.taskId && this.taskContinuationHandlers.has(job.taskId)) {
       const handler = this.taskContinuationHandlers.get(job.taskId);
       if (typeof handler.onCompleted === 'function') {
         try {

@@ -148,6 +148,7 @@ export const sanitizeTaskForPersistence = (raw) => {
     jobIds,
     durableJobEvidence,
     pendingContinuation: Boolean(raw.pendingContinuation),
+    stopRequestedAt: typeof raw.stopRequestedAt === 'string' ? raw.stopRequestedAt : null,
     controllerState: typeof raw.controllerState === 'string' ? raw.controllerState : null,
     continuationJobId: typeof raw.continuationJobId === 'string' ? raw.continuationJobId : null,
     continuationState: ['in_progress', 'completed', 'failed'].includes(raw.continuationState) ? raw.continuationState : null,
@@ -392,7 +393,7 @@ export class TaskStore {
     return this._withContinuationTransaction((db) => {
       this.load();
       const task = this.getTask(taskId);
-      if (!task || !task.conversationId || ['done', 'error'].includes(task.status)) return null;
+      if (!task || !task.conversationId || task.stopRequestedAt || ['done', 'error'].includes(task.status)) return null;
       const taskLink = task.jobId === jobId || task.jobIds?.includes(jobId);
       const evidenceLink = evidence?.taskId === taskId && evidence?.jobId === jobId;
       if (!taskLink && (task.jobId || task.jobIds?.length || !evidenceLink)) return null;
