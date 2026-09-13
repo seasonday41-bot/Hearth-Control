@@ -165,3 +165,8 @@ export const LOCAL_SKILL_TOOLS = Object.freeze([
 ]);
 
 export const createReadOnlyToolGateway = (options = {}) => new ReadOnlyToolGateway(options);
+
+// Reused by mcp/x/context-loader.mjs as the path-based half of its Secret
+// Guard, so a secret-shaped filename is blocked identically everywhere in
+// the app rather than re-implemented with a second, possibly-diverging list.
+export const isProtectedPath = isProtected;
