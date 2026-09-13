@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('controlApp', {
   localChatSend: (request) => ipcRenderer.invoke('local-chat:send', request),
   localChatStreamStart: (request) => ipcRenderer.send('local-chat:stream-start', request),
   localChatStreamStop: (requestId) => ipcRenderer.send('local-chat:stream-stop', requestId),
+  localChatTestApproval: (requestId, approved) => ipcRenderer.send('local-chat:test-approval-response', { requestId, approved }),
   onLocalChatStream: (callback) => {
     const events = ['chunk', 'done', 'error', 'activity'];
     const listeners = events.map((kind) => {

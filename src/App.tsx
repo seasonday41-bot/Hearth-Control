@@ -121,7 +121,8 @@ export default function App() {
   const [chatElapsedMs, setChatElapsedMs] = useState(0);
   const [chatFollowOutput, setChatFollowOutput] = useState(true);
   const [chatExpandedCode, setChatExpandedCode] = useState<{ code: string; language: string } | null>(null);
-  const [chatActivity, setChatActivity] = useState<Array<{ type: string; skill: string; elapsedMs?: number; resultCount?: number; stage?: string; relativePath?: string }>>([]);
+  const [chatActivity, setChatActivity] = useState<Array<{ type: string; skill: string; elapsedMs?: number; resultCount?: number; stage?: string; relativePath?: string; profile?: string; label?: string; timeoutMs?: number; pid?: number | null; status?: string; exitCode?: number | null; passedCount?: number; testCount?: number; outputTruncated?: boolean; processStillRunning?: boolean }>>([]);
+  const [chatTestApproval, setChatTestApproval] = useState<{ requestId: string; profile: string; label: string; timeoutMs: number } | null>(null);
   const [showChatContext, setShowChatContext] = useState(false);
   const [chatContext, setChatContext] = useState<any>(null);
   const [chatContextLoading, setChatContextLoading] = useState(false);
@@ -272,7 +273,17 @@ export default function App() {
   useEffect(() => window.controlApp.onLocalChatStream((event) => {
     if (!event.requestId || event.requestId !== chatRequestIdRef.current) return;
     if (event.type === 'activity' && event.activity) {
-      setChatActivity((current) => [...current, event.activity!]);
+      if (event.activity.type === 'test_approval_requested' && event.activity.profile && event.activity.label && event.activity.timeoutMs) {
+        const approval = { ...event.activity, elapsedMs: Math.max(0, Date.now() - chatStreamStartedRef.current) };
+        setChatTestApproval({ requestId: event.requestId, profile: event.activity.profile, label: event.activity.label, timeoutMs: event.activity.timeoutMs });
+        setChatActivity((current) => [...current, approval]);
+      }
+      if (['test_approval_cancelled', 'test_running', 'test_finished'].includes(event.activity.type)) setChatTestApproval(null);
+      if (event.activity.type === 'test_progress') setChatActivity((current) => current.map((item) => item.type === 'test_running' && item.profile === event.activity!.profile ? { ...item, elapsedMs: event.activity!.elapsedMs } : item));
+      else if (event.activity.type === 'test_running') setChatActivity((current) => [...current.filter((item) => item.type !== 'test_approval_requested' || item.profile !== event.activity!.profile), event.activity!]);
+      else if (event.activity.type === 'test_finished') setChatActivity((current) => current.map((item) => item.type === 'test_running' && item.profile === event.activity!.profile ? event.activity! : item));
+      else if (event.activity.type === 'test_approval_cancelled') setChatActivity((current) => current.map((item) => item.type === 'test_approval_requested' && item.profile === event.activity!.profile ? event.activity! : item));
+      else setChatActivity((current) => [...current, event.activity!]);
       return;
     }
     if (event.type === 'chunk' && event.content) {
@@ -283,7 +294,8 @@ export default function App() {
       const result = event.result || { ok: false, error: { message: 'Provider stream failed' } };
       setChatBusy(false);
       setChatStreaming(false);
-      setChatElapsedMs(result.elapsedMs || (Date.now() - chatStreamStartedRef.current));
+      setChatTestApproval(null);
+      setChatElapsedMs(Number.isFinite(result.elapsedMs) ? result.elapsedMs : Math.max(0, Date.now() - chatStreamStartedRef.current));
       if (result.response) setChatStreamText(result.response);
       setChatResult(result);
       if (!result.ok) setChatError(result.error?.code === 'CANCELLED' ? 'Generation stopped.' : (result.error?.message || 'Provider stream failed'));
@@ -293,7 +305,15 @@ export default function App() {
 
   useEffect(() => {
     if (!chatStreaming) return;
-    const timer = window.setInterval(() => setChatElapsedMs(Date.now() - chatStreamStartedRef.current), 250);
+    const requestId = chatRequestIdRef.current;
+    const requestStartedAt = chatStreamStartedRef.current;
+    const timer = window.setInterval(() => {
+      if (requestId && chatRequestIdRef.current === requestId) {
+        const elapsed = Math.max(0, Date.now() - requestStartedAt);
+        setChatElapsedMs(elapsed);
+        setChatActivity((current) => current.map((item) => item.type === 'test_approval_requested' ? { ...item, elapsedMs: elapsed } : item));
+      }
+    }, 250);
     return () => window.clearInterval(timer);
   }, [chatStreaming]);
 
@@ -547,6 +567,7 @@ export default function App() {
     setChatError('');
     setChatStreamText('');
     setChatActivity([]);
+    setChatTestApproval(null);
     setChatElapsedMs(0);
     setChatFollowOutput(true);
     chatStreamStartedRef.current = Date.now();
@@ -562,13 +583,14 @@ export default function App() {
       if (!result?.ok) setChatError(result?.error?.message || 'Provider request failed');
       else setChatResult(result);
       if (result?.response) setChatStreamText(result.response);
-      setChatElapsedMs(result?.elapsedMs || (Date.now() - chatStreamStartedRef.current));
+      setChatElapsedMs(Number.isFinite(result?.elapsedMs) ? result.elapsedMs : Math.max(0, Date.now() - chatStreamStartedRef.current));
     } catch (error: any) { setChatError(error?.message || 'Provider request failed'); }
     finally { setChatBusy(false); }
   };
 
   const handleLocalChatStop = () => {
     const requestId = chatRequestIdRef.current;
+    setChatTestApproval(null);
     if (requestId) window.controlApp.localChatStreamStop(requestId);
   };
 
@@ -942,8 +964,9 @@ export default function App() {
                 {chatStreaming ? <button type="button" className="local-chat-stop-button" onClick={handleLocalChatStop}>Stop</button> : <button type="button" className="run-task-button" disabled={chatBusy || !chatPrompt.trim() || (chatProvider === 'local' && !chatHealth?.ok)} onClick={() => void handleLocalChatSend()}>{chatBusy ? 'Sending…' : 'Send'}</button>}
               </div>
               {chatProvider === 'local' && <label className="local-chat-long-response"><input type="checkbox" checked={chatLongResponse} onChange={(event) => setChatLongResponse(event.target.checked)} /> Long response</label>}
-              {chatStreaming && <div className="local-chat-generating" aria-live="polite">Generating… {Math.round(chatElapsedMs / 1000)}s</div>}
-              {chatActivity.length > 0 && <section className="local-chat-activity" aria-label="Local AI activity"><strong>{chatStreaming ? 'Working' : 'Activity'}</strong>{chatActivity.map((item, index) => <div key={`${item.skill}-${index}`} className="local-chat-activity-row"><span>{item.type === 'skill_completed' || item.type === 'evidence_complete' ? '✓' : item.type === 'skill_failed' || item.type === 'evidence_incomplete' ? '!' : '●'}</span><span>{item.type === 'evidence_complete' ? 'Evidence trace complete' : item.type === 'evidence_incomplete' ? 'Evidence trace incomplete' : item.type === 'evidence_progress' ? `${item.stage || 'SOURCE'} · ${item.relativePath || item.skill}` : item.type === 'skill_started' ? `Running ${item.skill}` : `${item.skill}${item.resultCount === undefined ? '' : ` · ${item.resultCount} results`}`}</span></div>)}</section>}
+              {chatStreaming && <div className="local-chat-generating" aria-live="polite">{chatTestApproval ? 'Waiting for test approval' : chatActivity.some((item) => item.type === 'test_running') ? 'Running test' : 'Generating…'} · {Math.round(chatElapsedMs / 1000)}s</div>}
+              {chatTestApproval && <section className="local-chat-test-confirmation" aria-label="Run test confirmation"><div><strong>Run test?</strong><p>{chatTestApproval.label}</p><small>Profile: {chatTestApproval.profile} · Timeout: {Math.round(chatTestApproval.timeoutMs / 1000)}s</small></div><div className="local-chat-test-confirmation-actions"><button type="button" onClick={() => { window.controlApp.localChatTestApproval(chatTestApproval.requestId, false); setChatTestApproval(null); }}>Cancel</button><button type="button" onClick={() => { window.controlApp.localChatTestApproval(chatTestApproval.requestId, true); setChatTestApproval(null); }}>Run Test</button></div></section>}
+              {chatActivity.length > 0 && <section className="local-chat-activity" aria-label="Local AI activity"><strong>{chatStreaming ? 'Working' : 'Activity'}</strong>{chatActivity.map((item, index) => <div key={`${item.skill}-${index}`} className="local-chat-activity-row"><span>{item.type === 'skill_completed' || item.type === 'evidence_complete' || item.type === 'test_finished' && item.status === 'passed' ? '✓' : item.type === 'skill_failed' || item.type === 'evidence_incomplete' || item.type === 'test_finished' && item.status !== 'passed' ? '!' : '●'}</span><span>{item.type === 'evidence_complete' ? 'Evidence trace complete' : item.type === 'evidence_incomplete' ? 'Evidence trace incomplete' : item.type === 'evidence_progress' ? `${item.stage || 'SOURCE'} · ${item.relativePath || item.skill}` : item.type === 'test_approval_requested' ? `Waiting for approval · ${item.label} · ${Math.round((item.elapsedMs || 0) / 1000)}s` : item.type === 'test_approval_cancelled' ? `Test not run · ${item.label}` : item.type === 'test_running' ? `Running ${item.label} · PID ${item.pid ?? 'pending'} · ${Math.round((item.elapsedMs || 0) / 1000)}s` : item.type === 'test_finished' ? `${item.label} ${item.status}${item.passedCount === undefined || item.testCount === undefined ? '' : ` · ${item.passedCount}/${item.testCount}`}${['cancelled', 'timed_out'].includes(item.status || '') || item.exitCode === null || item.exitCode === undefined ? '' : ` · exit ${item.exitCode}`}${item.processStillRunning ? ' · manual review required' : ''}` : item.type === 'skill_started' ? `Running ${item.skill}` : `${item.skill}${item.resultCount === undefined ? '' : ` · ${item.resultCount} results`}`}</span></div>)}</section>}
               {chatError && <div className="local-chat-error" role="alert">{chatError}</div>}
               {(chatStreamText || chatResult) && <section className="local-chat-result" aria-live="polite"><div className="local-chat-result-meta"><span>{chatResult?.provider || 'ollama'}</span><span>{chatResult?.model || chatModel}</span><span>{chatProvider === 'local' ? chatProfile.toUpperCase() : 'EXTERNAL'}</span><span>{chatStreaming ? `${Math.round(chatElapsedMs / 1000)}s` : `${chatResult?.elapsedMs || chatElapsedMs} ms`}</span></div><div ref={chatResponseRef} className="local-chat-response-viewer" onScroll={handleChatResponseScroll}><LocalChatResponse text={chatStreamText || chatResult?.response || ''} onExpand={(code, language) => setChatExpandedCode({ code, language })} /></div>{!chatFollowOutput && chatStreaming && <button type="button" className="local-chat-bottom-button" onClick={() => { setChatFollowOutput(true); if (chatResponseRef.current) chatResponseRef.current.scrollTop = chatResponseRef.current.scrollHeight; }}>↓ Bottom</button>}{chatResult?.doneReason === 'length' && <small className="local-chat-output-warning">Response reached the output limit.</small>}</section>}
               {showChatContext && <section className="local-chat-context-inspector" aria-label="Local AI context"><header><strong>Context supplied to Local AI</strong><button type="button" onClick={() => setShowChatContext(false)}>Close</button></header>{chatContextLoading ? <p>Loading current context…</p> : chatContextError ? <p role="alert">{chatContextError}</p> : chatContext && <div><h3>Runtime</h3><pre>{chatContext.runtime}</pre><h3>Capabilities</h3><p><strong>Available:</strong> {chatContext.capabilities.available.join('; ')}</p><p><strong>Not available:</strong> {chatContext.capabilities.unavailable.join('; ')}</p><h3>Project</h3><pre>{chatContext.project}</pre><h3>Safety</h3><p>{chatContext.safety}</p><h3>Response Style</h3><p>{chatContext.responseStyle}</p></div>}</section>}

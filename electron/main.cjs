@@ -48,6 +48,8 @@ let bridgeState = {
 const taskNotifier = createTaskNotifier({ Notification, app });
 const taskMonitors = new Map();
 const localChatStreams = new Map();
+const localChatTestApprovals = new Map();
+let localChatTestRunner = null;
 let isStartingTask = false;
 let storageAuditWorker = null;
 let storageAuditItems = new Map();
@@ -542,14 +544,19 @@ app.whenReady().then(async () => {
     if (prior) prior.abort();
     const controller = new AbortController();
     localChatStreams.set(requestId, controller);
+    const onSenderDestroyed = () => controller.abort();
+    event.sender.once('destroyed', onSenderDestroyed);
     const startedAt = Date.now();
     try {
       const { createProviderSelection } = await importFromHere('../mcp/providers/selection.mjs');
       const { createLocalChatCaller } = await importFromHere('../mcp/providers/local-chat.mjs');
       const { createReadOnlyToolGateway } = await importFromHere('../mcp/skills/gateway.mjs');
+      const { createTestRunner } = await importFromHere('../mcp/skills/test-runner.mjs');
       const selection = createProviderSelection({ localProviderOptions: { model: request.model, profile: request.profile } });
       const caller = createLocalChatCaller({ selection });
       const gateway = settings.workspace ? createReadOnlyToolGateway({ workspace: settings.workspace, maxToolSteps: 6 }) : null;
+      if (settings.workspace && (!localChatTestRunner || localChatTestRunner.workspace !== settings.workspace && !localChatTestRunner.active)) localChatTestRunner = createTestRunner({ workspace: settings.workspace });
+      const testRunner = settings.workspace && localChatTestRunner?.workspace === settings.workspace ? localChatTestRunner : null;
       const result = await caller.stream({
         provider: 'local',
         messages: request.messages,
@@ -571,6 +578,21 @@ app.whenReady().then(async () => {
         gitCommit: null,
         gitState: null,
         gateway,
+        testRunner,
+        approveTest: (selected) => new Promise((resolve) => {
+          if (controller.signal.aborted || localChatStreams.get(requestId) !== controller || event.sender.isDestroyed()) return resolve(false);
+          const priorApproval = localChatTestApprovals.get(requestId);
+          if (priorApproval) priorApproval.respond(false);
+          const onAbort = () => respond(false);
+          const respond = (approved) => {
+            if (localChatTestApprovals.get(requestId)?.respond === respond) localChatTestApprovals.delete(requestId);
+            controller.signal.removeEventListener('abort', onAbort);
+            resolve(Boolean(approved) && !controller.signal.aborted);
+          };
+          localChatTestApprovals.set(requestId, { sender: event.sender, controller, respond });
+          controller.signal.addEventListener('abort', onAbort, { once: true });
+          if (controller.signal.aborted) respond(false);
+        }),
         localEndpoint: selection.localProvider?.baseUrl,
         signal: controller.signal,
         onChunk: async (content) => {
@@ -587,8 +609,14 @@ app.whenReady().then(async () => {
     } catch (error) {
       if (!event.sender.isDestroyed()) event.sender.send('local-chat:stream-error', { requestId, result: { ok: false, provider: 'ollama', error: { code: 'PROVIDER_ERROR', message: error?.message || 'Provider stream failed', status: null, retryable: false } } });
     } finally {
+      event.sender.removeListener('destroyed', onSenderDestroyed);
+      if (localChatTestApprovals.get(requestId)?.controller === controller) localChatTestApprovals.get(requestId)?.respond(false);
       if (localChatStreams.get(requestId) === controller) localChatStreams.delete(requestId);
     }
+  });
+  ipcMain.on('local-chat:test-approval-response', (event, { requestId, approved } = {}) => {
+    const pending = localChatTestApprovals.get(requestId);
+    if (pending?.sender === event.sender && typeof approved === 'boolean') pending.respond(approved);
   });
   ipcMain.on('local-chat:stream-stop', (_event, requestId) => {
     const controller = localChatStreams.get(requestId);
@@ -1267,6 +1295,7 @@ app.whenReady().then(async () => {
 });
 }
 app.on('before-quit', () => {
+  for (const controller of localChatStreams.values()) controller.abort();
   if (continuationRecoveryTimer) clearInterval(continuationRecoveryTimer);
   if (serverProcess) serverProcess.kill('SIGTERM');
   if (bridgeClientInstance) bridgeClientInstance.stopPolling();

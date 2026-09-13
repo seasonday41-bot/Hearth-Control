@@ -306,6 +306,15 @@ footer { color: var(--faint); display: flex; font-size: 8px; justify-content: sp
 .local-chat-activity strong { color: var(--faint); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
 .local-chat-activity-row { align-items: center; display: flex; font-size: 11px; gap: 8px; }
 .local-chat-activity-row span:first-child { color: var(--sage); width: 12px; }
+.local-chat-test-confirmation { align-items: center; background: var(--well); border: 1px solid var(--sage); border-radius: 10px; display: flex; flex-wrap: wrap; gap: 14px; justify-content: space-between; padding: 13px 15px; }
+.local-chat-test-confirmation strong { color: var(--text); font-size: 12px; }
+.local-chat-test-confirmation p { color: var(--text); font-size: 12px; margin: 5px 0 2px; }
+.local-chat-test-confirmation small { color: var(--muted); font-size: 10px; }
+.local-chat-test-confirmation-actions { display: flex; gap: 8px; }
+.local-chat-test-confirmation-actions button { background: transparent; border: 1px solid var(--line); border-radius: 8px; color: var(--text); cursor: pointer; font-size: 11px; padding: 8px 12px; }
+.local-chat-test-confirmation-actions button:last-child { background: var(--sage-pale); border-color: var(--sage); color: var(--sage-deep); font-weight: 700; }
+.local-chat-test-confirmation-actions button:hover { border-color: var(--sage-deep); }
+.local-chat-test-confirmation-actions button:focus-visible { outline: 2px solid var(--sage-deep); outline-offset: 2px; }
 .local-chat-controls { display: grid; grid-template-columns: 180px minmax(180px, 1fr) 150px; gap: 16px; align-items: end; }
 .local-chat-field { display: flex; flex-direction: column; gap: 7px; }
 .local-chat-field label { color: var(--faint); font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }

@@ -23,7 +23,13 @@ export class LocalChatCaller {
     const maxSteps = Math.max(0, Math.min(6, Number(gateway?.maxToolSteps || 0)));
     const prompt = [...messages].reverse().find((message) => message.role === 'user')?.content || '';
     const mode = groundingMode(prompt);
-    const tools = gateway && maxSteps > 0 && ['repo', 'ui', 'git'].includes(mode) ? LOCAL_SKILL_TOOLS : undefined;
+    if (mode === 'test' && /\b(?:rm|bash|zsh|sudo|npm|node|npx|python|curl)\b|(?:&&|\|\||[><])/i.test(prompt)) {
+      const response = 'Only approved Hearth test profiles can run. Arbitrary commands and Terminal access are unavailable.';
+      await request.onChunk?.(response);
+      return { ok: true, provider: 'ollama', response };
+    }
+    const tools = gateway && maxSteps > 0 && ['repo', 'ui', 'git', 'test'].includes(mode)
+      ? mode === 'test' && request.testRunner ? [...LOCAL_SKILL_TOOLS, TEST_RUN_TOOL] : LOCAL_SKILL_TOOLS : undefined;
     const facts = authoritativeLocalFacts(request);
     const productPacket = mode === 'product' ? createProductFactPacket(facts) : null;
     if (productPacket) {
@@ -38,13 +44,14 @@ export class LocalChatCaller {
     let claimRetry = false;
     const attemptedSearches = new Set();
     let emptySearches = 0;
+    let lastTestResult = null;
     const finish = async (result, response) => {
       if (needsGate && method === 'chatStream' && response) await request.onChunk?.(response);
       return { ...result, response, toolCalls: undefined };
     };
     const incomplete = async (result = {}) => {
       await request.onActivity?.({ type: 'evidence_incomplete', skill: 'evidence', resultCount: trace.records.length });
-      return finish({ ok: true, provider: 'ollama', ...result, toolLimitReached: steps >= maxSteps }, safeGroundingResponse(mode, facts, prompt));
+      return finish({ ok: true, provider: 'ollama', ...result, toolLimitReached: steps >= maxSteps }, mode === 'test' ? lastTestResult ? summarizeTestResult(lastTestResult) : 'No approved Test Runner profile covers this test yet.' : safeGroundingResponse(mode, facts, prompt));
     };
     while (true) {
       if (request.signal?.aborted) return { ok: false, provider: 'ollama', error: { code: 'CANCELLED', message: 'chat request was cancelled', status: null, retryable: false } };
@@ -52,6 +59,7 @@ export class LocalChatCaller {
       const result = await this.selection[method]({ ...request, messages, tools: steps < maxSteps ? tools : undefined, gateway: undefined, onActivity: undefined,
         onChunk: needsGate && method === 'chatStream' ? async (chunk) => { buffered += chunk; } : request.onChunk });
       if (!result?.ok) {
+        if (mode === 'test' && lastTestResult) return finish({ ok: true, provider: 'ollama' }, summarizeTestResult(lastTestResult));
         if (needsGate && result?.response) {
           const partial = result.response || buffered;
           const safePartial = mode === 'product' || ['repo', 'ui', 'git'].includes(mode) && !trace.check(partial).ok
@@ -74,6 +82,29 @@ export class LocalChatCaller {
             continue;
           }
           if (searchKey) attemptedSearches.add(searchKey);
+          if (name === 'test_run') {
+            if (mode !== 'test' || !request.testRunner || !tools.some((tool) => tool.function.name === 'test_run')) return finish({ ok: true, provider: 'ollama' }, 'No approved Test Runner profile covers this test yet.');
+            let selected;
+            try { selected = await request.testRunner?.validate(args); }
+            catch (error) {
+              const response = error?.code === 'PROFILE_NOT_APPROVED' ? 'No approved Test Runner profile covers this test yet.' : String(error?.message || 'Test profile rejected');
+              return finish({ ok: true, provider: 'ollama' }, response);
+            }
+            if (!selected) return finish({ ok: true, provider: 'ollama' }, 'No approved Test Runner profile covers this test yet.');
+            if (request.testRunner.active) return finish({ ok: true, provider: 'ollama' }, 'A Test Runner process is already active; wait for it to exit before starting another.');
+            await request.onActivity?.({ type: 'test_approval_requested', skill: 'test_run', profile: selected.id, label: selected.label, timeoutMs: selected.timeoutMs });
+            const approved = await request.approveTest?.(selected);
+            if (!approved || request.signal?.aborted) {
+              await request.onActivity?.({ type: 'test_approval_cancelled', skill: 'test_run', profile: selected.id, label: selected.label });
+              return finish({ ok: true, provider: 'ollama' }, 'Test not run; approval was cancelled.');
+            }
+            steps += 1;
+            try { lastTestResult = await request.testRunner.run(args, { signal: request.signal, onActivity: request.onActivity }); }
+            catch (error) { return finish({ ok: true, provider: 'ollama' }, `Test Runner error: ${String(error?.message || 'Unable to start the approved test')}`); }
+            if (lastTestResult.status === 'cancelled') return finish({ ok: true, provider: 'ollama' }, summarizeTestResult(lastTestResult));
+            messages.push({ role: 'tool', content: JSON.stringify({ ok: true, skill: 'test_run', result: lastTestResult }), tool_name: name });
+            continue;
+          }
           steps += 1;
           await request.onActivity?.({ type: 'skill_started', skill: name || 'unknown', step: steps });
           const startedAt = Date.now();
@@ -103,6 +134,7 @@ export class LocalChatCaller {
         }
         return finish(result, safeGroundingResponse(mode, facts, prompt));
       }
+      if (mode === 'test') return finish(result, lastTestResult ? groundedTestAnswer(answer, lastTestResult) : 'No approved Test Runner profile covers this test yet.');
       if (mode === 'repo' || mode === 'ui' || mode === 'git') {
         const validation = trace.check(answer);
         if (validation.ok) {
@@ -132,4 +164,5 @@ const withCompactContext = (request = {}) => request.provider === 'local' && Arr
 export const createLocalChatCaller = (options) => new LocalChatCaller(options);
 import { buildLocalContext } from '../context/builder.mjs';
 import { LOCAL_SKILL_TOOLS } from '../skills/gateway.mjs';
+import { TEST_RUN_TOOL, groundedTestAnswer, summarizeTestResult } from '../skills/test-runner.mjs';
 import { authoritativeLocalFacts, createEvidenceTrace, createProductFactPacket, groundingMode, renderProductFacts, safeGroundingResponse, validateProductClaims } from './grounding.mjs';

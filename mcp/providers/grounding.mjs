@@ -27,6 +27,7 @@ export const authoritativeLocalFacts = ({ version, buildId, model, profile, loca
 
 export const groundingMode = (prompt = '') => {
   const text = String(prompt);
+  if (/(?:รัน|ทดสอบ|\b(?:run|execute)\b)/i.test(text) && /(?:test|ทดสอบ|suite|regression|เช็ก|ตรวจ)/i.test(text)) return 'test';
   if (/(?:branch|working tree|git|commit|สาขา)/i.test(text) && /(?:what|am i on|อะไร|ไหน|status|สถานะ|clean|current|ตอนนี้|show|ดู)/i.test(text)) return 'git';
   if (/(?:inspect|search|find|ไฟล์ไหน|ดูโค้ด|หา logic|ค้น.*(?:ไฟล์|โค้ด)|source|code|repository|repo|where.*(?:file|logic|calculated|computed|implemented|defined|come from)|which (?:file|symbol|logic)|trace|ดูหน่อย)/i.test(text)) {
     return /(?:UI|display|render|output|summary|count|areas?|หน้าจอ|แสดง|จำนวน|นับ|คำนวณ|สรุป)/i.test(text) ? 'ui' : 'repo';
