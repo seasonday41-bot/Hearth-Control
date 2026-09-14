@@ -320,6 +320,7 @@ app.whenReady().then(async () => {
       createTaskContinuationRunner,
       reconcileDurableContinuations,
     } = await importFromHere('../mcp/executors/antigravity.mjs');
+    const { getProductionAntigravityClaimStore } = await importFromHere('../mcp/executors/antigravity-admission.mjs');
     const jobsPath = path.join(app.getPath('userData'), 'jobs.json');
     jobManager = new JobManager({ storagePath: jobsPath });
     jobManager.load();
@@ -354,6 +355,7 @@ app.whenReady().then(async () => {
       getBridgeState: () => bridgeState,
       sendEvent,
       monitorTaskTransition,
+      claimStore: getProductionAntigravityClaimStore(),
     });
     jobManager.setContinuationRunner(continuationRunner);
     const reconcileContinuations = () => {
@@ -370,9 +372,10 @@ app.whenReady().then(async () => {
     const { GoalStorage } = await importFromHere('../mcp/goals/storage.mjs');
     const { GoalRunner } = await importFromHere('../mcp/goals/runner.mjs');
     const antigravityExecutor = await importFromHere('../mcp/executors/antigravity.mjs');
+    const { getProductionAntigravityClaimStore } = await importFromHere('../mcp/executors/antigravity-admission.mjs');
     const goalsPath = path.join(app.getPath('userData'), 'goals.json');
     const goalStorage = new GoalStorage({ storagePath: goalsPath });
-    goalRunner = new GoalRunner({ storage: goalStorage, antigravityExecutor });
+    goalRunner = new GoalRunner({ storage: goalStorage, antigravityExecutor, claimStore: getProductionAntigravityClaimStore() });
   } catch (err) {
     console.error('Failed to initialize GoalRunner:', err);
   }
@@ -480,6 +483,7 @@ app.whenReady().then(async () => {
             return { ok: false, provider: 'external', error: { code: 'CONFIGURATION_ERROR', message: 'No workspace configured for the external provider', status: null, retryable: false } };
           }
           const { startAntigravityTask } = await importFromHere('../mcp/executors/antigravity.mjs');
+          const { getProductionAntigravityClaimStore } = await importFromHere('../mcp/executors/antigravity-admission.mjs');
           const prompt = externalMessages.map((message) => `${message.role || 'user'}: ${message.content || ''}`).join('\n');
           const result = await startAntigravityTask({
             workspace: settings.workspace,
@@ -489,6 +493,7 @@ app.whenReady().then(async () => {
             awaitCompletion: true,
             source: 'local',
             metadata: { experimentalLocalChat: true },
+            claimStore: getProductionAntigravityClaimStore(),
           });
           const completion = result.completion;
           if (!completion || completion.status !== 'completed') {
@@ -769,6 +774,7 @@ app.whenReady().then(async () => {
       throw new Error('Another task is already starting. Please wait.');
     }
     const { startAntigravityTask, hasRunningTask } = await importFromHere('../mcp/executors/antigravity.mjs');
+    const { getProductionAntigravityClaimStore } = await importFromHere('../mcp/executors/antigravity-admission.mjs');
     if (hasRunningTask && hasRunningTask()) {
       throw new Error('A task is already running. Please wait for it to complete or pause.');
     }
@@ -818,6 +824,7 @@ app.whenReady().then(async () => {
         title,
         userApproved: true,
         awaitCompletion: false,
+        claimStore: getProductionAntigravityClaimStore(),
       });
       void monitorTaskTransition(result.taskId);
       return result;
@@ -866,7 +873,8 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle('antigravity:resume', async (_event, taskId) => {
     const { resumeAntigravityTask, getAntigravityTask } = await importFromHere('../mcp/executors/antigravity.mjs');
-    const res = await resumeAntigravityTask({ taskId });
+    const { getProductionAntigravityClaimStore } = await importFromHere('../mcp/executors/antigravity-admission.mjs');
+    const res = await resumeAntigravityTask({ taskId, claimStore: getProductionAntigravityClaimStore() });
     const taskObj = getAntigravityTask(res.taskId) || res;
     if (taskObj.source === 'remote' && taskObj.remoteTaskId) {
       bridgeState.activeRemoteTaskId = taskObj.remoteTaskId;
@@ -1223,6 +1231,7 @@ app.whenReady().then(async () => {
 
         // 5. Spawn executor using existingTaskId
         const { startAntigravityTask } = await importFromHere('../mcp/executors/antigravity.mjs');
+        const { getProductionAntigravityClaimStore } = await importFromHere('../mcp/executors/antigravity-admission.mjs');
         const delegatedPrompt = requiresDurableJob && durableJob
           ? `[Hearth Durable Job Active]\nHearth has launched the authoritative background job (ID: ${durableJob.id}, PID: ${durableJob.pid}). Do NOT launch background processes or unmanaged shells via run_command. The durable job runs under Hearth ownership. Await completion or plan verification.\n\nTask Prompt:\n${task.prompt}`
           : task.prompt;
@@ -1241,6 +1250,7 @@ app.whenReady().then(async () => {
           jobIds: durableJob ? [durableJob.id] : [],
           metadata: task.metadata || {},
           verificationRequirements: task.verificationRequirements || (task.artifacts ? { requiredArtifacts: task.artifacts } : null),
+          claimStore: getProductionAntigravityClaimStore(),
         });
 
         const taskObj = getAntigravityTask(hearthTaskId) || startRes;

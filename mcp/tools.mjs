@@ -359,6 +359,7 @@ export const registerWorkspaceTools = (server, options) => {
         customAgyPath: options?.customAgyPath,
         customAgentApiPath: options?.customAgentApiPath,
         awaitCompletion: false,
+        claimStore: xRuntime.claimStore,
       });
       return text(JSON.stringify(result, null, 2));
     } catch (error) { return failure(error); }

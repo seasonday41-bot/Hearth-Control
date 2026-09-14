@@ -26,6 +26,12 @@ import {
   cancelJob as cancelDurableJobRuntime,
 } from '../runtime/job-manager.mjs';
 
+import {
+  acquireAntigravityAdmission,
+  releaseAntigravityAdmission,
+  hasAntigravityAdmission,
+} from './antigravity-admission.mjs';
+
 export const MAX_PAYLOAD_BYTES = 65536; // 64 KiB
 const MAX_RECENT_EVENTS = 100;
 const MAX_EVENT_TEXT_LENGTH = 1000;
@@ -752,6 +758,21 @@ export const hasRunningTask = () => {
   return false;
 };
 
+/** Per-process default owner id for the shared X/Antigravity admission claim. */
+const DEFAULT_ANTIGRAVITY_OWNER_ID = `antigravity-${process.pid}`;
+
+// Shared-admission fast path: whenever any task transitions, if this
+// process holds a shared execution-admission claim for it (see
+// antigravity-admission.mjs) and the task is no longer actively running
+// per the same authoritative predicate used everywhere else in this file,
+// release the claim immediately rather than waiting for the admission
+// module's own bounded safety-net poll. A no-op for every task that never
+// acquired a claim (i.e. every caller that does not pass `claimStore`).
+onTaskTransition((task) => {
+  if (!task?.taskId || !hasAntigravityAdmission(task.taskId)) return;
+  if (!isTaskActivelyRunning(task)) void releaseAntigravityAdmission(task.taskId);
+});
+
 /**
  * Secret redaction: strip tokens, passwords, bearer credentials, and API keys.
  * Ensures zero credential leakage in task registry and MCP responses.
@@ -1214,6 +1235,9 @@ export const startAntigravityTask = async ({
   jobId = null,
   jobIds = [],
   metadata = {},
+  claimStore = null,
+  ownerId = DEFAULT_ANTIGRAVITY_OWNER_ID,
+  leaseDurationMs,
 }) => {
   if (source === 'remote' && (!remoteTaskId || typeof remoteTaskId !== 'string' || !remoteTaskId.trim())) {
     throw new Error('Remote task must have a non-empty remoteTaskId.');
@@ -1260,13 +1284,35 @@ export const startAntigravityTask = async ({
     throw new Error('Antigravity CLI was not found. Install agy in ~/.local/bin and sign in once.');
   }
 
-  // 5. Initialize task in registry
+  // 4.5. Admission into the single shared X/Antigravity global execution
+  // slot (SQLite-backed, cross-process authoritative -- see
+  // antigravity-admission.mjs). A no-op when `claimStore` is not supplied
+  // (every existing caller/test that predates this feature). Everything
+  // from here through the end of this function runs inside the try/catch
+  // below, so any failure releases the claim before the error propagates
+  // -- but only if the task is no longer actually running (see that catch
+  // for why).
   const taskId = existingTaskId || crypto.randomUUID();
+  const admission = await acquireAntigravityAdmission({
+    claimStore, taskId, ownerId, leaseDurationMs,
+    isActive: (id) => isTaskActivelyRunning(id),
+    onOwnershipLost: (id) => stopAntigravityTask(id),
+  });
+  if (!admission.ok) {
+    throw new Error('Cannot start Antigravity task: the shared execution slot is currently held by another task (X or Antigravity). Try again once it completes.');
+  }
+
+  // Declared here (not `const` inside the try below) so the catch that
+  // closes this function -- a sibling block to the try, not a nested one --
+  // can still reach it.
+  let task;
+  try {
+  // 5. Initialize task in registry
   const existingStoredTask = (existingTaskId && globalTaskStore)
     ? globalTaskStore.getTask(existingTaskId)
     : taskRegistry.get(taskId);
   const now = new Date().toISOString();
-  const task = {
+  task = {
     taskId,
     conversationId: existingStoredTask?.conversationId || null,
     workspace,
@@ -1321,7 +1367,6 @@ export const startAntigravityTask = async ({
     ? undefined
     : `${JSON.stringify({ event: 'user', message: { content: buildAgyPrompt(workspace, prompt) } })}\n`;
 
-  try {
     if (!useLegacyAgentApi) {
       if (runner === defaultRunner || (typeof spawnFn === 'function' && spawnFn !== spawn)) {
         // Production execution: Spawn child process, stream stdout, resolve on init/startup
@@ -2138,9 +2183,16 @@ export const startAntigravityTask = async ({
       routeTransitions: task.routeTransitions,
     };
   } catch (error) {
+    const wasActivelyRunning = isTaskActivelyRunning(taskId);
+
     task.status = 'error';
     task.error = error.message;
     task.updatedAt = new Date().toISOString();
+
+    if (!wasActivelyRunning) {
+      await releaseAntigravityAdmission(taskId);
+    }
+
     throw error;
   }
 };
@@ -2519,6 +2571,9 @@ export const resumeAntigravityTask = async ({
   durableJobEvidence = null,
   continuationAttemptId = null,
   onContinuationChild = null,
+  claimStore = null,
+  ownerId = DEFAULT_ANTIGRAVITY_OWNER_ID,
+  leaseDurationMs,
 }) => {
   if (!taskId || typeof taskId !== 'string') {
     throw new Error('taskId is required to resume a task.');
@@ -2579,6 +2634,21 @@ export const resumeAntigravityTask = async ({
     task.isResuming = false;
     throw err;
   }
+
+  // Admission into the single shared X/Antigravity global execution slot --
+  // see the matching comment in startAntigravityTask. A no-op when
+  // `claimStore` is not supplied.
+  const admission = await acquireAntigravityAdmission({
+    claimStore, taskId, ownerId, leaseDurationMs,
+    isActive: (id) => isTaskActivelyRunning(id),
+    onOwnershipLost: (id) => stopAntigravityTask(id),
+  });
+  if (!admission.ok) {
+    task.isResuming = false;
+    throw new Error('Cannot resume Antigravity task: the shared execution slot is currently held by another task (X or Antigravity). Try again once it completes.');
+  }
+
+  try {
 
   task.status = 'starting';
   task.error = null;
@@ -3259,6 +3329,22 @@ export const resumeAntigravityTask = async ({
       safeResolve();
     });
   });
+
+  } catch (error) {
+    const wasActivelyRunning = isTaskActivelyRunning(taskId);
+
+    if (!wasActivelyRunning) {
+      task.status = 'error';
+      task.error = error.message;
+      task.updatedAt = new Date().toISOString();
+      syncTaskToStore(task);
+      emitTaskTransition(task);
+      await releaseAntigravityAdmission(taskId);
+    }
+
+    task.isResuming = false;
+    throw error;
+  }
 };
 
 /**
@@ -3447,6 +3533,8 @@ export const createTaskContinuationRunner = ({
   customAgyPath,
   runner,
   spawnFn,
+  claimStore = null,
+  ownerId,
 } = {}) => {
   return async ({ task, job, evidence } = {}) => {
     if (!job?.id || !job.taskId || !taskStore) return null;
@@ -3521,6 +3609,8 @@ export const createTaskContinuationRunner = ({
         if (customAgyPath) resumeOpts.customAgyPath = customAgyPath;
         if (runner) resumeOpts.runner = runner;
         if (spawnFn) resumeOpts.spawnFn = spawnFn;
+        if (claimStore) resumeOpts.claimStore = claimStore;
+        if (ownerId) resumeOpts.ownerId = ownerId;
         result = await resumeFn(resumeOpts);
       }
       if (typeof monitorFn === 'function') {

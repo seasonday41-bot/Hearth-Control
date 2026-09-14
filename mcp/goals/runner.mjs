@@ -24,6 +24,7 @@ export class GoalRunner {
     this.storage = storage;
     this.antigravityExecutor = options?.antigravityExecutor;
     this.jobManager = options?.jobManager || null;
+    this.claimStore = options?.claimStore || null;
     /** @type {string | null} */
     this.activeGoalId = null;
     /** @type {Set<string>} */
@@ -328,6 +329,7 @@ export class GoalRunner {
         title: `${goal.title} - ${step.title}`,
         runner: options.runner,
         customAgentApiPath: options.customAgentApiPath,
+        claimStore: this.claimStore,
       });
 
       // Poll until step reaches terminal state (done / waiting / error)
