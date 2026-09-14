@@ -147,14 +147,52 @@ export const registerWorkspaceTools = (server, options) => {
   // instance or the real per-user runtime path -- production callers never
   // set it, and instead get the lazy per-process singleton.
   const xRuntime = options.xRuntime ?? getProductionXRuntime();
-  // Attaches a no-op observer to `done` synchronously, in the same tick
+
+  const X_RUN_TERMINAL_EVENT_STATUSES = new Set(['completed', 'needs_review', 'failed']);
+
+  // Best-effort transport notification for a run whose terminal truth is
+  // ALREADY persisted -- `outcome.run` is exactly the row
+  // XRunStore.completeRunFenced()/failRunFenced() itself just wrote (see
+  // mcp/x/run-x-task.mjs's `done`). This function only ever reads that
+  // already-persisted row; it never writes to XRunStore, never retries
+  // persistence, and never changes `outcome`. `outcome.run` is null for
+  // every non-terminal-write outcome (cancelled, ownership_lost/uncertain,
+  // persistence_error, fence_rejected), so those are silently skipped by
+  // construction, not by a status-name allowlist alone. Any failure here
+  // (no IPC channel, a throwing `process.send`) is swallowed: a
+  // notification failure must never crash the MCP process, must never be
+  // mistaken for a persistence failure, and must never propagate back to
+  // `admitted.done`'s own (already-settled) resolution.
+  const emitXRunTerminalEvent = (outcome) => {
+    try {
+      const run = outcome?.run;
+      if (!run || !X_RUN_TERMINAL_EVENT_STATUSES.has(run.status)) return;
+      if (typeof process.send !== 'function') return;
+      process.send({
+        type: 'x_run_terminal',
+        runId: run.runId,
+        taskId: run.taskId,
+        status: run.status,
+        gateStatus: run.gateStatus,
+        hearthOutcome: run.hearthOutcome,
+        result: run.result,
+        error: run.error,
+      });
+    } catch {
+      // Best-effort notification only; never surfaces, never retried.
+    }
+  };
+  // Attaches an observer to `done` synchronously, in the same tick
   // `runXTask` returns -- `done` is documented to always resolve, never
   // reject, but this guarantees no window exists where it could be left
   // completely unattached (e.g. if the MCP caller disconnects) and become
-  // an unhandled rejection.
+  // an unhandled rejection. Persistence has already fully happened by the
+  // time this observer's callback runs (`done` cannot resolve until after
+  // its own completeRunFenced/failRunFenced call returns) -- this callback
+  // never persists anything itself, it only observes and notifies.
   const observeBackgroundCompletion = (admitted) => {
     if (admitted?.accepted && admitted.done && typeof admitted.done.then === 'function') {
-      admitted.done.then(() => {}, () => {});
+      admitted.done.then(emitXRunTerminalEvent, () => {});
     }
   };
 

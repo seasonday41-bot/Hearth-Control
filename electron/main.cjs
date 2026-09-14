@@ -254,6 +254,7 @@ const startServer = async ({ workspace, port }) => {
       sendEvent({ type: 'log', source: 'mcp', tone: 'success', message: `Local control server listening on 127.0.0.1:${selectedPort}` });
     }
     if (message?.type === 'approval') sendEvent(message);
+    if (message?.type === 'x_run_terminal') sendEvent(message);
   });
   serverProcess.once('exit', (code, signal) => {
     serverProcess = undefined;
