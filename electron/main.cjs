@@ -30,6 +30,9 @@ let goalRunner = null;
 let taskStore = null;
 let jobManager = null;
 let xQueueCoordinator = null;
+let xWakeupTimer = null;
+let xGetNextWakeupDeadline = null;
+let xReconcileRuntimeNow = null;
 let continuationRecoveryTimer = null;
 const localApprovals = new Map();
 let bridgeClientInstance = null;
@@ -163,6 +166,49 @@ const clearBridgeSession = () => {
   saveSettings({ bridgeSessionEncrypted: null, bridgeEnabled: false });
 };
 const sendEvent = (event) => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('server:event', event); };
+
+// Fast-restart X liveness: a single one-shot wakeup, never polling/setInterval.
+// Electron never inspects claim/run truth itself here -- it only ever reads
+// one persisted deadline (getNextXWakeupDeadline) and, on fire, re-runs the
+// exact same reconciliation production startup already performs
+// (reconcileXRuntimeNow), feeding any newly-interrupted runIds into the
+// already-existing XQueueCoordinator.onXRunTerminal(). Both function
+// references are populated once, inside the X startup block below; a call
+// to armXWakeup() before that (e.g. an early x_admission_hint) is a safe
+// no-op -- the startup block's own final arm call covers it.
+const armXWakeup = () => {
+  if (xWakeupTimer) { clearTimeout(xWakeupTimer); xWakeupTimer = null; }
+  if (!xGetNextWakeupDeadline) return;
+  let deadline;
+  try { deadline = xGetNextWakeupDeadline(); } catch (error) {
+    console.error('[Electron] X wakeup deadline lookup failed:', error);
+    return;
+  }
+  if (deadline == null) return;
+  xWakeupTimer = setTimeout(onXWakeupFire, Math.max(0, deadline - Date.now()));
+  xWakeupTimer.unref?.();
+};
+
+const onXWakeupFire = () => {
+  xWakeupTimer = null;
+  try {
+    const runIds = xReconcileRuntimeNow ? xReconcileRuntimeNow() : [];
+    for (const runId of runIds) {
+      try {
+        xQueueCoordinator?.onXRunTerminal({ runId });
+      } catch (error) {
+        console.error('[Electron] X wakeup terminal notification failed:', error);
+      }
+    }
+  } catch (error) {
+    console.error('[Electron] X wakeup reconciliation failed:', error);
+  } finally {
+    // Unconditional re-arm, even on an empty result or a notification
+    // failure -- required for lease renewal: the same run's lease may have
+    // been extended to a later deadline, which this re-read picks up.
+    armXWakeup();
+  }
+};
 const getUpdaterInfo = () => ({
   currentVersion: buildMetadata.version,
   currentBuildId: buildMetadata.buildId,
@@ -263,6 +309,7 @@ const startServer = async ({ workspace, port }) => {
         console.error('[XQueueCoordinator] onXRunTerminal failed:', err);
       }
     }
+    if (message?.type === 'x_admission_hint') armXWakeup();
   });
   serverProcess.once('exit', (code, signal) => {
     serverProcess = undefined;
@@ -392,13 +439,18 @@ app.whenReady().then(async () => {
   try {
     const { XQueueStore } = await importFromHere('../mcp/x/queue-store.mjs');
     const { XQueueCoordinator } = await importFromHere('../mcp/x/queue-coordinator.mjs');
-    const { getProductionXRuntime } = await importFromHere('../mcp/x/production-runtime.mjs');
+    const { getProductionXRuntime, getNextXWakeupDeadline, reconcileXRuntimeNow } = await importFromHere('../mcp/x/production-runtime.mjs');
+    xGetNextWakeupDeadline = getNextXWakeupDeadline;
+    xReconcileRuntimeNow = reconcileXRuntimeNow;
     const { onAntigravityAdmissionReleased } = await importFromHere('../mcp/executors/antigravity-admission.mjs');
     const queueStorePath = path.join(app.getPath('userData'), 'x-queue.json');
     const xQueueStore = new XQueueStore({ storagePath: queueStorePath });
     xQueueStore.load();
     const { claimStore, runStore, modelAdapter, ownerId } = getProductionXRuntime();
-    xQueueCoordinator = new XQueueCoordinator({ queueStore: xQueueStore, claimStore, runStore, modelAdapter, ownerId });
+    xQueueCoordinator = new XQueueCoordinator({
+      queueStore: xQueueStore, claimStore, runStore, modelAdapter, ownerId,
+      onAdmissionAccepted: () => armXWakeup(),
+    });
     onAntigravityAdmissionReleased(() => {
       xQueueCoordinator?.kick();
     });
@@ -417,6 +469,7 @@ app.whenReady().then(async () => {
       }
     }
     xQueueCoordinator.kick();
+    armXWakeup();
   } catch (err) {
     console.error('Failed to initialize XQueueCoordinator:', err);
   }

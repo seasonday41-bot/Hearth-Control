@@ -122,6 +122,7 @@ function coordinatorFor(item, overrides = {}) {
     modelAdapter: overrides.modelAdapter ?? fastModel([create()]),
     ownerId: overrides.ownerId ?? `owner-${Math.random().toString(36).slice(2)}`,
     leaseDurationMs: overrides.leaseDurationMs,
+    onAdmissionAccepted: overrides.onAdmissionAccepted,
   });
 }
 
@@ -1297,4 +1298,117 @@ test('43 no polling/timer exists anywhere in the coordinator\'s executable sourc
     /setInterval|setTimeout/,
     'no polling/timer mechanism may exist or be introduced',
   );
+});
+
+// ── fast-restart liveness: onAdmissionAccepted (queue-dispatched path) ─────
+//
+// Notification-only (void, no payload), fired exactly once per durably-
+// accepted admission -- after admitted.runId is validated against the
+// pre-generated runId, before queueStore.markDispatched(). Exists purely so
+// Electron can re-arm its fast-restart wakeup timer; this coordinator makes
+// no decision based on whatever the callback does, and a throwing callback
+// must never change admission/queue behavior.
+
+test('44 onAdmissionAccepted fires exactly once after a durably-accepted admission', async () => {
+  const item = fixture();
+  const controlled = controllableModel([create()]);
+  let calls = 0;
+  const coordinator = coordinatorFor(item, { modelAdapter: controlled, onAdmissionAccepted: () => { calls += 1; } });
+
+  coordinator.enqueue(taskFor(item, 'task-1'));
+  await controlled.entered;
+  await waitUntil(() => item.queueStore.listDispatched().length === 1, { label: 'entry to reach dispatched' });
+
+  assert.equal(calls, 1, 'onAdmissionAccepted must fire exactly once for one accepted admission');
+
+  controlled.release();
+  await waitUntil(() => isFullyIdle(item), { label: 'cleanup' });
+  assert.equal(calls, 1, 'onAdmissionAccepted must not fire again on terminal completion');
+});
+
+test('45 onAdmissionAccepted does not fire for a no_capacity denial', async () => {
+  const item = fixture();
+  const blocker = new XClaimStore({ storagePath: item.dbPath });
+  stores.push(blocker);
+  blocker.claim({ taskId: 'blocking-task', ownerId: 'blocker-owner' });
+
+  let calls = 0;
+  const coordinator = coordinatorFor(item, { modelAdapter: fastModel([create()]), onAdmissionAccepted: () => { calls += 1; } });
+  item.queueStore.enqueue(taskFor(item, 'task-1'));
+
+  const result = await coordinator.dispatchNext();
+  assert.equal(result.reason, 'no_capacity');
+  assert.equal(calls, 0, 'onAdmissionAccepted must never fire for a definite non-admission');
+});
+
+test('46 onAdmissionAccepted does not fire on an ambiguous (thrown) admission attempt', async () => {
+  const item = fixture();
+  let calls = 0;
+  const coordinator = coordinatorFor(item, { modelAdapter: fastModel([create()]), onAdmissionAccepted: () => { calls += 1; } });
+
+  const invalidTask = { version: X_TASK_VERSION, task_id: 'task-invalid' };
+  item.queueStore.enqueue(invalidTask);
+
+  const result = await coordinator.dispatchNext();
+  assert.equal(result.reason, 'ambiguous_throw');
+  assert.equal(calls, 0, 'onAdmissionAccepted must never fire for an ambiguous throw');
+});
+
+test('47 onAdmissionAccepted is structurally unreachable on a runId mismatch -- the mismatch return precedes the callback call site in source', () => {
+  // A genuine runId mismatch cannot be produced by the real runXTask (it
+  // always honors an explicitly-passed runId -- see run-x-task.mjs's own
+  // `actualRunId = runId ?? crypto.randomUUID()`), so this is proven
+  // structurally rather than by forcing an artificial mock.
+  const source = fs.readFileSync(
+    new URL('../mcp/x/queue-coordinator.mjs', import.meta.url),
+    'utf8',
+  );
+
+  const mismatchGuardIdx = source.indexOf(
+    'if (admitted.runId !== runId) {',
+  );
+  const callbackCallIdx = source.indexOf(
+    'this.onAdmissionAccepted()',
+  );
+
+  assert.ok(
+    mismatchGuardIdx !== -1,
+    'the runId-mismatch guard must exist',
+  );
+  assert.ok(
+    callbackCallIdx !== -1,
+    'the onAdmissionAccepted call site must exist',
+  );
+  assert.ok(
+    mismatchGuardIdx < callbackCallIdx,
+    'the mismatch guard must precede the admission callback',
+  );
+
+  const mismatchBlock = source.slice(
+    mismatchGuardIdx,
+    callbackCallIdx,
+  );
+
+  assert.match(
+    mismatchBlock,
+    /return\s+\{\s*dispatched:\s*false,\s*reason:\s*'ambiguous_throw'/s,
+    'the runId-mismatch path must return before onAdmissionAccepted can execute',
+  );
+});
+
+test('48 a throwing onAdmissionAccepted callback never breaks dispatch -- the entry still reaches dispatched', async () => {
+  const item = fixture();
+  const controlled = controllableModel([create()]);
+  const coordinator = coordinatorFor(item, {
+    modelAdapter: controlled,
+    onAdmissionAccepted: () => { throw new Error('simulated Electron-side hook failure'); },
+  });
+
+  coordinator.enqueue(taskFor(item, 'task-1'));
+  await controlled.entered;
+  await waitUntil(() => item.queueStore.listDispatched().length === 1, { label: 'entry must still reach dispatched despite the throwing callback' });
+  assert.equal(item.queueStore.listDispatched()[0].taskId, 'task-1');
+
+  controlled.release();
+  await waitUntil(() => isFullyIdle(item), { label: 'cleanup' });
 });

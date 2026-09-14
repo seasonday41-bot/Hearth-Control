@@ -448,6 +448,15 @@ export const registerWorkspaceTools = (server, options) => {
       if (!admitted.accepted) {
         return text(JSON.stringify({ accepted: false, reason: admitted.reason, run_id: null }, null, 2));
       }
+      // Fast-restart liveness: a content-free hint only -- no runId, taskId,
+      // leaseId, expiry, or status -- so Electron's fast-restart wakeup
+      // scheduler can re-arm itself by independently reading persisted
+      // claim state (getNextXWakeupDeadline()), never by trusting this
+      // message's payload for anything. Best-effort only: a missing/failed
+      // send must never affect x_start's own response.
+      if (typeof process.send === 'function') {
+        try { process.send({ type: 'x_admission_hint' }); } catch { /* best-effort only */ }
+      }
       return text(JSON.stringify({ accepted: true, run_id: admitted.runId, task_id: admitted.taskId, status: 'running' }, null, 2));
     } catch (error) { return failure(error); }
   });

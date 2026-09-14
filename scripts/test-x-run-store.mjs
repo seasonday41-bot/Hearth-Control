@@ -567,3 +567,73 @@ test('C5 the REAL XClaimStore.getActiveClaim read path works correctly from insi
   claimStore.close();
   runStore.close();
 });
+
+// ── R1: hasNonTerminalRunForClaimLease ──────────────────────────────────────
+//
+// Read-only: does ANY non-terminal (queued/running) run currently carry
+// this exact claim_lease_id? Lets a caller holding only a bare leaseId
+// (e.g. from XClaimStore.getActiveClaim(), which is claim-kind-agnostic and
+// knows nothing about X vs. any other consumer of the shared claim table)
+// determine whether that lease actually belongs to an X run.
+
+test('R1 hasNonTerminalRunForClaimLease is true for a matching QUEUED run', () => {
+  const store = new XRunStore({ storagePath: tmpDbPath() });
+  store.createRun({ runId: 'run-1', taskId: 'task-1', claimLeaseId: 'lease-1' });
+  assert.equal(store.getRun('run-1').status, 'queued');
+  assert.equal(store.hasNonTerminalRunForClaimLease('lease-1'), true);
+});
+
+test('R1 hasNonTerminalRunForClaimLease is true for a matching RUNNING run', () => {
+  const store = new XRunStore({ storagePath: tmpDbPath() });
+  store.createRun({ runId: 'run-1', taskId: 'task-1', claimLeaseId: 'lease-1' });
+  store.markRunning({ runId: 'run-1', claimLeaseId: 'lease-1' });
+  assert.equal(store.getRun('run-1').status, 'running');
+  assert.equal(store.hasNonTerminalRunForClaimLease('lease-1'), true);
+});
+
+test('R1 hasNonTerminalRunForClaimLease is false once the run reaches COMPLETED', () => {
+  const store = new XRunStore({ storagePath: tmpDbPath() });
+  store.createRun({ runId: 'run-1', taskId: 'task-1', claimLeaseId: 'lease-1' });
+  store.markRunning({ runId: 'run-1', claimLeaseId: 'lease-1' });
+  store.completeRun({ runId: 'run-1', gateResult: fakeGateResult('COMPLETED', 'completed'), xResult: fakeXResult('task-1', 'COMPLETED', 'completed') });
+  assert.equal(store.hasNonTerminalRunForClaimLease('lease-1'), false);
+});
+
+test('R1 hasNonTerminalRunForClaimLease is false once the run reaches NEEDS_REVIEW', () => {
+  const store = new XRunStore({ storagePath: tmpDbPath() });
+  store.createRun({ runId: 'run-1', taskId: 'task-1', claimLeaseId: 'lease-1' });
+  store.markRunning({ runId: 'run-1', claimLeaseId: 'lease-1' });
+  store.completeRun({ runId: 'run-1', gateResult: fakeGateResult('NEEDS_REVIEW', 'waiting'), xResult: fakeXResult('task-1', 'NEEDS_REVIEW', 'waiting') });
+  assert.equal(store.hasNonTerminalRunForClaimLease('lease-1'), false);
+});
+
+test('R1 hasNonTerminalRunForClaimLease is false once the run reaches FAILED', () => {
+  const store = new XRunStore({ storagePath: tmpDbPath() });
+  store.createRun({ runId: 'run-1', taskId: 'task-1', claimLeaseId: 'lease-1' });
+  store.markRunning({ runId: 'run-1', claimLeaseId: 'lease-1' });
+  store.completeRun({ runId: 'run-1', gateResult: fakeGateResult('FAILED', 'error'), xResult: fakeXResult('task-1', 'FAILED', 'error') });
+  assert.equal(store.hasNonTerminalRunForClaimLease('lease-1'), false);
+});
+
+test('R1 hasNonTerminalRunForClaimLease is false once the run reaches INTERRUPTED', () => {
+  const store = new XRunStore({ storagePath: tmpDbPath() });
+  store.createRun({ runId: 'run-1', taskId: 'task-1', claimLeaseId: 'lease-1' });
+  store.markRunning({ runId: 'run-1', claimLeaseId: 'lease-1' });
+  store.markInterrupted('run-1');
+  assert.equal(store.hasNonTerminalRunForClaimLease('lease-1'), false);
+});
+
+test('R1 hasNonTerminalRunForClaimLease is false for an unknown/unrelated leaseId', () => {
+  const store = new XRunStore({ storagePath: tmpDbPath() });
+  store.createRun({ runId: 'run-1', taskId: 'task-1', claimLeaseId: 'lease-1' });
+  store.markRunning({ runId: 'run-1', claimLeaseId: 'lease-1' });
+  assert.equal(store.hasNonTerminalRunForClaimLease('some-other-lease'), false);
+  assert.equal(store.hasNonTerminalRunForClaimLease('antigravity-lease-id-unrelated'), false);
+});
+
+test('R1 hasNonTerminalRunForClaimLease rejects invalid input safely (no throw, false)', () => {
+  const store = new XRunStore({ storagePath: tmpDbPath() });
+  assert.equal(store.hasNonTerminalRunForClaimLease(''), false);
+  assert.equal(store.hasNonTerminalRunForClaimLease(null), false);
+  assert.equal(store.hasNonTerminalRunForClaimLease(undefined), false);
+});

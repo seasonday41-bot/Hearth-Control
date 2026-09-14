@@ -85,9 +85,10 @@ export class XQueueCoordinator {
    *   modelAdapter: object,
    *   ownerId: string,
    *   leaseDurationMs?: number,
+   *   onAdmissionAccepted?: () => void,
    * }} deps
    */
-  constructor({ queueStore, claimStore, runStore, modelAdapter, ownerId, leaseDurationMs } = {}) {
+  constructor({ queueStore, claimStore, runStore, modelAdapter, ownerId, leaseDurationMs, onAdmissionAccepted } = {}) {
     if (!queueStore) throw new TypeError('queueStore is required for XQueueCoordinator.');
     if (!claimStore) throw new TypeError('claimStore is required for XQueueCoordinator.');
     if (!runStore) throw new TypeError('runStore is required for XQueueCoordinator.');
@@ -99,6 +100,8 @@ export class XQueueCoordinator {
     this.modelAdapter = modelAdapter;
     this.ownerId = ownerId;
     this.leaseDurationMs = leaseDurationMs;
+    /** Optional, notification-only (void, no payload): fired exactly once per durably-accepted admission, after admitted.runId is validated and before queueStore.markDispatched() -- see dispatchNext(). Never required, never inspected for a return value. */
+    this.onAdmissionAccepted = onAdmissionAccepted;
     this._dispatching = false;
     /** Last ambiguous (thrown) dispatch attempt, for observability only -- never acted on automatically. */
     this.lastDispatchError = null;
@@ -204,6 +207,18 @@ export class XQueueCoordinator {
           at: new Date().toISOString(),
         };
         return { dispatched: false, reason: 'ambiguous_throw', entryId: entry.id };
+      }
+
+      // Notification-only, fired exactly once per durably-accepted
+      // admission: runXTask never returns accepted:true before its own
+      // createRun()+markRunning() have already committed, so claim/run
+      // truth is already fully durable here, independent of the queue
+      // bookkeeping write below. No payload; a throwing hook must never
+      // change admission/queue behavior.
+      if (this.onAdmissionAccepted) {
+        try { this.onAdmissionAccepted(); } catch (error) {
+          console.error('[XQueueCoordinator] onAdmissionAccepted hook failed:', error);
+        }
       }
 
       this.queueStore.markDispatched(entry.id, admitted.runId);

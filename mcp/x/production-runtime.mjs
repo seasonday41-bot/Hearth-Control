@@ -53,17 +53,27 @@ import { createOllamaModelAdapter } from './model-adapter.mjs';
  */
 let singleton = null;
 
+/**
+ * The exact liveness check XRunStore.reconcileStartupState() requires:
+ * read-only, a single XClaimStore.getActiveClaim(taskId) lookup plus an
+ * exact leaseId comparison. Factored out so getProductionXRuntime()'s own
+ * startup call and reconcileXRuntimeNow() below are provably the same
+ * check, not merely similar-looking duplicates.
+ */
+function makeIsClaimLive(claimStore) {
+  return (taskId, claimLeaseId) => {
+    const active = claimStore.getActiveClaim(taskId);
+    return Boolean(active && active.leaseId === claimLeaseId);
+  };
+}
+
 export function getProductionXRuntime() {
   if (singleton) return singleton;
   const storagePath = resolveHearthRuntimeDatabasePath();
   const claimStore = new XClaimStore({ storagePath });
   const runStore = new XRunStore({ storagePath });
 
-  const isClaimLive = (taskId, claimLeaseId) => {
-    const active = claimStore.getActiveClaim(taskId);
-    return Boolean(active && active.leaseId === claimLeaseId);
-  };
-  runStore.reconcileStartupState(isClaimLive);
+  runStore.reconcileStartupState(makeIsClaimLive(claimStore));
 
   singleton = {
     claimStore,
@@ -77,4 +87,51 @@ export function getProductionXRuntime() {
 /** Test-only: forces the next getProductionXRuntime() call to construct a fresh singleton. */
 export function __resetProductionXRuntimeForTests() {
   singleton = null;
+}
+
+/**
+ * Fast-restart liveness (wakeup arming): the persisted deadline a caller
+ * should schedule a one-shot re-reconciliation for, or null if there is
+ * currently nothing X-relevant to wait on. Pure read, no decision beyond
+ * the one below, no write -- the caller (Electron) never inspects
+ * claim/run truth itself, it only ever receives this one timestamp.
+ *
+ * The shared claim table (XClaimStore) is deliberately claim-kind-agnostic
+ * -- global execution admission (capacity=1) is shared with Antigravity,
+ * so XClaimStore.getActiveClaim() (no taskId argument) returns whichever
+ * single claim currently holds the slot, regardless of which subsystem
+ * acquired it. Surfacing that claim's deadline unconditionally would arm a
+ * wakeup for a pure-Antigravity admission that has no X run behind it at
+ * all. The correction is to ask XRunStore -- the actual X-side source of
+ * truth -- whether that exact leaseId is the one recorded on a still-
+ * non-terminal X run (`hasNonTerminalRunForClaimLease`); only then is the
+ * claim's expiry X-relevant. This never inspects task_id naming
+ * conventions (e.g. Antigravity's own `antigravity:` prefix) or ownerId --
+ * it is answered entirely from X's own already-recorded claim_lease_id.
+ * @returns {number|null} epoch-ms leaseExpiresAt, or null
+ */
+export function getNextXWakeupDeadline() {
+  const { claimStore, runStore } = getProductionXRuntime();
+  const active = claimStore.getActiveClaim();
+  if (!active) return null;
+  if (!runStore.hasNonTerminalRunForClaimLease(active.leaseId)) return null;
+  return active.leaseExpiresAt;
+}
+
+/**
+ * Fast-restart liveness (wakeup fire): re-runs the EXACT SAME reconciliation
+ * production startup already performs -- XRunStore.reconcileStartupState()
+ * with the identical isClaimLive check (see makeIsClaimLive above) -- so a
+ * run whose owning process died with the lease still technically unexpired
+ * at Hearth's last startup (correctly preserved then) can still be
+ * discovered once that lease genuinely expires later, without requiring a
+ * second Electron restart. Not a new reconciliation policy: same atomic
+ * BEGIN IMMEDIATE transaction, same terminal write, same idempotency,
+ * already proven safe by run-store.mjs's own C4/C5 tests -- this function
+ * only re-invokes it.
+ * @returns {string[]} runIds newly marked interrupted by THIS call only
+ */
+export function reconcileXRuntimeNow() {
+  const { claimStore, runStore } = getProductionXRuntime();
+  return runStore.reconcileStartupState(makeIsClaimLive(claimStore));
 }

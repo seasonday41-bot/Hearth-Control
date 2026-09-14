@@ -89,6 +89,8 @@ function taskFor(item, taskId = 'task-x-1') {
 }
 
 const jsonOf = (toolResult) => JSON.parse(toolResult.content[0].text);
+/** Filters captured process.send calls down to x_run_terminal messages only -- x_start's own, separate, content-free x_admission_hint (fast-restart liveness) now also legitimately fires on every accepted admission, so raw call counts/positions are no longer a reliable proxy for "did x_run_terminal fire"; this keeps EVT1-7's original intent (the terminal-event contract itself) exact and unaffected by that unrelated hint. */
+const terminalEventsOf = (calls) => calls.filter((msg) => msg?.type === 'x_run_terminal');
 async function pollUntilTerminal(server, runId, { timeoutMs = 4000, intervalMs = 15 } = {}) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
@@ -208,9 +210,10 @@ test('EVT1 COMPLETED emits exactly once, matching the persisted run', async () =
     const final = await pollUntilTerminal(server, started.run_id);
     assert.equal(final.status, 'completed');
 
-    assert.equal(calls.length, 1, 'exactly one x_run_terminal event must be emitted');
+    const terminalEvents = terminalEventsOf(calls);
+    assert.equal(terminalEvents.length, 1, 'exactly one x_run_terminal event must be emitted');
     const persisted = runStore.getRun(started.run_id);
-    assert.deepEqual(calls[0], {
+    assert.deepEqual(terminalEvents[0], {
       type: 'x_run_terminal',
       runId: persisted.runId, taskId: persisted.taskId, status: persisted.status,
       gateStatus: persisted.gateStatus, hearthOutcome: persisted.hearthOutcome,
@@ -229,10 +232,11 @@ test('EVT2 NEEDS_REVIEW emits exactly once, matching the persisted run', async (
     const final = await pollUntilTerminal(server, started.run_id);
     assert.equal(final.status, 'needs_review');
 
-    assert.equal(calls.length, 1);
+    const terminalEvents = terminalEventsOf(calls);
+    assert.equal(terminalEvents.length, 1);
     const persisted = runStore.getRun(started.run_id);
-    assert.equal(calls[0].status, 'needs_review');
-    assert.deepEqual(calls[0], {
+    assert.equal(terminalEvents[0].status, 'needs_review');
+    assert.deepEqual(terminalEvents[0], {
       type: 'x_run_terminal',
       runId: persisted.runId, taskId: persisted.taskId, status: persisted.status,
       gateStatus: persisted.gateStatus, hearthOutcome: persisted.hearthOutcome,
@@ -250,10 +254,11 @@ test('EVT3 FAILED emits exactly once, matching the persisted run', async () => {
     const final = await pollUntilTerminal(server, started.run_id);
     assert.equal(final.status, 'failed');
 
-    assert.equal(calls.length, 1);
+    const terminalEvents = terminalEventsOf(calls);
+    assert.equal(terminalEvents.length, 1);
     const persisted = runStore.getRun(started.run_id);
-    assert.equal(calls[0].status, 'failed');
-    assert.deepEqual(calls[0], {
+    assert.equal(terminalEvents[0].status, 'failed');
+    assert.deepEqual(terminalEvents[0], {
       type: 'x_run_terminal',
       runId: persisted.runId, taskId: persisted.taskId, status: persisted.status,
       gateStatus: persisted.gateStatus, hearthOutcome: persisted.hearthOutcome,
@@ -270,8 +275,9 @@ test('EVT4 emitted event field set matches exactly what x_task itself reports (n
     const started = jsonOf(await server.tools.get('x_start').handler({ task: taskFor(item) }));
     const final = await pollUntilTerminal(server, started.run_id);
 
-    assert.equal(calls.length, 1);
-    const event = calls[0];
+    const terminalEvents = terminalEventsOf(calls);
+    assert.equal(terminalEvents.length, 1);
+    const event = terminalEvents[0];
     assert.equal(event.runId, final.run_id);
     assert.equal(event.taskId, final.task_id);
     assert.equal(event.status, final.status);
@@ -296,7 +302,7 @@ test('EVT5 fence_rejected emits nothing', async () => {
     // instead of polling for a terminal state that will never arrive.
     await sleep(200);
     assert.equal(runStore.getRun(started.run_id).status, 'running', 'a fence-rejected run must stay nonterminal');
-    assert.equal(calls.length, 0, 'no event may be emitted for a fence-rejected (non-persisted-by-us) outcome');
+    assert.equal(terminalEventsOf(calls).length, 0, 'no event may be emitted for a fence-rejected (non-persisted-by-us) outcome');
   });
 });
 
@@ -393,7 +399,7 @@ test('EVT6 ownership_lost emits nothing', async () => {
     await new Promise((resolve) => setImmediate(resolve));
 
     assert.equal(
-      calls.length,
+      terminalEventsOf(calls).length,
       0,
       'ownership loss must not emit x_run_terminal',
     );
@@ -429,7 +435,7 @@ test('EVT7 persistence_error emits nothing, even though the row was genuinely wr
     // the injected throw) -- but runXTask's own outcome carries run: null
     // for this path, so no event may be emitted for it.
     assert.equal(runStore.getRun(started.run_id).status, 'completed');
-    assert.equal(calls.length, 0, 'a post-write throw must not be treated as a safe-to-notify terminal outcome');
+    assert.equal(terminalEventsOf(calls).length, 0, 'a post-write throw must not be treated as a safe-to-notify terminal outcome');
   });
 });
 

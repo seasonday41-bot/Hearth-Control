@@ -225,6 +225,24 @@ export class XRunStore {
   }
 
   /**
+   * Read-only: does ANY non-terminal (`queued`/`running`) run currently
+   * carry this exact `claim_lease_id`? Lets a caller holding only a bare
+   * leaseId (e.g. from XClaimStore.getActiveClaim(), which is claim-kind-
+   * agnostic and knows nothing about X vs. any other consumer of the
+   * shared claim table) determine whether that lease actually belongs to
+   * an X run, without needing to enumerate or expose run rows at all.
+   * @param {string} claimLeaseId
+   * @returns {boolean}
+   */
+  hasNonTerminalRunForClaimLease(claimLeaseId) {
+    if (!claimLeaseId || typeof claimLeaseId !== 'string') return false;
+    const row = this._getDb().prepare(
+      `SELECT 1 FROM x_runs WHERE claim_lease_id = ? AND status IN ('queued','running') LIMIT 1`,
+    ).get(claimLeaseId);
+    return Boolean(row);
+  }
+
+  /**
    * Records a claim lease id -- ONLY while a run is still `queued`. A
    * single atomic `UPDATE ... WHERE run_id = ? AND status = 'queued'`, so
    * this can never clear or change the lease of a `running` or terminal

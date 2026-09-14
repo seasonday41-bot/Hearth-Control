@@ -329,3 +329,137 @@ test('T15 existing MCP tools remain registered and unaffected by the new X tools
   const info = jsonOf(await server.tools.get('workspace_info').handler({}));
   assert.equal(info.workspace, item.root);
 });
+
+// ── fast-restart liveness: x_admission_hint (direct x_start path) ──────────
+//
+// A content-free IPC hint only -- no runId/taskId/leaseId/expiry/status --
+// so Electron's fast-restart wakeup scheduler can re-arm itself by
+// independently reading persisted claim state, never by trusting this
+// message's payload. Reuses the exact withMockedProcessSend/
+// withoutProcessSend pattern already established in
+// scripts/test-x-terminal-event.mjs for the same process.send surface.
+// Filtered by message type (rather than asserting raw call counts/order) so
+// these tests stay robust regardless of exactly when the separate,
+// already-existing x_run_terminal notification (fired later, only once the
+// run actually reaches a terminal status) happens to land relative to the
+// synchronous admission hint.
+
+/** Temporarily installs a mock process.send for the duration of `fn`, restoring the prior value (present or absent) afterward. */
+async function withMockedProcessSend(mockFn, fn) {
+  const hadOwnProperty = Object.prototype.hasOwnProperty.call(process, 'send');
+  const original = process.send;
+  process.send = mockFn;
+  try {
+    return await fn();
+  } finally {
+    if (hadOwnProperty) process.send = original;
+    else delete process.send;
+  }
+}
+/** Ensures process.send is absent for the duration of `fn` (the real, non-forked default). */
+async function withoutProcessSend(fn) {
+  const hadOwnProperty = Object.prototype.hasOwnProperty.call(process, 'send');
+  const original = process.send;
+  delete process.send;
+  try {
+    return await fn();
+  } finally {
+    if (hadOwnProperty) process.send = original;
+  }
+}
+
+test('H1 direct x_start accepted admission sends exactly one x_admission_hint', async () => {
+  const item = fixture();
+  const { server } = registerFor(item);
+  const calls = [];
+
+  const result = await withMockedProcessSend(
+    (msg) => { calls.push(msg); },
+    async () =>
+      jsonOf(await server.tools.get('x_start').handler({
+        task: taskFor(item),
+      })),
+  );
+
+  assert.equal(result.accepted, true);
+
+  const admissionHints = calls.filter(
+    (msg) => msg?.type === 'x_admission_hint',
+  );
+
+  assert.equal(
+    admissionHints.length,
+    1,
+    'expected exactly one x_admission_hint for an accepted admission',
+  );
+
+  assert.deepEqual(admissionHints[0], {
+    type: 'x_admission_hint',
+  });
+
+  await pollUntilTerminal(server, result.run_id);
+});
+
+test('H2 rejected x_start (no_capacity) sends no admission hint', async () => {
+  const item = fixture();
+  const { server } = registerFor(item);
+  const outsideClaims = new XClaimStore({ storagePath: item.dbPath });
+  item.stores.push(outsideClaims);
+  outsideClaims.claim({ taskId: 'task-x-1', ownerId: 'someone-else' });
+
+  const calls = [];
+  const result = await withMockedProcessSend((msg) => { calls.push(msg); }, async () =>
+    jsonOf(await server.tools.get('x_start').handler({ task: taskFor(item) })));
+  assert.equal(result.accepted, false);
+  const admissionHints = calls.filter((msg) => msg?.type === 'x_admission_hint');
+  assert.equal(admissionHints.length, 0, 'a denied admission must never send an admission hint');
+});
+
+test('H3 the admission hint carries no authoritative payload -- no runId, taskId, leaseId, expiry, or status', async () => {
+  const item = fixture();
+  const { server } = registerFor(item);
+  const calls = [];
+
+  const result = await withMockedProcessSend(
+    (msg) => { calls.push(msg); },
+    async () =>
+      jsonOf(await server.tools.get('x_start').handler({
+        task: taskFor(item),
+      })),
+  );
+
+  const admissionHints = calls.filter(
+    (msg) => msg?.type === 'x_admission_hint',
+  );
+
+  assert.equal(admissionHints.length, 1);
+
+  assert.deepEqual(
+    Object.keys(admissionHints[0]).sort(),
+    ['type'],
+    'the hint must carry exactly one field: type',
+  );
+
+  assert.equal(
+    admissionHints[0].type,
+    'x_admission_hint',
+  );
+
+  await pollUntilTerminal(server, result.run_id);
+});
+
+test('H4 process.send absent or throwing never affects x_start\'s own accepted response', async () => {
+  const item = fixture();
+  const { server: server1 } = registerFor(item);
+  const withoutResult = await withoutProcessSend(async () =>
+    jsonOf(await server1.tools.get('x_start').handler({ task: taskFor(item, 'task-x-2') })));
+  assert.equal(withoutResult.accepted, true);
+  await pollUntilTerminal(server1, withoutResult.run_id);
+
+  const item2 = fixture();
+  const { server: server2 } = registerFor(item2);
+  const throwingResult = await withMockedProcessSend(() => { throw new Error('simulated IPC failure'); }, async () =>
+    jsonOf(await server2.tools.get('x_start').handler({ task: taskFor(item2) })));
+  assert.equal(throwingResult.accepted, true);
+  await pollUntilTerminal(server2, throwingResult.run_id);
+});
