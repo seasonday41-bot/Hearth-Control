@@ -63,6 +63,44 @@ export const antigravityClaimTaskId = (taskId) => `${CLAIM_NAMESPACE}${taskId}`;
 /** taskId -> { claim, keeper, claimStore, ownerId, taskId, released, poll } */
 const admissions = new Map();
 
+/**
+ * Post-release notification plumbing ONLY. This never changes
+ * admission/release semantics: it fires strictly after
+ * `releaseAntigravityAdmission`'s own persisted `claimStore.release(...)`
+ * call has already returned `true` -- never before, never on a `false`
+ * result, never on a thrown release, never merely because a task reached
+ * done/error. A listener's own failure is logged and otherwise ignored: it
+ * cannot change the release result, retry anything, propagate back into
+ * `releaseAntigravityAdmission`, mutate admission state, or route anywhere.
+ */
+const admissionReleasedListeners = new Set();
+
+/**
+ * Subscribes to the post-release notification. Fires once per successful
+ * persisted release, after the shared claim is already gone.
+ * @param {(event: { taskId: string }) => void} listener
+ * @returns {() => void} unsubscribe function
+ */
+export function onAntigravityAdmissionReleased(listener) {
+  if (typeof listener !== 'function') {
+    throw new TypeError('listener must be a function.');
+  }
+  admissionReleasedListeners.add(listener);
+  return () => {
+    admissionReleasedListeners.delete(listener);
+  };
+}
+
+function emitAntigravityAdmissionReleased(event) {
+  for (const listener of admissionReleasedListeners) {
+    try {
+      listener(event);
+    } catch (error) {
+      console.error('[AntigravityAdmission] release listener failed:', error);
+    }
+  }
+}
+
 let productionClaimStore = null;
 
 /**
@@ -173,9 +211,13 @@ export async function releaseAntigravityAdmission(taskId) {
     // keeper failure does not prevent releasing the claim below
   }
   try {
-    return record.claimStore.release({
+    const released = record.claimStore.release({
       taskId: antigravityClaimTaskId(taskId), ownerId: record.ownerId, leaseId: record.claim.leaseId,
     });
+    if (released) {
+      emitAntigravityAdmissionReleased({ taskId });
+    }
+    return released;
   } catch {
     return false;
   }
