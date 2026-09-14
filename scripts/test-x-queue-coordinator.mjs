@@ -123,8 +123,29 @@ function coordinatorFor(item, overrides = {}) {
     ownerId: overrides.ownerId ?? `owner-${Math.random().toString(36).slice(2)}`,
     leaseDurationMs: overrides.leaseDurationMs,
     onAdmissionAccepted: overrides.onAdmissionAccepted,
+    onCapacityBlocked: overrides.onCapacityBlocked,
   });
 }
+
+test('ingress receipt dispatches once and blocked notification follows return to pending', async () => {
+  const item = fixture();
+  const blocker = item.claimStore.claim({ taskId: 'other-task', ownerId: 'other-owner' });
+  let observed;
+  const coordinator = coordinatorFor(item, { onCapacityBlocked: () => {
+    observed = item.queueStore.getReceipt('request-1');
+  } });
+  const identity = { requestId: 'request-1', fingerprint: 'hash-1', workspaceRoot: item.root };
+  const first = coordinator.enqueue(taskFor(item), identity);
+  assert.ok(['pending', 'dispatching'].includes(first.receipt.queueStatus));
+  assert.equal(coordinator.enqueue(taskFor(item), identity).receipt.queueId, first.receipt.queueId);
+  await waitUntil(() => observed != null);
+  assert.equal(observed.queueStatus, 'pending');
+  assert.equal(observed.runId, null);
+  item.claimStore.release({ taskId: blocker.taskId, ownerId: blocker.ownerId, leaseId: blocker.leaseId });
+  coordinator.kick();
+  await waitUntil(() => item.queueStore.getReceipt('request-1').queueStatus === 'terminal');
+  assert.equal(item.queueStore.getReceipt('request-1').terminalStatus, 'completed');
+});
 
 async function waitUntil(conditionFn, { timeoutMs = 3000, intervalMs = 10, label = 'condition' } = {}) {
   const deadline = Date.now() + timeoutMs;

@@ -118,6 +118,12 @@ export function getNextXWakeupDeadline() {
   return active.leaseExpiresAt;
 }
 
+/** Queue-capacity wakeup only: read the current shared lease, regardless of claim kind. */
+export function getNextXQueueCapacityDeadline() {
+  const { claimStore } = getProductionXRuntime();
+  return claimStore.getActiveClaim()?.leaseExpiresAt ?? null;
+}
+
 /**
  * Fast-restart liveness (wakeup fire): re-runs the EXACT SAME reconciliation
  * production startup already performs -- XRunStore.reconcileStartupState()

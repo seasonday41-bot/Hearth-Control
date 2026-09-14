@@ -86,9 +86,10 @@ export class XQueueCoordinator {
    *   ownerId: string,
    *   leaseDurationMs?: number,
    *   onAdmissionAccepted?: () => void,
+   *   onCapacityBlocked?: () => void,
    * }} deps
    */
-  constructor({ queueStore, claimStore, runStore, modelAdapter, ownerId, leaseDurationMs, onAdmissionAccepted } = {}) {
+  constructor({ queueStore, claimStore, runStore, modelAdapter, ownerId, leaseDurationMs, onAdmissionAccepted, onCapacityBlocked } = {}) {
     if (!queueStore) throw new TypeError('queueStore is required for XQueueCoordinator.');
     if (!claimStore) throw new TypeError('claimStore is required for XQueueCoordinator.');
     if (!runStore) throw new TypeError('runStore is required for XQueueCoordinator.');
@@ -102,6 +103,7 @@ export class XQueueCoordinator {
     this.leaseDurationMs = leaseDurationMs;
     /** Optional, notification-only (void, no payload): fired exactly once per durably-accepted admission, after admitted.runId is validated and before queueStore.markDispatched() -- see dispatchNext(). Never required, never inspected for a return value. */
     this.onAdmissionAccepted = onAdmissionAccepted;
+    this.onCapacityBlocked = onCapacityBlocked;
     this._dispatching = false;
     /** Last ambiguous (thrown) dispatch attempt, for observability only -- never acted on automatically. */
     this.lastDispatchError = null;
@@ -112,8 +114,14 @@ export class XQueueCoordinator {
    * Never inspects, edits, or authors its content beyond what XQueueStore
    * itself validates (a non-empty `task_id`).
    * @param {object} task a complete x-task-v1 payload
+   * @param {object|null} ingress optional main-authorized receipt identity
    */
-  enqueue(task) {
+  enqueue(task, ingress = null) {
+    if (ingress) {
+      const result = this.queueStore.enqueueWithReceipt(task, ingress);
+      if (!result.error && !result.replayed) this._scheduleDispatch();
+      return result;
+    }
     const entry = this.queueStore.enqueue(task);
     this._scheduleDispatch();
     return entry;
@@ -192,6 +200,11 @@ export class XQueueCoordinator {
         // A definite non-admission (no_capacity, or any other explicit
         // denial) -- the task is not dropped, only returned to pending.
         this.queueStore.returnToPending(entry.id);
+        if (admitted.reason === 'no_capacity' && this.onCapacityBlocked) {
+          try { this.onCapacityBlocked(); } catch (error) {
+            console.error('[XQueueCoordinator] onCapacityBlocked hook failed:', error);
+          }
+        }
         return { dispatched: false, reason: admitted.reason || 'not_accepted' };
       }
 
@@ -294,10 +307,10 @@ export class XQueueCoordinator {
       // entry tracked, re-calls recordReview (no-op, returns the existing
       // record), and completes markTerminal.
       this.queueStore.recordReview({ runId: run.runId, taskId: run.taskId, status: run.status });
-      this.queueStore.markTerminal(entry.id);
+      this.queueStore.markTerminal(entry.id, run.status);
     } else {
       // completed
-      this.queueStore.markTerminal(entry.id);
+      this.queueStore.markTerminal(entry.id, run.status);
     }
 
     this._scheduleDispatch();

@@ -30,6 +30,17 @@ let goalRunner = null;
 let taskStore = null;
 let jobManager = null;
 let xQueueCoordinator = null;
+let xQueueStore = null;
+let xQueueDispatchEnabled = false;
+let xQueueCapacityTimer = null;
+let xQueueCapacityImmediate = null;
+let xGetQueueCapacityDeadline = null;
+let xRunStore = null;
+let xParseTask = null;
+let xShuttingDown = false;
+const xQueueInflight = new Map();
+const xQueueRequests = new Map();
+const pendingXApprovals = new Map();
 let xWakeupTimer = null;
 let xGetNextWakeupDeadline = null;
 let xReconcileRuntimeNow = null;
@@ -167,6 +178,129 @@ const clearBridgeSession = () => {
 };
 const sendEvent = (event) => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('server:event', event); };
 
+const xQueueError = (code) => Object.assign(new Error(code), { code });
+const canonicalJson = (value) => JSON.stringify(value, (_key, item) => {
+  if (!item || Array.isArray(item) || typeof item !== 'object') return item;
+  return Object.fromEntries(Object.keys(item).sort().map((key) => [key, item[key]]));
+});
+const hasLiveXQueueEntries = () => Boolean(xQueueStore &&
+  (xQueueStore.listPending().length || xQueueStore.listDispatching().length || xQueueStore.listDispatched().length));
+const xQueueWorkspaceMatches = (workspace) => {
+  if (!hasLiveXQueueEntries()) return true;
+  try {
+    const selected = fs.realpathSync(workspace);
+    return [...xQueueStore.listPending(), ...xQueueStore.listDispatching(), ...xQueueStore.listDispatched()]
+      .every((entry) => fs.realpathSync(entry.workspaceRoot || entry.task?.workspace?.root) === selected);
+  } catch { return false; }
+};
+const xQueueReceiptStatus = (receipt) => {
+  if (!receipt) return { found: false, reason: xQueueStore?.recoveryRequired ? 'queue_recovery_required' : 'not_found' };
+  const result = {
+    found: true, request_id: receipt.requestId, queue_id: receipt.queueId, task_id: receipt.taskId,
+    queue_status: receipt.queueStatus, run_id: receipt.runId, terminal_status: receipt.terminalStatus,
+    accepted_at: receipt.acceptedAt,
+  };
+  if (receipt.queueStatus === 'terminal') {
+    const run = receipt.runId ? xRunStore?.getRun(receipt.runId) : null;
+    result.execution_detail_available = Boolean(run);
+    if (run) {
+      result.terminal_status = run.status;
+      result.gate_status = run.gateStatus;
+      result.hearth_outcome = run.hearthOutcome;
+      result.error = run.error;
+      result.result = run.result;
+    }
+  }
+  if (xQueueStore?.recoveryRequired) result.recovery_required = true;
+  return result;
+};
+const cancelXQueueRequest = (transportId) => {
+  const waiter = xQueueRequests.get(transportId);
+  if (!waiter) return;
+  xQueueRequests.delete(transportId);
+  waiter.active = false;
+  if (waiter.inflight) {
+    waiter.inflight.waiters.delete(transportId);
+    if (!waiter.inflight.committed && waiter.inflight.waiters.size === 0) waiter.inflight.abort.abort();
+  }
+};
+const cancelXQueueChild = (child) => {
+  for (const [transportId, waiter] of xQueueRequests) if (waiter.child === child) cancelXQueueRequest(transportId);
+  for (const pending of pendingXApprovals.values()) if (pending.child === child) pending.cancel();
+};
+const requestXApproval = (record, child, action) => new Promise((resolve) => {
+  const requestId = crypto.randomUUID();
+  let settled = false;
+  const finish = (allowed) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    record.abort.signal.removeEventListener('abort', onAbort);
+    pendingXApprovals.delete(requestId);
+    localApprovals.delete(requestId);
+    resolve(allowed === true);
+  };
+  const onAbort = () => finish(false);
+  const timer = setTimeout(() => finish(false), 60000);
+  pendingXApprovals.set(requestId, { child, cancel: () => finish(false) });
+  localApprovals.set(requestId, finish);
+  record.abort.signal.addEventListener('abort', onAbort, { once: true });
+  if (record.abort.signal.aborted || xShuttingDown || serverProcess !== child) finish(false);
+  else sendEvent({ type: 'approval', requestId, permission: 'X', action });
+});
+const handleXQueueEnqueue = async (message, child, launchWorkspace, waiter) => {
+  if (!xQueueStore || !xParseTask) throw xQueueError('queue_unavailable');
+  if (typeof message.requestId !== 'string' || !message.requestId.trim() || message.requestId.length > 256) throw xQueueError('invalid_request_id');
+  let task;
+  try { task = xParseTask(message.task); } catch (error) { throw xQueueError(error?.code || 'invalid_x_task'); }
+  let childRoot, reportedRoot, settingsRoot, taskRoot;
+  try {
+    [childRoot, reportedRoot, settingsRoot, taskRoot] = await Promise.all([
+      fs.promises.realpath(launchWorkspace), fs.promises.realpath(message.workspace),
+      fs.promises.realpath(readSettings().workspace), fs.promises.realpath(task.workspace.root),
+    ]);
+  } catch { throw xQueueError('workspace_mismatch'); }
+  if (childRoot !== reportedRoot || childRoot !== settingsRoot) throw xQueueError('workspace_mismatch');
+  const canonicalTask = { ...task, workspace: { ...task.workspace, root: taskRoot } };
+  const fingerprint = crypto.createHash('sha256').update(canonicalJson(canonicalTask)).digest('hex');
+  if (xQueueStore.recoveryRequired) throw xQueueError('queue_recovery_required');
+  const prior = xQueueStore.getReceipt(message.requestId);
+  if (prior) {
+    if (prior.fingerprint !== fingerprint) throw xQueueError('request_id_conflict');
+    return { accepted: true, ...xQueueReceiptStatus(prior) };
+  }
+  if (!waiter.active || xShuttingDown || serverProcess !== child) throw xQueueError('transport_unavailable');
+  if (!xQueueCoordinator) throw xQueueError('workspace_mismatch');
+  if (taskRoot !== settingsRoot || !xQueueDispatchEnabled || !xQueueWorkspaceMatches(settingsRoot)) throw xQueueError('workspace_mismatch');
+  const existing = xQueueInflight.get(message.requestId);
+  if (existing) {
+    if (existing.fingerprint !== fingerprint) throw xQueueError('request_id_conflict');
+    existing.waiters.add(waiter.transportId);
+    waiter.inflight = existing;
+    return existing.promise;
+  }
+  const record = { fingerprint, waiters: new Set([waiter.transportId]), abort: new AbortController(), committed: false, promise: null };
+  waiter.inflight = record;
+  xQueueInflight.set(message.requestId, record);
+  record.promise = (async () => {
+    const permission = readSettings().permissions.X ?? 'Ask';
+    if (permission === 'Blocked') throw xQueueError('permission_blocked');
+    if (permission !== 'Allow' && permission !== 'Ask') throw xQueueError('permission_blocked');
+    if (permission === 'Ask' && !(await requestXApproval(record, child, `Queue X task: ${canonicalTask.task_id}`))) throw xQueueError('permission_denied');
+    if (record.abort.signal.aborted || xShuttingDown || serverProcess !== child || record.waiters.size === 0) throw xQueueError('transport_unavailable');
+    let currentRoot;
+    try { currentRoot = await fs.promises.realpath(readSettings().workspace); } catch { throw xQueueError('workspace_mismatch'); }
+    if (record.abort.signal.aborted || xShuttingDown || serverProcess !== child || record.waiters.size === 0) throw xQueueError('transport_unavailable');
+    if (currentRoot !== taskRoot || !xQueueDispatchEnabled || !xQueueWorkspaceMatches(currentRoot)) throw xQueueError('workspace_mismatch');
+    const accepted = xQueueCoordinator.enqueue(canonicalTask, { requestId: message.requestId, fingerprint, workspaceRoot: taskRoot });
+    if (accepted.error) throw xQueueError(accepted.error);
+    record.committed = true;
+    return { accepted: true, ...xQueueReceiptStatus(accepted.receipt) };
+  })();
+  try { return await record.promise; }
+  finally { if (xQueueInflight.get(message.requestId) === record) xQueueInflight.delete(message.requestId); }
+};
+
 // Fast-restart X liveness: a single one-shot wakeup, never polling/setInterval.
 // Electron never inspects claim/run truth itself here -- it only ever reads
 // one persisted deadline (getNextXWakeupDeadline) and, on fire, re-runs the
@@ -208,6 +342,31 @@ const onXWakeupFire = () => {
     // been extended to a later deadline, which this re-read picks up.
     armXWakeup();
   }
+};
+const clearXQueueCapacityWakeup = () => {
+  if (xQueueCapacityTimer) clearTimeout(xQueueCapacityTimer);
+  if (xQueueCapacityImmediate) clearImmediate(xQueueCapacityImmediate);
+  xQueueCapacityTimer = null;
+  xQueueCapacityImmediate = null;
+};
+const armXQueueCapacityWakeup = () => {
+  clearXQueueCapacityWakeup();
+  if (!xQueueDispatchEnabled || !xQueueStore?.listPending().length || !xGetQueueCapacityDeadline) return;
+  let deadline;
+  try { deadline = xGetQueueCapacityDeadline(); }
+  catch (error) { console.error('[Electron] X queue capacity deadline lookup failed:', error); return; }
+  if (deadline == null) {
+    xQueueCapacityImmediate = setImmediate(() => {
+      xQueueCapacityImmediate = null;
+      if (xQueueDispatchEnabled) xQueueCoordinator?.kick();
+    });
+    return;
+  }
+  xQueueCapacityTimer = setTimeout(() => {
+    xQueueCapacityTimer = null;
+    if (xQueueDispatchEnabled) xQueueCoordinator?.kick();
+  }, Math.max(0, deadline - Date.now()));
+  xQueueCapacityTimer.unref?.();
 };
 const getUpdaterInfo = () => ({
   currentVersion: buildMetadata.version,
@@ -280,6 +439,7 @@ const stopServer = async () => {
 
 const startServer = async ({ workspace, port }) => {
   if (serverProcess) return serverState;
+  if (hasLiveXQueueEntries() && !xQueueWorkspaceMatches(workspace)) throw xQueueError('workspace_mismatch');
   const selectedPort = Number(port) || 3001;
   serverProcess = fork(path.join(__dirname, 'server.cjs'), [], {
     env: {
@@ -290,11 +450,14 @@ const startServer = async ({ workspace, port }) => {
     },
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
   });
+  const child = serverProcess;
+  const launchWorkspace = workspace || '';
   serverState = { running: false, port: selectedPort, pid: serverProcess.pid ?? null };
   sendEvent({ type: 'log', source: 'core', tone: 'quiet', message: `Starting local server process (PID ${serverProcess.pid})` });
   serverProcess.stdout.on('data', (chunk) => sendEvent({ type: 'log', source: 'server', tone: 'quiet', message: chunk.toString().trim() }));
   serverProcess.stderr.on('data', (chunk) => sendEvent({ type: 'log', source: 'server', tone: 'error', message: chunk.toString().trim() }));
   serverProcess.on('message', (message) => {
+    if (serverProcess !== child) return;
     if (message?.type === 'ready') {
       serverState = { running: true, port: selectedPort, pid: serverProcess?.pid ?? null };
       sendEvent({ type: 'state', state: serverState });
@@ -304,14 +467,40 @@ const startServer = async ({ workspace, port }) => {
     if (message?.type === 'x_run_terminal') {
       sendEvent(message);
       try {
-        xQueueCoordinator?.onXRunTerminal(message);
+        const handled = xQueueCoordinator?.onXRunTerminal(message);
+        if (handled?.reason === 'not_tracked') xQueueCoordinator?.kick();
       } catch (err) {
         console.error('[XQueueCoordinator] onXRunTerminal failed:', err);
       }
     }
     if (message?.type === 'x_admission_hint') armXWakeup();
+    if (message?.type === 'x_capacity_released_hint' && xQueueDispatchEnabled) {
+      xQueueCoordinator?.kick();
+      armXQueueCapacityWakeup();
+    }
+    if (message?.type === 'x_queue_request_cancel') cancelXQueueRequest(message.transportId);
+    if (message?.type === 'x_queue_enqueue_request' || message?.type === 'x_queue_status_request') {
+      if (typeof message.transportId !== 'string' || !/^[0-9a-f-]{36}$/i.test(message.transportId) || xQueueRequests.has(message.transportId)) return;
+      const waiter = { transportId: message.transportId, child, active: true, inflight: null };
+      xQueueRequests.set(message.transportId, waiter);
+      const operation = message.type === 'x_queue_enqueue_request'
+        ? handleXQueueEnqueue(message, child, launchWorkspace, waiter)
+        : Promise.resolve().then(() => xQueueReceiptStatus(xQueueStore?.getReceipt(message.requestId)));
+      void operation.then((receipt) => {
+        if (waiter.active && serverProcess === child) {
+          try { child.send({ type: message.type === 'x_queue_enqueue_request' ? 'x_queue_enqueue_ack' : 'x_queue_status_ack', transportId: message.transportId, ok: true, receipt }); }
+          catch (error) { console.error('[Electron] X queue ack failed:', error); }
+        }
+      }, (error) => {
+        if (waiter.active && serverProcess === child) {
+          try { child.send({ type: message.type === 'x_queue_enqueue_request' ? 'x_queue_enqueue_ack' : 'x_queue_status_ack', transportId: message.transportId, ok: false, error: error?.code || 'queue_error' }); }
+          catch (sendError) { console.error('[Electron] X queue error ack failed:', sendError); }
+        }
+      }).finally(() => cancelXQueueRequest(message.transportId));
+    }
   });
   serverProcess.once('exit', (code, signal) => {
+    cancelXQueueChild(child);
     serverProcess = undefined;
     serverState = { running: false, port: selectedPort, pid: null };
     sendEvent({ type: 'state', state: serverState });
@@ -439,21 +628,32 @@ app.whenReady().then(async () => {
   try {
     const { XQueueStore } = await importFromHere('../mcp/x/queue-store.mjs');
     const { XQueueCoordinator } = await importFromHere('../mcp/x/queue-coordinator.mjs');
-    const { getProductionXRuntime, getNextXWakeupDeadline, reconcileXRuntimeNow } = await importFromHere('../mcp/x/production-runtime.mjs');
+    const { getProductionXRuntime, getNextXWakeupDeadline, getNextXQueueCapacityDeadline, reconcileXRuntimeNow } = await importFromHere('../mcp/x/production-runtime.mjs');
+    const { parseXTask } = await importFromHere('../mcp/x/task-contract.mjs');
     xGetNextWakeupDeadline = getNextXWakeupDeadline;
+    xGetQueueCapacityDeadline = getNextXQueueCapacityDeadline;
     xReconcileRuntimeNow = reconcileXRuntimeNow;
+    xParseTask = parseXTask;
     const { onAntigravityAdmissionReleased } = await importFromHere('../mcp/executors/antigravity-admission.mjs');
     const queueStorePath = path.join(app.getPath('userData'), 'x-queue.json');
-    const xQueueStore = new XQueueStore({ storagePath: queueStorePath });
+    xQueueStore = new XQueueStore({ storagePath: queueStorePath });
     xQueueStore.load();
     const { claimStore, runStore, modelAdapter, ownerId } = getProductionXRuntime();
+    xRunStore = runStore;
     xQueueCoordinator = new XQueueCoordinator({
       queueStore: xQueueStore, claimStore, runStore, modelAdapter, ownerId,
       onAdmissionAccepted: () => armXWakeup(),
+      onCapacityBlocked: () => armXQueueCapacityWakeup(),
     });
     onAntigravityAdmissionReleased(() => {
-      xQueueCoordinator?.kick();
+      if (xQueueDispatchEnabled) xQueueCoordinator?.kick();
     });
+    xQueueDispatchEnabled = !xQueueStore.recoveryRequired && xQueueWorkspaceMatches(readSettings().workspace);
+    if (!xQueueDispatchEnabled) {
+      console.error(`[Electron] X queue ${xQueueStore.recoveryRequired ? 'recovery required' : 'workspace mismatch'}; preserving entries without dispatch.`);
+      xQueueCoordinator = null;
+    }
+    if (xQueueDispatchEnabled) {
     for (const entry of xQueueStore.listDispatched()) {
       try {
         xQueueCoordinator.onXRunTerminal({ runId: entry.runId });
@@ -469,6 +669,7 @@ app.whenReady().then(async () => {
       }
     }
     xQueueCoordinator.kick();
+    }
     armXWakeup();
   } catch (err) {
     console.error('Failed to initialize XQueueCoordinator:', err);
@@ -479,6 +680,7 @@ app.whenReady().then(async () => {
     return publicSettings;
   });
   ipcMain.handle('settings:save', async (_event, settings) => {
+    if (settings.workspace && settings.workspace !== readSettings().workspace && hasLiveXQueueEntries()) throw xQueueError('workspace_locked_by_x_queue');
     const { hasRunningTask } = await importFromHere('../mcp/executors/antigravity.mjs');
     if (settings.workspace && (goalRunner?.is_goal_active() || (hasRunningTask && hasRunningTask()))) {
       const current = readSettings();
@@ -722,6 +924,7 @@ app.whenReady().then(async () => {
     if (controller) controller.abort();
   });
   ipcMain.handle('workspace:choose', async () => {
+    if (hasLiveXQueueEntries()) throw xQueueError('workspace_locked_by_x_queue');
     const { hasRunningTask } = await importFromHere('../mcp/executors/antigravity.mjs');
     if (goalRunner?.is_goal_active() || (hasRunningTask && hasRunningTask())) {
       throw new Error('Cannot change workspace while a goal or task is active or requires recovery');
@@ -798,6 +1001,10 @@ app.whenReady().then(async () => {
   ipcMain.handle('server:start', (_event, options) => startServer(options));
   ipcMain.handle('server:stop', () => stopServer());
   ipcMain.handle('server:respond-approval', (_event, response) => {
+    if (pendingXApprovals.has(response.requestId)) {
+      localApprovals.get(response.requestId)?.(response.allowed === true);
+      return true;
+    }
     if (localApprovals.has(response.requestId)) {
       localApprovals.get(response.requestId)(response.allowed === true);
     }
@@ -1399,6 +1606,10 @@ app.whenReady().then(async () => {
 });
 }
 app.on('before-quit', () => {
+  xShuttingDown = true;
+  for (const transportId of xQueueRequests.keys()) cancelXQueueRequest(transportId);
+  for (const pending of pendingXApprovals.values()) pending.cancel();
+  clearXQueueCapacityWakeup();
   for (const controller of localChatStreams.values()) controller.abort();
   if (continuationRecoveryTimer) clearInterval(continuationRecoveryTimer);
   if (serverProcess) serverProcess.kill('SIGTERM');

@@ -24,6 +24,74 @@ afterEach(() => {
 
 const taskFor = (taskId = 'task-1') => ({ version: 'x-task-v1', task_id: taskId, objective: 'do the thing' });
 
+test('ingress receipt is durable, idempotent, and survives terminal pruning', () => {
+  const file = tmpStorePath();
+  const store = new XQueueStore({ storagePath: file }).load();
+  const identity = { requestId: 'request-1', fingerprint: 'hash-1', workspaceRoot: '/workspace' };
+  const first = store.enqueueWithReceipt(taskFor(), identity);
+  assert.equal(first.receipt.queueStatus, 'pending');
+  assert.equal(first.receipt.runId, null);
+  assert.equal(store.enqueueWithReceipt(taskFor(), identity).receipt.queueId, first.entry.id);
+  assert.equal(store.enqueueWithReceipt(taskFor(), { ...identity, fingerprint: 'different' }).error, 'request_id_conflict');
+  store.markDispatching(first.entry.id, 'run-1');
+  assert.equal(store.getReceipt('request-1').runId, null);
+  store.returnToPending(first.entry.id);
+  assert.equal(store.getReceipt('request-1').queueStatus, 'pending');
+  store.markDispatching(first.entry.id, 'run-2');
+  store.markDispatched(first.entry.id, 'run-2');
+  assert.equal(store.getReceipt('request-1').runId, 'run-2');
+  store.markTerminal(first.entry.id, 'completed');
+  const loaded = new XQueueStore({ storagePath: file }).load();
+  assert.equal(loaded.listDispatched().length, 0);
+  assert.equal(loaded.getReceipt('request-1').terminalStatus, 'completed');
+  assert.equal(loaded.enqueueWithReceipt(taskFor(), identity).receipt.queueId, first.entry.id);
+  assert.equal(loaded.listPending().length, 0);
+});
+
+test('backup recovery blocks new ingress and remains blocked after a save', () => {
+  const file = tmpStorePath();
+  const store = new XQueueStore({ storagePath: file }).load();
+  store.enqueue(taskFor('one'));
+  store.enqueue(taskFor('two'));
+  fs.writeFileSync(file, '{broken', 'utf8');
+  const recovered = new XQueueStore({ storagePath: file }).load();
+  assert.equal(recovered.recoveryRequired, true);
+  assert.equal(recovered.enqueueWithReceipt(taskFor(), { requestId: 'r', fingerprint: 'h', workspaceRoot: '/w' }).error, 'queue_recovery_required');
+  recovered.save();
+  const reloaded = new XQueueStore({ storagePath: file }).load();
+  assert.equal(reloaded.recoveryRequired, true);
+});
+
+test('a failed receipt transition save rolls memory back to durable queue truth', () => {
+  const file = tmpStorePath();
+  const store = new XQueueStore({ storagePath: file }).load();
+  const { entry } = store.enqueueWithReceipt(taskFor(), { requestId: 'request-1', fingerprint: 'hash-1', workspaceRoot: '/workspace' });
+  const originalSave = store.save.bind(store);
+  store.save = () => { throw new Error('disk unavailable'); };
+  assert.throws(() => store.markDispatching(entry.id, 'run-1'), /disk unavailable/);
+  assert.equal(store.getReceipt('request-1').queueStatus, 'pending');
+  assert.equal(store.nextPending().id, entry.id);
+  store.save = originalSave;
+  store.markDispatching(entry.id, 'run-1');
+  store.markDispatched(entry.id, 'run-1');
+  store.save = () => { throw new Error('disk unavailable'); };
+  assert.throws(() => store.markTerminal(entry.id, 'completed'), /disk unavailable/);
+  assert.equal(store.getReceipt('request-1').queueStatus, 'dispatched');
+  assert.equal(store.findDispatchedByRunId('run-1').id, entry.id);
+});
+
+test('a parseable primary missing required receipt truth also fails closed', () => {
+  const file = tmpStorePath();
+  const store = new XQueueStore({ storagePath: file }).load();
+  store.enqueueWithReceipt(taskFor(), { requestId: 'request-1', fingerprint: 'hash-1', workspaceRoot: '/workspace' });
+  const corrupted = JSON.parse(fs.readFileSync(file, 'utf8'));
+  corrupted.receipts = [];
+  fs.writeFileSync(file, JSON.stringify(corrupted), 'utf8');
+  const loaded = new XQueueStore({ storagePath: file }).load();
+  assert.equal(loaded.recoveryRequired, true);
+  assert.equal(loaded.enqueueWithReceipt(taskFor(), { requestId: 'request-1', fingerprint: 'hash-1', workspaceRoot: '/workspace' }).error, 'queue_recovery_required');
+});
+
 // ── enqueue ──────────────────────────────────────────────────────────────
 
 test('enqueue persists a pending entry and rejects a missing/non-string task_id', () => {

@@ -3,6 +3,8 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { localhostHostValidation } from '@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js';
 import { createMcpServer } from './create-server.mjs';
 import { toolNames } from './tools.mjs';
+import crypto from 'node:crypto';
+import { onAntigravityAdmissionReleased } from './executors/antigravity-admission.mjs';
 
 // Build Express app manually so we can set body-parser limit to 12 MB.
 // This allows write_file's own 10 MB guard to fire with a readable error
@@ -17,6 +19,48 @@ const port = Number(process.env.CONTROL_PORT || 3001);
 const workspace = process.env.CONTROL_WORKSPACE || '';
 const permissions = process.env.CONTROL_PERMISSIONS ? JSON.parse(process.env.CONTROL_PERMISSIONS) : {};
 const approvals = new Map();
+const queueReplies = new Map();
+const queueError = (code) => Object.assign(new Error(code), { code });
+
+const queueIngressTransportFor = (response) => {
+  const active = new Set();
+  const roundTrip = (type, payload) => new Promise((resolve, reject) => {
+    if (typeof process.send !== 'function' || !process.connected) { reject(queueError('transport_unavailable')); return; }
+    const transportId = crypto.randomUUID();
+    const finish = (error, result) => {
+      const pending = queueReplies.get(transportId);
+      if (!pending) return;
+      clearTimeout(pending.timer);
+      queueReplies.delete(transportId);
+      active.delete(transportId);
+      if (error) reject(error); else resolve(result);
+    };
+    const timer = setTimeout(() => {
+      try { process.send({ type: 'x_queue_request_cancel', transportId }); } catch {}
+      finish(queueError('transport_timeout'));
+    }, 120000);
+    active.add(transportId);
+    queueReplies.set(transportId, { finish, timer });
+    try { process.send({ type, transportId, ...payload }); }
+    catch { finish(queueError('transport_unavailable')); }
+  });
+  response.on('close', () => {
+    for (const transportId of active) {
+      try { process.send?.({ type: 'x_queue_request_cancel', transportId }); } catch {}
+      queueReplies.get(transportId)?.finish(queueError('transport_unavailable'));
+    }
+  });
+  return {
+    enqueue: ({ requestId, task, workspace }) => roundTrip('x_queue_enqueue_request', { requestId, task, workspace }),
+    status: ({ requestId }) => roundTrip('x_queue_status_request', { requestId }),
+  };
+};
+
+onAntigravityAdmissionReleased(() => {
+  if (typeof process.send === 'function') {
+    try { process.send({ type: 'x_capacity_released_hint' }); } catch {}
+  }
+});
 
 const requestApproval = ({ permission, action }) => new Promise((resolve) => {
   const requestId = crypto.randomUUID();
@@ -29,6 +73,12 @@ const requestApproval = ({ permission, action }) => new Promise((resolve) => {
 process.on('message', (message) => {
   if (message?.type === 'approval:result') approvals.get(message.requestId)?.(message.allowed === true);
   if (message?.type === 'settings:update' && message.permissions) Object.assign(permissions, message.permissions);
+  if (message?.type === 'x_queue_enqueue_ack' || message?.type === 'x_queue_status_ack') {
+    queueReplies.get(message.transportId)?.finish(null, message.ok ? message.receipt : { accepted: false, found: false, reason: message.error });
+  }
+});
+process.on('disconnect', () => {
+  for (const pending of queueReplies.values()) pending.finish(queueError('transport_unavailable'));
 });
 
 app.get('/health', (_request, response) => {
@@ -38,7 +88,7 @@ app.get('/health', (_request, response) => {
 app.get('/tools', (_request, response) => response.json({ tools: toolNames }));
 
 app.post('/mcp', async (request, response) => {
-  const server = createMcpServer({ workspace, permissions, requestApproval });
+  const server = createMcpServer({ workspace, permissions, requestApproval, queueIngressTransport: queueIngressTransportFor(response) });
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   response.on('close', () => {
     void transport.close();

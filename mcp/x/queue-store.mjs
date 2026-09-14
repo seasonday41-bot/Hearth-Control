@@ -3,6 +3,28 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 
 const REVIEW_STATUSES = new Set(['needs_review', 'failed', 'interrupted']);
+const receiptDigest = (receipts) => crypto.createHash('sha256').update(JSON.stringify(receipts)).digest('hex');
+const validQueuePayload = (value) => {
+  if (!value || Array.isArray(value) || !Array.isArray(value.entries) || !Array.isArray(value.reviews)) return false;
+  if (value.schemaVersion === 1) return value.receipts === undefined;
+  if (value.schemaVersion !== 2 || !Array.isArray(value.receipts) || value.receiptDigest !== receiptDigest(value.receipts)) return false;
+  const ids = new Set();
+  const entryById = new Map(value.entries.filter((entry) => entry && typeof entry.id === 'string').map((entry) => [entry.id, entry]));
+  for (const receipt of value.receipts) {
+    if (!receipt || typeof receipt.requestId !== 'string' || !receipt.requestId ||
+        typeof receipt.queueId !== 'string' || !receipt.queueId || typeof receipt.fingerprint !== 'string' ||
+        typeof receipt.workspaceRoot !== 'string' ||
+        !['pending', 'dispatching', 'dispatched', 'terminal'].includes(receipt.queueStatus) || ids.has(receipt.requestId)) return false;
+    const entry = entryById.get(receipt.queueId);
+    if (receipt.queueStatus === 'terminal') {
+      if (entry || typeof receipt.runId !== 'string' ||
+          !['completed', 'needs_review', 'failed', 'interrupted'].includes(receipt.terminalStatus)) return false;
+    } else if (!entry || entry.status !== receipt.queueStatus ||
+               (receipt.queueStatus === 'dispatched' ? receipt.runId !== entry.runId : receipt.runId !== null)) return false;
+    ids.add(receipt.requestId);
+  }
+  return true;
+};
 
 /**
  * Persistent, JSON-file-backed store for XQueueCoordinator's own bookkeeping
@@ -10,11 +32,14 @@ const REVIEW_STATUSES = new Set(['needs_review', 'failed', 'interrupted']);
  * load/save shape: atomic tmp-file + rename, a .bak copy kept before each
  * overwrite, corrupted-primary falls back to backup on load).
  *
- * This store is authoritative for exactly two things, and nothing else:
+ * This store is authoritative for queue bookkeeping and ingress receipts:
  *  - which already-authored x-task-v1 payloads are waiting to be dispatched
  *    (and, for the one currently being/just dispatched, which runId it
  *    became, once known);
  *  - which terminal runs (needs_review/failed) still need a human's review.
+ *  - which request_id values were already accepted, including after an
+ *    entry is pruned. Receipts record queue state and a terminal status
+ *    snapshot, but never replace XRunStore's execution result truth.
  *
  * It NEVER stores a persisted x-result-v1, gate result, or any other
  * X execution truth -- XRunStore remains the sole authority for that.
@@ -64,14 +89,16 @@ export class XQueueStore {
     this.backupPath = `${storagePath}.bak`;
     /** @type {Map<string, { id: string, task: object, taskId: string, status: 'pending'|'dispatching'|'dispatched', createdAt: string, dispatchingAt: string|null, dispatchedAt: string|null, runId: string|null }>} */
     this.entries = new Map();
+    this.receipts = new Map();
+    this.recoveryRequired = false;
     /** @type {Map<string, { runId: string, taskId: string, status: 'needs_review'|'failed', recordedAt: string }>} */
     this.reviews = new Map();
     this.loaded = false;
   }
 
   /**
-   * Loads persisted state from disk. Tolerant of a missing, corrupted, or
-   * partially-written file (falls back to .bak, then to empty). A
+   * Loads persisted state from disk. A missing store starts empty; corrupted
+   * primary data may fall back to .bak, but then new ingress fails closed. A
    * `dispatching` entry loads exactly as it was persisted -- this method
    * never redispatches, never reverts it to pending, and never invents any
    * recovery of its own; see the class-level note above.
@@ -79,18 +106,25 @@ export class XQueueStore {
   load() {
     this.entries.clear();
     this.reviews.clear();
+    this.receipts.clear();
     let rawData = null;
+    let primaryFailed = false;
 
     if (fs.existsSync(this.storagePath)) {
       try {
         rawData = JSON.parse(fs.readFileSync(this.storagePath, 'utf8'));
+        if (!validQueuePayload(rawData)) throw new Error('Invalid queue store structure');
       } catch (err) {
+        primaryFailed = true;
         console.warn(`[XQueueStore] Primary store '${this.storagePath}' corrupted: ${err.message}. Trying backup...`);
       }
     }
+    if (!fs.existsSync(this.storagePath) && fs.existsSync(this.backupPath)) primaryFailed = true;
     if (!rawData && fs.existsSync(this.backupPath)) {
+      primaryFailed = true;
       try {
         rawData = JSON.parse(fs.readFileSync(this.backupPath, 'utf8'));
+        if (!validQueuePayload(rawData)) throw new Error('Invalid backup queue store structure');
         console.info(`[XQueueStore] Successfully restored queue from backup '${this.backupPath}'`);
       } catch (err) {
         console.warn(`[XQueueStore] Backup store '${this.backupPath}' also corrupted: ${err.message}`);
@@ -98,13 +132,18 @@ export class XQueueStore {
     }
 
     if (rawData) {
+      this.recoveryRequired ||= Boolean(rawData.recoveryRequired);
       for (const entry of Array.isArray(rawData.entries) ? rawData.entries : []) {
         if (entry && typeof entry.id === 'string') this.entries.set(entry.id, entry);
       }
       for (const review of Array.isArray(rawData.reviews) ? rawData.reviews : []) {
         if (review && typeof review.runId === 'string') this.reviews.set(review.runId, review);
       }
+      for (const receipt of Array.isArray(rawData.receipts) ? rawData.receipts : []) {
+        if (receipt && typeof receipt.requestId === 'string') this.receipts.set(receipt.requestId, receipt);
+      }
     }
+    this.recoveryRequired ||= primaryFailed;
     this.loaded = true;
     return this;
   }
@@ -115,11 +154,14 @@ export class XQueueStore {
       const dir = path.dirname(this.storagePath);
       fs.mkdirSync(dir, { recursive: true });
       const payload = {
-        schemaVersion: 1,
+        schemaVersion: 2,
         updatedAt: new Date().toISOString(),
         entries: Array.from(this.entries.values()),
         reviews: Array.from(this.reviews.values()),
+        receipts: Array.from(this.receipts.values()),
+        recoveryRequired: this.recoveryRequired,
       };
+      payload.receiptDigest = receiptDigest(payload.receipts);
       const serialized = JSON.stringify(payload, null, 2);
       const tempPath = `${this.storagePath}.tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -158,6 +200,38 @@ export class XQueueStore {
     return entry;
   }
 
+  getReceipt(requestId) {
+    return this.receipts.get(requestId) ?? null;
+  }
+
+  /** Persist a new entry and its idempotency receipt in the same queue-file save. */
+  enqueueWithReceipt(task, { requestId, fingerprint, workspaceRoot }) {
+    if (this.recoveryRequired) return { error: 'queue_recovery_required' };
+    if (!requestId || !fingerprint || !workspaceRoot) throw new TypeError('Receipt identity is required.');
+    const prior = this.getReceipt(requestId);
+    if (prior) return prior.fingerprint === fingerprint
+      ? { receipt: prior, entry: this.entries.get(prior.queueId) ?? null, replayed: true }
+      : { error: 'request_id_conflict' };
+    if (!task || typeof task.task_id !== 'string' || !task.task_id.trim()) throw new TypeError('A valid task_id is required.');
+    const id = crypto.randomUUID();
+    const createdAt = new Date().toISOString();
+    const entry = { id, task, taskId: task.task_id, status: 'pending', createdAt, dispatchingAt: null, dispatchedAt: null, runId: null, workspaceRoot };
+    const receipt = { requestId, queueId: id, taskId: task.task_id, fingerprint, workspaceRoot, queueStatus: 'pending', runId: null, terminalStatus: null, acceptedAt: createdAt };
+    this.entries.set(id, entry);
+    this.receipts.set(requestId, receipt);
+    try { this.save(); } catch (error) {
+      this.entries.delete(id);
+      this.receipts.delete(requestId);
+      throw error;
+    }
+    return { entry, receipt, replayed: false };
+  }
+
+  _receiptForEntry(id) {
+    for (const receipt of this.receipts.values()) if (receipt.queueId === id) return receipt;
+    return null;
+  }
+
   /** Returns the oldest still-pending entry (insertion order), or null if none. */
   nextPending() {
     for (const entry of this.entries.values()) {
@@ -171,10 +245,18 @@ export class XQueueStore {
     const entry = this.entries.get(id);
     if (!entry || entry.status !== 'pending') return null;
     if (!runId || typeof runId !== 'string') throw new TypeError('markDispatching requires a real runId.');
+    const priorEntry = { ...entry };
+    const receipt = this._receiptForEntry(id);
+    const priorReceipt = receipt ? { ...receipt } : null;
     entry.status = 'dispatching';
     entry.dispatchingAt = new Date().toISOString();
     entry.runId = runId;
-    this.save();
+    if (receipt) { receipt.queueStatus = 'dispatching'; receipt.runId = null; }
+    try { this.save(); } catch (error) {
+      Object.assign(entry, priorEntry);
+      if (receipt) Object.assign(receipt, priorReceipt);
+      throw error;
+    }
     return entry;
   }
 
@@ -183,10 +265,18 @@ export class XQueueStore {
     const entry = this.entries.get(id);
     if (!entry || entry.status !== 'dispatching') return null;
     if (!runId || typeof runId !== 'string') throw new TypeError('markDispatched requires a real runId.');
+    const priorEntry = { ...entry };
+    const receipt = this._receiptForEntry(id);
+    const priorReceipt = receipt ? { ...receipt } : null;
     entry.status = 'dispatched';
     entry.dispatchedAt = new Date().toISOString();
     entry.runId = runId;
-    this.save();
+    if (receipt) { receipt.queueStatus = 'dispatched'; receipt.runId = runId; }
+    try { this.save(); } catch (error) {
+      Object.assign(entry, priorEntry);
+      if (receipt) Object.assign(receipt, priorReceipt);
+      throw error;
+    }
     return entry;
   }
 
@@ -194,10 +284,18 @@ export class XQueueStore {
   returnToPending(id) {
     const entry = this.entries.get(id);
     if (!entry || entry.status !== 'dispatching') return null;
+    const priorEntry = { ...entry };
+    const receipt = this._receiptForEntry(id);
+    const priorReceipt = receipt ? { ...receipt } : null;
     entry.status = 'pending';
     entry.dispatchingAt = null;
     entry.runId = null;
-    this.save();
+    if (receipt) { receipt.queueStatus = 'pending'; receipt.runId = null; }
+    try { this.save(); } catch (error) {
+      Object.assign(entry, priorEntry);
+      if (receipt) Object.assign(receipt, priorReceipt);
+      throw error;
+    }
     return entry;
   }
 
@@ -210,11 +308,23 @@ export class XQueueStore {
   }
 
   /** Prunes an entry ONLY once it has actually reached `dispatched` and its run has hit ANY terminal outcome. Never deletes a `pending` or stuck-`dispatching` entry. */
-  markTerminal(id) {
+  markTerminal(id, terminalStatus = null) {
     const entry = this.entries.get(id);
     if (!entry || entry.status !== 'dispatched') return false;
+    const receipt = this._receiptForEntry(id);
+    const priorReceipt = receipt ? { ...receipt } : null;
+    if (receipt) {
+      if (!['completed', 'needs_review', 'failed', 'interrupted'].includes(terminalStatus)) throw new TypeError('A persisted terminal status is required.');
+      receipt.queueStatus = 'terminal';
+      receipt.runId = entry.runId;
+      receipt.terminalStatus = terminalStatus;
+    }
     this.entries.delete(id);
-    this.save();
+    try { this.save(); } catch (error) {
+      this.entries.set(id, entry);
+      if (receipt) Object.assign(receipt, priorReceipt);
+      throw error;
+    }
     return true;
   }
 

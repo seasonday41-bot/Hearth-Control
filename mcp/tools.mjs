@@ -29,6 +29,8 @@ export const toolNames = [
   'antigravity_send',
   'x_start',
   'x_task',
+  'x_enqueue',
+  'x_queue_status',
 ];
 
 const text = (value) => ({ content: [{ type: 'text', text: String(value) }] });
@@ -482,5 +484,25 @@ export const registerWorkspaceTools = (server, options) => {
       }, null, 2));
     } catch (error) { return failure(error); }
   });
-};
 
+  server.registerTool('x_enqueue', {
+    title: 'Queue X coding task',
+    description: 'Durably queue one x-task-v1 payload through the Electron-owned HTTP ingress. A run_id becomes available only after dispatch.',
+    inputSchema: { request_id: z.string().min(1).max(256), task: z.any() },
+    annotations: { destructiveHint: true },
+  }, async ({ request_id, task }) => {
+    if (!options.queueIngressTransport) return text(JSON.stringify({ accepted: false, reason: 'transport_unavailable' }));
+    try { return text(JSON.stringify(await options.queueIngressTransport.enqueue({ requestId: request_id, task, workspace: options.workspace }))); }
+    catch (error) { return text(JSON.stringify({ accepted: false, reason: error?.code || 'transport_unavailable' })); }
+  });
+
+  server.registerTool('x_queue_status', {
+    title: 'Get queued X task status',
+    description: 'Read an Electron-owned X queue receipt by durable request_id.',
+    inputSchema: { request_id: z.string().min(1).max(256) },
+  }, async ({ request_id }) => {
+    if (!options.queueIngressTransport) return text(JSON.stringify({ found: false, reason: 'transport_unavailable' }));
+    try { return text(JSON.stringify(await options.queueIngressTransport.status({ requestId: request_id }))); }
+    catch (error) { return text(JSON.stringify({ found: false, reason: error?.code || 'transport_unavailable' })); }
+  });
+};

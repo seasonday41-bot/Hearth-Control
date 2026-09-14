@@ -52,9 +52,34 @@ function registerFor(item, overrides = {}) {
     workspace: item.root,
     permissions: {},
     xRuntime: { claimStore, runStore, modelAdapter, ownerId },
+    queueIngressTransport: overrides.queueIngressTransport,
   });
   return { server, claimStore, runStore, ownerId };
 }
+
+test('queue tools require an injected transport and never use process.send alone', async () => {
+  const item = fixture();
+  const { server } = registerFor(item);
+  const enqueue = jsonOf(await server.tools.get('x_enqueue').handler({ request_id: 'request-1', task: taskFor(item) }));
+  const status = jsonOf(await server.tools.get('x_queue_status').handler({ request_id: 'request-1' }));
+  assert.equal(enqueue.reason, 'transport_unavailable');
+  assert.equal(status.reason, 'transport_unavailable');
+  assert.equal(server.tools.has('x_start'), true);
+});
+
+test('queue tools forward only through the injected HTTP transport', async () => {
+  const item = fixture();
+  const calls = [];
+  const transport = {
+    enqueue: async (input) => { calls.push(input); return { accepted: true, queue_id: 'queue-1', run_id: null }; },
+    status: async (input) => { calls.push(input); return { found: true, queue_status: 'pending', run_id: null }; },
+  };
+  const { server } = registerFor(item, { queueIngressTransport: transport });
+  assert.equal(jsonOf(await server.tools.get('x_enqueue').handler({ request_id: 'request-1', task: taskFor(item) })).run_id, null);
+  assert.equal(jsonOf(await server.tools.get('x_queue_status').handler({ request_id: 'request-1' })).queue_status, 'pending');
+  assert.equal(calls[0].requestId, 'request-1');
+  assert.equal(calls[0].workspace, item.root);
+});
 
 function taskFor(item, taskId = 'task-x-1') {
   return {

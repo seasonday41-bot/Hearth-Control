@@ -69,6 +69,63 @@ function taskFor(taskId) {
 
 const mainSource = fs.readFileSync(new URL('../electron/main.cjs', import.meta.url), 'utf8');
 
+test('ingress main independently validates, fingerprints, authorizes, and gates startup workspace', () => {
+  assert.match(mainSource, /xParseTask\(message\.task\)/);
+  assert.match(mainSource, /fs\.promises\.realpath\(launchWorkspace\)/);
+  assert.match(mainSource, /fs\.promises\.realpath\(message\.workspace\)/);
+  assert.match(mainSource, /fs\.promises\.realpath\(readSettings\(\)\.workspace\)/);
+  assert.match(mainSource, /fs\.promises\.realpath\(task\.workspace\.root\)/);
+  assert.match(mainSource, /crypto\.createHash\('sha256'\)/);
+  assert.match(mainSource, /readSettings\(\)\.permissions\.X \?\? 'Ask'/);
+  assert.match(mainSource, /xQueueDispatchEnabled = !xQueueStore\.recoveryRequired && xQueueWorkspaceMatches/);
+  assert.match(mainSource, /if \(xQueueDispatchEnabled\) \{\s*for \(const entry of xQueueStore\.listDispatched\(\)\)/);
+  assert.match(mainSource, /hasLiveXQueueEntries\(\) && !xQueueWorkspaceMatches\(workspace\)\) throw xQueueError\('workspace_mismatch'\)/);
+  assert.match(mainSource, /ipcMain\.handle\('settings:save'[\s\S]*?workspace_locked_by_x_queue/);
+  assert.match(mainSource, /ipcMain\.handle\('workspace:choose'[\s\S]*?workspace_locked_by_x_queue/);
+});
+
+test('X approval is resolved in Electron main before the existing child relay', () => {
+  const handler = mainSource.slice(
+    mainSource.indexOf("ipcMain.handle('server:respond-approval'"),
+    mainSource.indexOf("ipcMain.handle('workspace:validate'"),
+  );
+  assert.match(handler, /pendingXApprovals\.has\(response\.requestId\)[\s\S]*?localApprovals\.get\(response\.requestId\)\?\.\(response\.allowed === true\);[\s\S]*?return true;/);
+  assert.ok(handler.indexOf('pendingXApprovals.has') < handler.indexOf("serverProcess.send({ type: 'approval:result'"));
+});
+
+test('direct X terminal wakes the queue only after coordinator reports not_tracked', () => {
+  const terminal = mainSource.slice(mainSource.indexOf("if (message?.type === 'x_run_terminal')"), mainSource.indexOf("if (message?.type === 'x_admission_hint')"));
+  assert.match(terminal, /onXRunTerminal\(message\)/);
+  assert.match(terminal, /handled\?\.reason === 'not_tracked'\) xQueueCoordinator\?\.kick\(\)/);
+  assert.doesNotMatch(terminal, /x_capacity_released_hint/);
+});
+
+test('shared-capacity timer is one-shot, claim-kind-agnostic, and defers a null-deadline retry', () => {
+  const timerSource = mainSource.slice(mainSource.indexOf('const clearXQueueCapacityWakeup = () => {'), mainSource.indexOf('const getUpdaterInfo = () => ({'));
+  assert.doesNotMatch(timerSource, /setInterval/);
+  const scheduled = [];
+  const immediate = [];
+  let deadline = Date.now() + 5000;
+  let kicks = 0;
+  const factory = new Function('setTimeout', 'clearTimeout', 'setImmediate', 'clearImmediate', 'xQueueStore',
+    'xGetQueueCapacityDeadline', 'xQueueCoordinator', 'console', 'Date',
+    `let xQueueCapacityTimer = null; let xQueueCapacityImmediate = null; let xQueueDispatchEnabled = true;
+     ${timerSource}
+     return { armXQueueCapacityWakeup };`);
+  const timer = factory((fn, delay) => { const handle = { fn, delay, unref() {} }; scheduled.push(handle); return handle; },
+    () => {}, (fn) => { immediate.push(fn); return fn; }, () => {}, { listPending: () => [{}] },
+    () => deadline, { kick: () => { kicks += 1; } }, console, Date);
+  timer.armXQueueCapacityWakeup();
+  assert.equal(scheduled.length, 1);
+  scheduled[0].fn();
+  assert.equal(kicks, 1);
+  deadline = null;
+  timer.armXQueueCapacityWakeup();
+  assert.equal(immediate.length, 1);
+  immediate[0]();
+  assert.equal(kicks, 2);
+});
+
 // The exact XQueueCoordinator startup block, sliced the same way
 // scripts/test-updater.mjs already slices electron/main.cjs sections.
 const blockStart = mainSource.indexOf("const { XQueueStore } = await importFromHere('../mcp/x/queue-store.mjs');");
