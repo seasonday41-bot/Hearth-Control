@@ -29,6 +29,7 @@ let serverState = { running: false, port: 3001, pid: null };
 let goalRunner = null;
 let taskStore = null;
 let jobManager = null;
+let xQueueCoordinator = null;
 let continuationRecoveryTimer = null;
 const localApprovals = new Map();
 let bridgeClientInstance = null;
@@ -254,7 +255,14 @@ const startServer = async ({ workspace, port }) => {
       sendEvent({ type: 'log', source: 'mcp', tone: 'success', message: `Local control server listening on 127.0.0.1:${selectedPort}` });
     }
     if (message?.type === 'approval') sendEvent(message);
-    if (message?.type === 'x_run_terminal') sendEvent(message);
+    if (message?.type === 'x_run_terminal') {
+      sendEvent(message);
+      try {
+        xQueueCoordinator?.onXRunTerminal(message);
+      } catch (err) {
+        console.error('[XQueueCoordinator] onXRunTerminal failed:', err);
+      }
+    }
   });
   serverProcess.once('exit', (code, signal) => {
     serverProcess = undefined;
@@ -379,6 +387,24 @@ app.whenReady().then(async () => {
     goalRunner = new GoalRunner({ storage: goalStorage, antigravityExecutor, claimStore: getProductionAntigravityClaimStore() });
   } catch (err) {
     console.error('Failed to initialize GoalRunner:', err);
+  }
+
+  try {
+    const { XQueueStore } = await importFromHere('../mcp/x/queue-store.mjs');
+    const { XQueueCoordinator } = await importFromHere('../mcp/x/queue-coordinator.mjs');
+    const { getProductionXRuntime } = await importFromHere('../mcp/x/production-runtime.mjs');
+    const { onAntigravityAdmissionReleased } = await importFromHere('../mcp/executors/antigravity-admission.mjs');
+    const queueStorePath = path.join(app.getPath('userData'), 'x-queue.json');
+    const xQueueStore = new XQueueStore({ storagePath: queueStorePath });
+    xQueueStore.load();
+    const { claimStore, runStore, modelAdapter, ownerId } = getProductionXRuntime();
+    xQueueCoordinator = new XQueueCoordinator({ queueStore: xQueueStore, claimStore, runStore, modelAdapter, ownerId });
+    onAntigravityAdmissionReleased(() => {
+      xQueueCoordinator?.kick();
+    });
+    xQueueCoordinator.kick();
+  } catch (err) {
+    console.error('Failed to initialize XQueueCoordinator:', err);
   }
 
   ipcMain.handle('settings:get', () => {
