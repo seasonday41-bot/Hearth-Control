@@ -10,6 +10,8 @@ import {
   getAntigravityTask,
   sendAntigravityMessage,
 } from './executors/antigravity.mjs';
+import { runXTask } from './x/run-x-task.mjs';
+import { getProductionXRuntime } from './x/production-runtime.mjs';
 
 const execFileAsync = promisify(execFile);
 export const toolNames = [
@@ -25,6 +27,8 @@ export const toolNames = [
   'antigravity_start',
   'antigravity_task',
   'antigravity_send',
+  'x_start',
+  'x_task',
 ];
 
 const text = (value) => ({ content: [{ type: 'text', text: String(value) }] });
@@ -134,6 +138,24 @@ export const registerWorkspaceTools = (server, options) => {
       throw new Error(`User denied ${name} access for this request.`);
     }
     throw new Error(`${name} permission is ${level}. Change it to Allow in Hearth Control before using this tool.`);
+  };
+
+  // X production dependencies: real, SQLite-backed, shared across every MCP
+  // process via the same resolved runtime database file. `options.xRuntime`
+  // exists solely so tests can inject fixtures (temp SQLite path, a
+  // deterministic fake ModelAdapter) without touching a real Ollama
+  // instance or the real per-user runtime path -- production callers never
+  // set it, and instead get the lazy per-process singleton.
+  const xRuntime = options.xRuntime ?? getProductionXRuntime();
+  // Attaches a no-op observer to `done` synchronously, in the same tick
+  // `runXTask` returns -- `done` is documented to always resolve, never
+  // reject, but this guarantees no window exists where it could be left
+  // completely unattached (e.g. if the MCP caller disconnects) and become
+  // an unhandled rejection.
+  const observeBackgroundCompletion = (admitted) => {
+    if (admitted?.accepted && admitted.done && typeof admitted.done.then === 'function') {
+      admitted.done.then(() => {}, () => {});
+    }
   };
 
   server.registerTool('workspace_info', {
@@ -368,6 +390,48 @@ export const registerWorkspaceTools = (server, options) => {
       await requirePermission('Antigravity', `Send message to Antigravity task ${taskId}`);
       const result = await sendAntigravityMessage({ taskId, message });
       return text(JSON.stringify(result, null, 2));
+    } catch (error) { return failure(error); }
+  });
+
+  server.registerTool('x_start', {
+    title: 'Start X coding task',
+    description: 'Admit one x-task-v1 payload into the local X coding pipeline (bounded repair loop -> deterministic Result Gate -> x-result-v1). Returns immediately with a run_id and never waits for model execution; poll x_task with that run_id for status and, once terminal, the full result. Never retries outside X\'s own bounded repair policy and never routes a result to Codex or Claude.',
+    inputSchema: {
+      task: z.any().describe('A complete x-task-v1 payload (see mcp/x/task-contract.mjs). Validated internally; a malformed payload returns an error.'),
+    },
+    annotations: { destructiveHint: true },
+  }, async ({ task }) => {
+    try {
+      const admitted = await runXTask(task, xRuntime.modelAdapter, {
+        claimStore: xRuntime.claimStore, runStore: xRuntime.runStore, ownerId: xRuntime.ownerId,
+      });
+      observeBackgroundCompletion(admitted);
+      if (!admitted.accepted) {
+        return text(JSON.stringify({ accepted: false, reason: admitted.reason, run_id: null }, null, 2));
+      }
+      return text(JSON.stringify({ accepted: true, run_id: admitted.runId, task_id: admitted.taskId, status: 'running' }, null, 2));
+    } catch (error) { return failure(error); }
+  });
+
+  server.registerTool('x_task', {
+    title: 'Get X task run status',
+    description: 'Read the current persisted status of an X coding run by run_id: queued, running, completed, needs_review, failed, or interrupted. Includes the full x-result-v1 once terminal. Reads only persisted XRunStore state, never an in-memory completion promise.',
+    inputSchema: {
+      run_id: z.string().min(1).describe('The run_id returned by x_start'),
+    },
+  }, async ({ run_id }) => {
+    try {
+      const run = xRuntime.runStore.getRun(run_id);
+      if (!run) throw new Error(`No X run found for run_id '${run_id}'.`);
+      return text(JSON.stringify({
+        run_id: run.runId,
+        task_id: run.taskId,
+        status: run.status,
+        gate_status: run.gateStatus,
+        hearth_outcome: run.hearthOutcome,
+        error: run.error,
+        result: run.result,
+      }, null, 2));
     } catch (error) { return failure(error); }
   });
 };
