@@ -26,16 +26,25 @@ const REVIEW_STATUSES = new Set(['needs_review', 'failed', 'interrupted']);
  *     X's shared admission slot.
  *   - `dispatched` is only reached after that call has returned an accepted
  *     admission with a real runId.
- *   - `returnToPending` reverts dispatching -> pending, but ONLY when the
- *     call has definitively reported no_capacity / not accepted -- never
- *     used to paper over an unknown/ambiguous outcome.
+ *   - `returnToPending` reverts dispatching -> pending only when there is
+ *     definitive evidence that execution was not admitted / did not start:
+ *     either the dispatch call explicitly reported no_capacity / not
+ *     accepted, or Phase B2B startup reconciliation has a durable runId and
+ *     proves that XRunStore contains no row for that exact runId (so
+ *     createRun never committed). It is never used to paper over an
+ *     unknown/ambiguous outcome. It also clears `runId` back to `null`, so
+ *     the next dispatch attempt for this entry must generate a fresh runId.
  * A process crash between `dispatching` and `dispatched` therefore leaves
- * the entry stuck in `dispatching`, on purpose: Phase B1 deliberately does
- * NOT guess what happened to it (redispatching could double-claim the same
- * task_id; silently reverting to pending could re-run a task that is
- * actually still executing). Resolving a stuck `dispatching` entry requires
- * cross-referencing XRunStore, which is out of scope for this store and
- * deferred to Phase B2.
+ * the entry stuck in `dispatching`, on purpose: this store never guesses
+ * what happened to it (redispatching could double-claim the same task_id;
+ * silently reverting to pending could re-run a task that is actually still
+ * executing). Resolving a stuck `dispatching` entry requires cross-
+ * referencing XRunStore, which is out of scope for this store -- see
+ * `XQueueCoordinator.reconcileDispatchingEntry` (Phase B2B). For an entry
+ * whose `runId` is still `null` (persisted by the pre-B2B `markDispatching`
+ * shape), no such cross-reference is possible at all; it remains
+ * permanently unresolvable by any automatic means and is left for human
+ * review.
  *
  * A queue entry is pruned (deleted, not archived) the instant its dispatched
  * run reaches ANY terminal outcome; this store has nothing further to say
@@ -157,12 +166,14 @@ export class XQueueStore {
     return null;
   }
 
-  /** pending -> dispatching ONLY. Must be persisted before the caller attempts runXTask/x_start. */
-  markDispatching(id) {
+  /** pending -> dispatching ONLY. Requires the caller's own pre-generated runId (Phase B2B), persisted in this SAME atomic transition -- must be called, and persisted, before the caller attempts runXTask/x_start, passing this exact same runId through. */
+  markDispatching(id, runId) {
     const entry = this.entries.get(id);
     if (!entry || entry.status !== 'pending') return null;
+    if (!runId || typeof runId !== 'string') throw new TypeError('markDispatching requires a real runId.');
     entry.status = 'dispatching';
     entry.dispatchingAt = new Date().toISOString();
+    entry.runId = runId;
     this.save();
     return entry;
   }
@@ -179,12 +190,13 @@ export class XQueueStore {
     return entry;
   }
 
-  /** dispatching -> pending ONLY. Use only when the dispatch attempt definitively reported no_capacity / not accepted -- never for an unknown/ambiguous outcome (e.g. a crash mid-call, which must instead be left in `dispatching` for Phase B2 reconciliation). */
+  /** dispatching -> pending ONLY. Use only when there is definitive evidence execution was not admitted / did not start -- never for an unknown/ambiguous outcome. Clears `runId` back to `null` so the next dispatch attempt for this entry must generate and persist a genuinely fresh, unrelated runId. */
   returnToPending(id) {
     const entry = this.entries.get(id);
     if (!entry || entry.status !== 'dispatching') return null;
     entry.status = 'pending';
     entry.dispatchingAt = null;
+    entry.runId = null;
     this.save();
     return entry;
   }

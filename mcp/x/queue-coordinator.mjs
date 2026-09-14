@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { runXTask } from './run-x-task.mjs';
 
 // Live x_run_terminal transport contract (Phase A) -- unchanged. This is the
@@ -64,12 +65,16 @@ function deriveTerminalEvent(outcome) {
  *    whether a terminal run still needs review -- never for execution
  *    truth itself.
  *
- * Phase B1 is deliberately globally serial and deliberately does NOT poll,
- * retry on a timer, or attempt any reconciliation of an ambiguous
- * (crashed-mid-dispatch) `dispatching` entry, or of a terminal event for a
- * run it isn't tracking as dispatched -- all of that is Phase B2, which
- * requires cross-referencing XRunStore in ways this module does not
- * attempt (no `listRuns`, no missed-event recovery).
+ * This coordinator is deliberately globally serial and deliberately does
+ * NOT poll or retry on a timer. A terminal event for a run it isn't
+ * tracking as dispatched is a no-op (`onXRunTerminal`'s own `not_tracked`
+ * path). A `dispatching` entry with a known, durably pre-generated runId
+ * (Phase B2B) CAN be deterministically reconciled at startup via
+ * `reconcileDispatchingEntry`, using only that exact runId -- never a
+ * taskId-based lookup, since task_id is not guaranteed unique across a
+ * task's revision/repair/retry history. A LEGACY `dispatching` entry
+ * (persisted before Phase B2B, `runId` still `null`) carries no such
+ * evidence at all and is left completely untouched, for human review only.
  */
 export class XQueueCoordinator {
   /**
@@ -137,7 +142,8 @@ export class XQueueCoordinator {
    * Attempts to dispatch the single next pending queued task, if any and if
    * nothing else is already dispatching/dispatched. Never drops a task: a
    * definite non-admission returns it to pending; an ambiguous (thrown)
-   * dispatch attempt leaves it in `dispatching`, untouched, for Phase B2.
+   * dispatch attempt leaves it in `dispatching`, untouched, with its
+   * already-durable runId, for `reconcileDispatchingEntry` to resolve later.
    */
   async dispatchNext() {
     if (this._dispatching) return { dispatched: false, reason: 'already_dispatching' };
@@ -155,19 +161,26 @@ export class XQueueCoordinator {
       const entry = this.queueStore.nextPending();
       if (!entry) return { dispatched: false, reason: 'queue_empty' };
 
-      this.queueStore.markDispatching(entry.id);
+      // Phase B2B: pre-generate the runId BEFORE calling runXTask, and
+      // durably persist it in the SAME atomic transition as `dispatching`
+      // (markDispatching). This is what makes a crash between here and
+      // markDispatched deterministically resolvable later
+      // (reconcileDispatchingEntry) instead of merely inert -- see that
+      // method and queue-store.mjs's own class-level notes.
+      const runId = crypto.randomUUID();
+      this.queueStore.markDispatching(entry.id, runId);
 
       let admitted;
       try {
         admitted = await runXTask(entry.task, this.modelAdapter, {
           claimStore: this.claimStore, runStore: this.runStore, ownerId: this.ownerId,
-          leaseDurationMs: this.leaseDurationMs,
+          leaseDurationMs: this.leaseDurationMs, runId,
         });
       } catch (error) {
         // Ambiguous: runXTask may have claimed/persisted something before
         // throwing. Never guess -- leave the entry exactly as `dispatching`
-        // for Phase B2 reconciliation, and never route this failure
-        // anywhere (no Codex/Claude, no retry).
+        // (with its already-durable runId) for reconcileDispatchingEntry,
+        // and never route this failure anywhere (no Codex/Claude, no retry).
         this.lastDispatchError = { entryId: entry.id, error, at: new Date().toISOString() };
         return { dispatched: false, reason: 'ambiguous_throw', entryId: entry.id, error };
       }
@@ -177,6 +190,20 @@ export class XQueueCoordinator {
         // denial) -- the task is not dropped, only returned to pending.
         this.queueStore.returnToPending(entry.id);
         return { dispatched: false, reason: admitted.reason || 'not_accepted' };
+      }
+
+      if (admitted.runId !== runId) {
+        // runXTask was given our pre-generated runId explicitly, so it must
+        // honor it -- if it ever reported a different one, the queue's
+        // durable correlation and XRunStore's actual row would silently
+        // disagree. Never substitute: treat this exactly like any other
+        // ambiguous outcome, leaving the entry exactly as `dispatching`.
+        this.lastDispatchError = {
+          entryId: entry.id,
+          error: new Error(`runXTask returned runId '${admitted.runId}', expected pre-generated '${runId}'.`),
+          at: new Date().toISOString(),
+        };
+        return { dispatched: false, reason: 'ambiguous_throw', entryId: entry.id };
       }
 
       this.queueStore.markDispatched(entry.id, admitted.runId);
@@ -260,5 +287,88 @@ export class XQueueCoordinator {
 
     this._scheduleDispatch();
     return { handled: true };
+  }
+
+  /**
+   * Phase B2B: resolves ONE persisted `dispatching` queue entry at startup,
+   * using ONLY its own durably pre-generated `runId` (see `markDispatching`
+   * in dispatchNext()) -- never a taskId-based lookup, since task_id is not
+   * guaranteed unique across a task's revision/repair/retry history (see
+   * the module-level notes above). Intended to be called once per
+   * `queueStore.listDispatching()` entry by Electron's startup block,
+   * mirroring exactly how `onXRunTerminal` already reconciles `dispatched`
+   * entries. Never polls, never retries, never guesses.
+   *
+   * - `entry.status !== 'dispatching'`: not applicable, no mutation.
+   * - `entry.runId === null`: a LEGACY entry persisted before this
+   *   correlation existed -- no durable evidence exists to resolve it
+   *   safely. Left completely untouched; requires human review.
+   * - known `runId`, `runStore.getRun(entry.runId) === null`: STILL
+   *   AMBIGUOUS, not safe to act on. XRunStore's own retention
+   *   (`_applyRetention`) prunes old TERMINAL rows once more than
+   *   `DEFAULT_RUN_RETENTION_LIMIT` accumulate, so a missing row does not
+   *   prove `createRun()` never committed -- it could equally mean the run
+   *   completed (or failed/etc.) long ago and its row was later pruned.
+   *   Returning the entry to `pending` on this evidence alone could
+   *   double-execute work that already genuinely finished, so this case
+   *   leaves the entry completely untouched (still `dispatching`, still
+   *   carrying its known runId) for human/manual resolution -- exactly
+   *   like the legacy-null-runId case, just for a different reason.
+   * - run exists but `run.taskId !== entry.taskId`: the queue's own
+   *   bookkeeping disagrees with persisted truth -- never guess which is
+   *   right; no mutation, reported for observability only.
+   * - `run.status` is `queued`/`running`: the correlation is proven, so the
+   *   entry is promoted to `dispatched` and preserved exactly like any
+   *   other in-flight dispatched entry -- this also keeps the serial
+   *   admission gate correctly blocked. No terminal event is fabricated.
+   *   This does NOT by itself guarantee the underlying run will ever reach
+   *   a terminal status: a fast-restart orphaned-claim window can leave a
+   *   row genuinely stuck non-terminal -- that gap lives entirely inside
+   *   XRunStore/production-runtime's own startup reconciliation and is out
+   *   of this method's scope to fix.
+   * - `run.status` is terminal (completed/needs_review/failed/interrupted):
+   *   promoted to `dispatched`, then reconciled via the EXISTING
+   *   `onXRunTerminal` re-read-from-truth path -- no duplicated terminal
+   *   handling.
+   * - any other/unexpected persisted status: no mutation, reported as
+   *   unsupported rather than guessed at.
+   *
+   * @param {{ id: string, status: string, runId: string|null, taskId: string }} entry
+   * @returns {{ handled: boolean, reason: string }}
+   */
+  reconcileDispatchingEntry(entry) {
+    if (!entry || entry.status !== 'dispatching') {
+      return { handled: false, reason: 'not_applicable' };
+    }
+    if (!entry.runId) {
+      return { handled: false, reason: 'legacy_ambiguous' };
+    }
+
+    const run = this.runStore.getRun(entry.runId);
+    if (!run) {
+      // Still ambiguous, not safe to act on -- see the doc comment above.
+      // XRunStore's own retention can prune an old TERMINAL row, so a
+      // missing row does not prove createRun() never committed; it could
+      // equally mean the run already finished and was pruned. Never guess:
+      // no mutation, entry remains exactly `dispatching` with its known
+      // runId.
+      return { handled: false, reason: 'run_not_found_ambiguous' };
+    }
+
+    if (run.taskId !== entry.taskId) {
+      return { handled: false, reason: 'task_mismatch' };
+    }
+
+    if (run.status === 'queued' || run.status === 'running') {
+      this.queueStore.markDispatched(entry.id, entry.runId);
+      return { handled: true, reason: 'promoted_nonterminal' };
+    }
+
+    if (PERSISTED_TERMINAL_STATUSES.has(run.status)) {
+      this.queueStore.markDispatched(entry.id, entry.runId);
+      return this.onXRunTerminal({ runId: entry.runId });
+    }
+
+    return { handled: false, reason: 'unsupported_status' };
   }
 }

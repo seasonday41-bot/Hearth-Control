@@ -200,8 +200,8 @@ test('3 pending -> dispatching -> dispatched ordering is observed in sequence', 
 
   let markDispatchingCalled = false;
   const originalMarkDispatching = item.queueStore.markDispatching.bind(item.queueStore);
-  item.queueStore.markDispatching = (id) => {
-    const result = originalMarkDispatching(id);
+  item.queueStore.markDispatching = (id, runId) => {
+    const result = originalMarkDispatching(id, runId);
     if (result) markDispatchingCalled = true;
     return result;
   };
@@ -522,7 +522,7 @@ test('15 repeated/overlapping kick() calls cannot double-dispatch', async () => 
 test('16 a restart-loaded dispatching entry remains blocked, never auto-redispatched', async () => {
   const item = fixture();
   const stuck = item.queueStore.enqueue(taskFor(item, 'task-stuck'));
-  item.queueStore.markDispatching(stuck.id);
+  item.queueStore.markDispatching(stuck.id, 'run-stuck');
 
   const reloadedQueueStore = new XQueueStore({ storagePath: item.queuePath }).load();
   assert.equal(reloadedQueueStore.listDispatching().length, 1);
@@ -735,8 +735,8 @@ test('24 tracked dispatched entry + persisted interrupted run -> handled true, r
   const spyStore = orderTrackingQueueStore(item.queueStore, callOrder);
 
   const entry = item.queueStore.enqueue(taskFor(item, 'task-1'));
-  item.queueStore.markDispatching(entry.id);
   const runId = 'run-task-1';
+  item.queueStore.markDispatching(entry.id, runId);
   item.runStore.createRun({ runId, taskId: 'task-1' });
   item.runStore.markRunning({ runId, claimLeaseId: 'lease-1' });
   const interrupted = item.runStore.markInterrupted(runId);
@@ -764,8 +764,8 @@ test('25 interrupted does not block the next already-pending X task', async () =
   const item = fixture();
 
   const entry1 = item.queueStore.enqueue(taskFor(item, 'task-1'));
-  item.queueStore.markDispatching(entry1.id);
   const runId1 = 'run-task-1';
+  item.queueStore.markDispatching(entry1.id, runId1);
   item.runStore.createRun({ runId: runId1, taskId: 'task-1' });
   item.runStore.markRunning({ runId: runId1, claimLeaseId: 'lease-1' });
   item.runStore.markInterrupted(runId1);
@@ -897,5 +897,404 @@ test('27 live deriveTerminalEvent contract remains limited to completed/needs_re
     body,
     /PERSISTED_TERMINAL_STATUSES/,
     'deriveTerminalEvent must never reference the persisted-reconciliation terminal set',
+  );
+});
+
+// ── B2B: durable dispatch correlation (pre-generated runId) ────────────────
+//
+// Phase B2B pre-generates a runId in the coordinator BEFORE calling
+// runXTask, persists it into the queue entry in the SAME atomic transition
+// as `dispatching` (markDispatching(id, runId)), and passes that exact same
+// runId into runXTask's own already-existing `runId` option. This makes a
+// crashed-mid-dispatch entry deterministically resolvable later via
+// reconcileDispatchingEntry, using only that runId -- never a taskId-based
+// lookup (task_id is not guaranteed unique across a task's revision/repair/
+// retry history).
+//
+// IMPORTANT CORRECTION: a missing XRunStore row for a known, durable runId
+// is NOT safe to treat as "createRun never committed" -- XRunStore prunes
+// old TERMINAL rows past its retention limit, so a null row could equally
+// mean the run finished long ago and was later pruned. reconcileDispatching
+// Entry therefore leaves this case completely untouched (still
+// `dispatching`, still carrying its runId) rather than returning it to
+// pending -- see the method's own doc comment in queue-coordinator.mjs.
+
+/** Writes a legacy (pre-B2B) queue file directly -- a dispatching entry with runId:null, exactly as the OLD markDispatching(id) shape would have persisted it. Never uses the new production markDispatching(id, runId) API, which cannot produce this state at all once B2B ships. */
+function writeLegacyDispatchingQueueFile(queuePath, { id, taskId, task }) {
+  const payload = {
+    schemaVersion: 1,
+    updatedAt: new Date().toISOString(),
+    entries: [{
+      id, task, taskId, status: 'dispatching',
+      createdAt: new Date().toISOString(), dispatchingAt: new Date().toISOString(),
+      dispatchedAt: null, runId: null,
+    }],
+    reviews: [],
+  };
+  fs.mkdirSync(path.dirname(queuePath), { recursive: true });
+  fs.writeFileSync(queuePath, JSON.stringify(payload, null, 2), 'utf8');
+}
+
+test('28 each new dispatch attempt gets a pre-generated runId before runXTask admission, persisted atomically with dispatching', async () => {
+  const item = fixture();
+  const controlled = controllableModel([create()]);
+  const coordinator = coordinatorFor(item, { modelAdapter: controlled });
+
+  let capturedRunId = null;
+  const originalMarkDispatching = item.queueStore.markDispatching.bind(item.queueStore);
+  item.queueStore.markDispatching = (id, runId) => {
+    capturedRunId = runId;
+    return originalMarkDispatching(id, runId);
+  };
+
+  coordinator.enqueue(taskFor(item, 'task-1'));
+  await controlled.entered;
+
+  assert.equal(typeof capturedRunId, 'string');
+  assert.ok(capturedRunId.length > 0, 'markDispatching must be called with a real, non-empty pre-generated runId');
+  // Already persisted (dispatching, at minimum) by the time generate() is entered.
+  assert.equal(item.queueStore.listDispatching().length + item.queueStore.listDispatched().length, 1);
+
+  controlled.release();
+  await waitUntil(() => isFullyIdle(item), { label: 'cleanup' });
+});
+
+test('29 XQueueStore correlation equals the XRunStore row and the admitted runId -- all three agree', async () => {
+  const item = fixture();
+  const controlled = controllableModel([create()]);
+  const coordinator = coordinatorFor(item, { modelAdapter: controlled });
+
+  let preGeneratedRunId = null;
+  const originalMarkDispatching = item.queueStore.markDispatching.bind(item.queueStore);
+  item.queueStore.markDispatching = (id, runId) => {
+    preGeneratedRunId = runId;
+    return originalMarkDispatching(id, runId);
+  };
+
+  coordinator.enqueue(taskFor(item, 'task-1'));
+  await controlled.entered;
+  await waitUntil(() => item.queueStore.listDispatched().length === 1, { label: 'entry to reach dispatched' });
+
+  const dispatchedRunId = item.queueStore.listDispatched()[0].runId;
+  assert.equal(dispatchedRunId, preGeneratedRunId, 'the queue-persisted runId must equal the pre-generated one');
+  assert.ok(item.runStore.getRun(preGeneratedRunId), 'XRunStore must have a real row for that exact pre-generated runId');
+
+  controlled.release();
+  await waitUntil(() => isFullyIdle(item), { label: 'cleanup' });
+});
+
+test('30 definitive no_capacity returns the entry to pending with runId cleared to null', async () => {
+  const item = fixture();
+  const blocker = new XClaimStore({ storagePath: item.dbPath });
+  stores.push(blocker);
+  blocker.claim({ taskId: 'blocking-task', ownerId: 'blocker-owner' });
+
+  const coordinator = coordinatorFor(item, { modelAdapter: fastModel([create()]) });
+  const entry = item.queueStore.enqueue(taskFor(item, 'task-1'));
+
+  const result = await coordinator.dispatchNext();
+  assert.equal(result.dispatched, false);
+  assert.equal(result.reason, 'no_capacity');
+
+  const reverted = item.queueStore.listPending().find((e) => e.id === entry.id);
+  assert.ok(reverted, 'the entry must be back in pending');
+  assert.equal(reverted.status, 'pending');
+  assert.equal(reverted.runId, null, 'runId must be cleared so the next attempt generates a fresh one');
+});
+
+test('31 an ambiguous throw preserves dispatching with its known, already-durable runId', async () => {
+  const item = fixture();
+  const coordinator = coordinatorFor(item, { modelAdapter: fastModel([create()]) });
+
+  let capturedRunId = null;
+  const originalMarkDispatching = item.queueStore.markDispatching.bind(item.queueStore);
+  item.queueStore.markDispatching = (id, runId) => {
+    capturedRunId = runId;
+    return originalMarkDispatching(id, runId);
+  };
+
+  const invalidTask = { version: X_TASK_VERSION, task_id: 'task-invalid' };
+  const entry = item.queueStore.enqueue(invalidTask);
+
+  const result = await coordinator.dispatchNext();
+  assert.equal(result.reason, 'ambiguous_throw');
+
+  const stillDispatching = item.queueStore.listDispatching().find((e) => e.id === entry.id);
+  assert.ok(stillDispatching, 'the entry must remain dispatching');
+  assert.equal(stillDispatching.runId, capturedRunId);
+  assert.ok(stillDispatching.runId, 'the known, pre-generated runId must be preserved, not cleared');
+});
+
+// ── reconcileDispatchingEntry: legacy (runId:null) ──────────────────────────
+
+test('32 startup: a legacy dispatching entry (runId:null) is left completely untouched -- no taskId lookup, no mutation', () => {
+  const item = fixture();
+  writeLegacyDispatchingQueueFile(item.queuePath, { id: 'legacy-1', taskId: 'task-legacy', task: taskFor(item, 'task-legacy') });
+  item.queueStore.load();
+
+  const legacyEntry = item.queueStore.listDispatching()[0];
+  assert.equal(legacyEntry.runId, null);
+
+  const coordinator = coordinatorFor(item, { modelAdapter: fastModel([create()]) });
+  const result = coordinator.reconcileDispatchingEntry(legacyEntry);
+
+  assert.equal(result.handled, false);
+  assert.equal(result.reason, 'legacy_ambiguous');
+  assert.equal(item.queueStore.listDispatching().length, 1, 'the legacy entry must still be present, exactly as dispatching');
+  assert.equal(item.queueStore.listDispatching()[0].runId, null);
+  assert.equal(item.queueStore.listPending().length, 0, 'must not have been returned to pending');
+});
+
+// ── reconcileDispatchingEntry: known runId, no XRunStore row (ambiguous) ────
+
+test('33 startup: known runId with no XRunStore row is ambiguous -- entry stays dispatching, never returned to pending', () => {
+  const item = fixture();
+  const entry = item.queueStore.enqueue(taskFor(item, 'task-1'));
+  item.queueStore.markDispatching(entry.id, 'run-never-created');
+
+  const coordinator = coordinatorFor(item, { modelAdapter: fastModel([create()]) });
+  const result = coordinator.reconcileDispatchingEntry(item.queueStore.listDispatching()[0]);
+
+  assert.equal(result.handled, false);
+  assert.equal(result.reason, 'run_not_found_ambiguous');
+  assert.equal(item.queueStore.listDispatching().length, 1);
+  assert.equal(item.queueStore.listDispatching()[0].status, 'dispatching');
+  assert.equal(item.queueStore.listDispatching()[0].runId, 'run-never-created');
+  assert.equal(item.queueStore.listPending().length, 0, 'must never be returned to pending on this evidence alone');
+});
+
+test('34 the null-row ambiguous path schedules no dispatch and makes no other state changes', () => {
+  const item = fixture();
+  const entry = item.queueStore.enqueue(taskFor(item, 'task-1'));
+  item.queueStore.markDispatching(entry.id, 'run-never-created');
+
+  const coordinator = coordinatorFor(item, { modelAdapter: fastModel([create()]) });
+
+  let scheduleCalls = 0;
+  coordinator._scheduleDispatch = () => {
+    scheduleCalls += 1;
+  };
+
+  const result = coordinator.reconcileDispatchingEntry(
+    item.queueStore.listDispatching()[0],
+  );
+
+  assert.equal(result.handled, false);
+  assert.equal(result.reason, 'run_not_found_ambiguous');
+
+  assert.equal(
+    scheduleCalls,
+    0,
+    'run_not_found_ambiguous must not schedule another dispatch',
+  );
+
+  assert.equal(item.queueStore.listDispatching().length, 1);
+  assert.equal(item.queueStore.listDispatching()[0].id, entry.id);
+  assert.equal(item.queueStore.listDispatching()[0].runId, 'run-never-created');
+  assert.equal(item.queueStore.listPending().length, 0);
+  assert.equal(item.queueStore.listDispatched().length, 0);
+  assert.equal(item.queueStore.listReviews().length, 0);
+});
+
+// ── reconcileDispatchingEntry: known run, taskId mismatch ───────────────────
+
+test('35 startup: known run whose taskId disagrees with the queue entry -- untouched, task_mismatch', () => {
+  const item = fixture();
+  const entry = item.queueStore.enqueue(taskFor(item, 'task-1'));
+  const runId = 'run-mismatch';
+  item.queueStore.markDispatching(entry.id, runId);
+  item.runStore.createRun({ runId, taskId: 'a-completely-different-task' });
+
+  const coordinator = coordinatorFor(item, { modelAdapter: fastModel([create()]) });
+  const result = coordinator.reconcileDispatchingEntry(item.queueStore.listDispatching()[0]);
+
+  assert.equal(result.handled, false);
+  assert.equal(result.reason, 'task_mismatch');
+  assert.equal(item.queueStore.listDispatching().length, 1, 'entry untouched');
+  assert.equal(item.queueStore.listDispatching()[0].status, 'dispatching');
+});
+
+// ── reconcileDispatchingEntry: known run, nonterminal (queued/running) ──────
+
+test('36 startup: known run queued -> promoted to dispatched and preserved', () => {
+  const item = fixture();
+  const entry = item.queueStore.enqueue(taskFor(item, 'task-1'));
+  const runId = 'run-queued';
+  item.queueStore.markDispatching(entry.id, runId);
+  item.runStore.createRun({ runId, taskId: 'task-1' });
+  assert.equal(item.runStore.getRun(runId).status, 'queued');
+
+  const coordinator = coordinatorFor(item, { modelAdapter: fastModel([create()]) });
+  const result = coordinator.reconcileDispatchingEntry(item.queueStore.listDispatching()[0]);
+
+  assert.equal(result.handled, true);
+  assert.equal(result.reason, 'promoted_nonterminal');
+  assert.equal(item.queueStore.listDispatching().length, 0);
+  assert.equal(item.queueStore.listDispatched().length, 1);
+  assert.equal(item.queueStore.findDispatchedByRunId(runId).id, entry.id);
+  assert.equal(item.queueStore.listReviews().length, 0, 'no terminal event fabricated');
+});
+
+test('37 startup: known run running -> promoted to dispatched and preserved, still blocking the serial gate', async () => {
+  const item = fixture();
+  const entry = item.queueStore.enqueue(taskFor(item, 'task-1'));
+  const runId = 'run-running';
+  item.queueStore.markDispatching(entry.id, runId);
+  item.runStore.createRun({ runId, taskId: 'task-1' });
+  item.runStore.markRunning({ runId, claimLeaseId: 'lease-1' });
+  assert.equal(item.runStore.getRun(runId).status, 'running');
+
+  const coordinator = coordinatorFor(item, { modelAdapter: fastModel([create()]) });
+  const result = coordinator.reconcileDispatchingEntry(item.queueStore.listDispatching()[0]);
+
+  assert.equal(result.handled, true);
+  assert.equal(result.reason, 'promoted_nonterminal');
+  assert.equal(item.queueStore.listDispatching().length, 0);
+  assert.equal(item.queueStore.findDispatchedByRunId(runId).id, entry.id);
+  assert.equal(item.queueStore.listReviews().length, 0);
+
+  // The coordinator's own existing serial gate now correctly blocks further
+  // dispatch, exactly as any other in-flight dispatched entry would.
+  const next = await coordinator.dispatchNext();
+  assert.equal(next.dispatched, false);
+  assert.equal(next.reason, 'inflight_or_ambiguous');
+});
+
+// ── reconcileDispatchingEntry: known run, terminal (reuses onXRunTerminal) ─
+
+test('38 startup: known run completed -> promoted then reconciled via the existing onXRunTerminal path, pruned, no review', () => {
+  const item = fixture();
+  const entry = item.queueStore.enqueue(taskFor(item, 'task-1'));
+  const runId = 'run-completed';
+  item.queueStore.markDispatching(entry.id, runId);
+  item.runStore.createRun({ runId, taskId: 'task-1' });
+  item.runStore.markRunning({ runId, claimLeaseId: 'lease-1' });
+  item.runStore.completeRun({
+    runId, gateResult: { gate_status: 'COMPLETED', hearth_outcome: 'completed' },
+    xResult: { task_id: 'task-1', gate_status: 'COMPLETED', hearth_outcome: 'completed' },
+  });
+
+  const coordinator = coordinatorFor(item, { modelAdapter: fastModel([create()]) });
+  const result = coordinator.reconcileDispatchingEntry(item.queueStore.listDispatching()[0]);
+
+  assert.equal(result.handled, true);
+  assert.equal(item.queueStore.listDispatching().length, 0);
+  assert.equal(item.queueStore.findDispatchedByRunId(runId), null, 'pruned once reconciled');
+  assert.equal(item.queueStore.listReviews().length, 0, 'completed is not review-worthy');
+});
+
+test('39 startup: known run needs_review -> promoted then existing review-before-prune behavior applies', () => {
+  const item = fixture();
+  const entry = item.queueStore.enqueue(taskFor(item, 'task-1'));
+  const runId = 'run-review';
+  item.queueStore.markDispatching(entry.id, runId);
+  item.runStore.createRun({ runId, taskId: 'task-1' });
+  item.runStore.markRunning({ runId, claimLeaseId: 'lease-1' });
+  item.runStore.completeRun({
+    runId, gateResult: { gate_status: 'NEEDS_REVIEW', hearth_outcome: 'waiting' },
+    xResult: { task_id: 'task-1', gate_status: 'NEEDS_REVIEW', hearth_outcome: 'waiting' },
+  });
+
+  const coordinator = coordinatorFor(item, { modelAdapter: fastModel([create()]) });
+  const result = coordinator.reconcileDispatchingEntry(item.queueStore.listDispatching()[0]);
+
+  assert.equal(result.handled, true);
+  const reviews = item.queueStore.listReviews();
+  assert.equal(reviews.length, 1);
+  assert.equal(reviews[0].status, 'needs_review');
+  assert.equal(reviews[0].runId, runId);
+  assert.equal(item.queueStore.findDispatchedByRunId(runId), null);
+});
+
+test('40 startup: known run failed -> promoted then existing review-before-prune behavior applies', () => {
+  const item = fixture();
+  const entry = item.queueStore.enqueue(taskFor(item, 'task-1'));
+  const runId = 'run-failed';
+  item.queueStore.markDispatching(entry.id, runId);
+  item.runStore.createRun({ runId, taskId: 'task-1' });
+  item.runStore.markRunning({ runId, claimLeaseId: 'lease-1' });
+  item.runStore.completeRun({
+    runId, gateResult: { gate_status: 'FAILED', hearth_outcome: 'error' },
+    xResult: { task_id: 'task-1', gate_status: 'FAILED', hearth_outcome: 'error' },
+  });
+
+  const coordinator = coordinatorFor(item, { modelAdapter: fastModel([create()]) });
+  const result = coordinator.reconcileDispatchingEntry(item.queueStore.listDispatching()[0]);
+
+  assert.equal(result.handled, true);
+  const reviews = item.queueStore.listReviews();
+  assert.equal(reviews.length, 1);
+  assert.equal(reviews[0].status, 'failed');
+  assert.equal(item.queueStore.findDispatchedByRunId(runId), null);
+});
+
+test('41 startup: known run interrupted -> promoted then existing review-before-prune behavior applies', () => {
+  const item = fixture();
+  const entry = item.queueStore.enqueue(taskFor(item, 'task-1'));
+  const runId = 'run-interrupted';
+  item.queueStore.markDispatching(entry.id, runId);
+  item.runStore.createRun({ runId, taskId: 'task-1' });
+  item.runStore.markRunning({ runId, claimLeaseId: 'lease-1' });
+  item.runStore.markInterrupted(runId);
+
+  const coordinator = coordinatorFor(item, { modelAdapter: fastModel([create()]) });
+  const result = coordinator.reconcileDispatchingEntry(item.queueStore.listDispatching()[0]);
+
+  assert.equal(result.handled, true);
+  const reviews = item.queueStore.listReviews();
+  assert.equal(reviews.length, 1);
+  assert.equal(reviews[0].status, 'interrupted');
+  assert.equal(item.queueStore.findDispatchedByRunId(runId), null);
+});
+
+// ── authority boundaries, restated for B2B ──────────────────────────────────
+
+test('42 no taskId-based XRunStore lookup exists anywhere in the coordinator -- every runStore call is getRun(runId)', () => {
+  const source = fs.readFileSync(
+    new URL('../mcp/x/queue-coordinator.mjs', import.meta.url),
+    'utf8',
+  );
+
+  const codeOnly = source
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/.*$/gm, '');
+
+  assert.doesNotMatch(
+    codeOnly,
+    /ByTaskId/,
+    'no taskId-keyed XRunStore lookup may exist or be introduced',
+  );
+
+  const runStoreCalls =
+    codeOnly.match(/this\.runStore\.\w+\(/g) || [];
+
+  assert.ok(
+    runStoreCalls.length > 0,
+    'sanity: the coordinator must call runStore at all',
+  );
+
+  for (const call of runStoreCalls) {
+    assert.match(
+      call,
+      /^this\.runStore\.getRun\($/,
+      `every runStore call must be getRun(runId), found: ${call}`,
+    );
+  }
+});
+
+test('43 no polling/timer exists anywhere in the coordinator\'s executable source', () => {
+  const source = fs.readFileSync(
+    new URL('../mcp/x/queue-coordinator.mjs', import.meta.url),
+    'utf8',
+  );
+
+  const codeOnly = source
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/.*$/gm, '');
+
+  assert.doesNotMatch(
+    codeOnly,
+    /setInterval|setTimeout/,
+    'no polling/timer mechanism may exist or be introduced',
   );
 });

@@ -409,6 +409,13 @@ app.whenReady().then(async () => {
         console.error('[Electron] X startup queue reconciliation failed:', error);
       }
     }
+    for (const entry of xQueueStore.listDispatching()) {
+      try {
+        xQueueCoordinator.reconcileDispatchingEntry(entry);
+      } catch (error) {
+        console.error('[Electron] X startup dispatching reconciliation failed:', error);
+      }
+    }
     xQueueCoordinator.kick();
   } catch (err) {
     console.error('Failed to initialize XQueueCoordinator:', err);

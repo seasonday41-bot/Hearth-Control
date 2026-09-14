@@ -95,13 +95,26 @@ test('13 the final startup kick still happens, after reconciliation', () => {
 // ── 10, 11, 12, 14: reconciliation loop behavior (extracted from the real source) ──
 
 const loopStart = startupBlock.indexOf('for (const entry of xQueueStore.listDispatched())');
-const loopEnd = startupBlock.indexOf('\n    xQueueCoordinator.kick();');
-assert.ok(loopStart !== -1 && loopEnd !== -1, 'the reconciliation for-loop must be found in the startup block');
+const loopEnd = startupBlock.indexOf('\n    for (const entry of xQueueStore.listDispatching())');
+assert.ok(loopStart !== -1 && loopEnd !== -1, 'the B2A reconciliation for-loop must be found in the startup block, immediately followed by the B2B one');
 const loopSource = startupBlock.slice(loopStart, loopEnd);
 
-/** Executes the EXACT reconciliation for-loop text extracted from electron/main.cjs against fake doubles, so behavior is proven against the real committed code, not a hand-copied duplicate. */
+/** Executes the EXACT B2A reconciliation for-loop text extracted from electron/main.cjs against fake doubles, so behavior is proven against the real committed code, not a hand-copied duplicate. */
 function runExtractedLoop({ xQueueStore, xQueueCoordinator, consoleImpl }) {
   const fn = new Function('xQueueStore', 'xQueueCoordinator', 'console', loopSource);
+  fn(xQueueStore, xQueueCoordinator, consoleImpl ?? console);
+}
+
+// ── B2B: the second (dispatching) reconciliation loop, extracted the same way ──
+
+const loopStartB2B = startupBlock.indexOf('for (const entry of xQueueStore.listDispatching())');
+const loopEndB2B = startupBlock.indexOf('\n    xQueueCoordinator.kick();');
+assert.ok(loopStartB2B !== -1 && loopEndB2B !== -1, 'the B2B reconciliation for-loop must be found in the startup block, immediately before the final kick()');
+const loopSourceB2B = startupBlock.slice(loopStartB2B, loopEndB2B);
+
+/** Executes the EXACT B2B reconciliation for-loop text extracted from electron/main.cjs against fake doubles. */
+function runExtractedLoopB2B({ xQueueStore, xQueueCoordinator, consoleImpl }) {
+  const fn = new Function('xQueueStore', 'xQueueCoordinator', 'console', loopSourceB2B);
   fn(xQueueStore, xQueueCoordinator, consoleImpl ?? console);
 }
 
@@ -158,15 +171,30 @@ test('14 listDispatching() is never inspected or mutated by the reconciliation l
 test('15 a persisted dispatching entry remains stuck/ambiguous after startup reconciliation, and still blocks dispatch', async () => {
   const item = fixture();
 
-  // A crashed-mid-dispatch entry: pending -> dispatching, never reached
-  // dispatched. B2A must never inspect or mutate this.
-  const stuck = item.queueStore.enqueue(taskFor('task-stuck'));
-  item.queueStore.markDispatching(stuck.id);
+  // A crashed-mid-dispatch LEGACY entry: pending -> dispatching, persisted
+  // by the pre-B2B markDispatching(id) shape (runId:null). Seeded by
+  // writing the store's own on-disk JSON directly -- the new production
+  // markDispatching(id, runId) API cannot produce this state at all once
+  // B2B ships. B2A's listDispatched() reconciliation never sees this entry.
+  // Phase B2B's listDispatching() pass may delegate it to
+  // reconcileDispatchingEntry(), but because runId is null it must remain
+  // completely untouched as legacy_ambiguous.
+  const legacyPayload = {
+    schemaVersion: 1, updatedAt: new Date().toISOString(),
+    entries: [{
+      id: 'legacy-stuck-1', task: taskFor('task-stuck'), taskId: 'task-stuck', status: 'dispatching',
+      createdAt: new Date().toISOString(), dispatchingAt: new Date().toISOString(),
+      dispatchedAt: null, runId: null,
+    }],
+    reviews: [],
+  };
+  fs.writeFileSync(item.queuePath, JSON.stringify(legacyPayload, null, 2), 'utf8');
+  item.queueStore.load();
 
   // A genuinely-completed dispatched entry, reconciled normally.
   const done = item.queueStore.enqueue(taskFor('task-done'));
-  item.queueStore.markDispatching(done.id);
   const runIdDone = 'run-task-done';
+  item.queueStore.markDispatching(done.id, runIdDone);
   item.runStore.createRun({ runId: runIdDone, taskId: 'task-done' });
   item.runStore.markRunning({ runId: runIdDone, claimLeaseId: 'lease-done' });
   item.runStore.completeRun({
@@ -189,7 +217,7 @@ test('15 a persisted dispatching entry remains stuck/ambiguous after startup rec
 
   // The stuck dispatching entry must be completely untouched.
   assert.equal(item.queueStore.listDispatching().length, 1);
-  assert.equal(item.queueStore.listDispatching()[0].id, stuck.id);
+  assert.equal(item.queueStore.listDispatching()[0].id, 'legacy-stuck-1');
   assert.equal(item.queueStore.listDispatching()[0].status, 'dispatching');
   assert.equal(item.queueStore.listDispatching()[0].runId, null);
 
@@ -202,4 +230,64 @@ test('15 a persisted dispatching entry remains stuck/ambiguous after startup rec
   const result = await coordinator.dispatchNext();
   assert.equal(result.dispatched, false);
   assert.equal(result.reason, 'inflight_or_ambiguous');
+});
+
+// ── B2B: the second (listDispatching) startup reconciliation pass ──────────
+
+test('16 exact startup order: B2A listDispatched() reconciliation, then B2B listDispatching() reconciliation, then the final kick()', () => {
+  const idxA = startupBlock.indexOf('xQueueStore.listDispatched()');
+  const idxB = startupBlock.indexOf('xQueueStore.listDispatching()');
+  const idxKick = startupBlock.lastIndexOf('xQueueCoordinator.kick();');
+  assert.ok(idxA !== -1 && idxB !== -1 && idxKick !== -1);
+  assert.ok(idxA < idxB, 'B2A listDispatched() reconciliation must run before B2B listDispatching() reconciliation');
+  assert.ok(idxB < idxKick, 'B2B listDispatching() reconciliation must run before the final kick()');
+});
+
+test('17 each dispatching entry is delegated whole to xQueueCoordinator.reconcileDispatchingEntry(entry)', () => {
+  const entries = [{ id: 'e1', status: 'dispatching', runId: 'run-a', taskId: 'task-a' }];
+  const calls = [];
+  const fakeStore = { listDispatching: () => entries };
+  const fakeCoordinator = { reconcileDispatchingEntry: (entry) => { calls.push(entry); } };
+  runExtractedLoopB2B({ xQueueStore: fakeStore, xQueueCoordinator: fakeCoordinator });
+  assert.deepEqual(calls, entries, 'the entire persisted entry object must be passed through, not a reshaped subset');
+});
+
+test('18 one B2B reconciliation throw is contained and does not stop later entries', () => {
+  const entries = [{ id: 'e-throws', status: 'dispatching', runId: 'run-throws' }, { id: 'e-ok', status: 'dispatching', runId: 'run-ok' }];
+  const calls = [];
+  const loggedErrors = [];
+  const fakeStore = { listDispatching: () => entries };
+  const fakeCoordinator = {
+    reconcileDispatchingEntry: (entry) => {
+      calls.push(entry);
+      if (entry.id === 'e-throws') throw new Error('simulated dispatching reconciliation failure');
+    },
+  };
+  const fakeConsole = { error: (...args) => loggedErrors.push(args) };
+  runExtractedLoopB2B({ xQueueStore: fakeStore, xQueueCoordinator: fakeCoordinator, consoleImpl: fakeConsole });
+  assert.deepEqual(calls, entries, 'both entries must be reached despite the first throwing');
+  assert.equal(loggedErrors.length, 1);
+  assert.equal(loggedErrors[0][0], '[Electron] X startup dispatching reconciliation failed:');
+});
+
+test('19 Electron itself never inspects runStore directly -- no runStore.<method> call anywhere in the X startup block', () => {
+  assert.doesNotMatch(
+    startupBlock,
+    /\brunStore\.\w+\(/,
+    'Electron must delegate all run-state decisions to the coordinator, never call runStore itself',
+  );
+});
+
+test('20 legacy null-runId policy remains coordinator-owned -- the B2B loop source contains no runId/status decision logic of its own', () => {
+  assert.doesNotMatch(
+    loopSourceB2B,
+    /\.runId\b/,
+    'the B2B loop must not itself inspect entry.runId -- that decision belongs entirely to reconcileDispatchingEntry',
+  );
+
+  assert.doesNotMatch(
+    loopSourceB2B,
+    /returnToPending|markDispatched|markInterrupted|failRun/,
+    'the B2B loop must not itself mutate queue or run state -- only the coordinator method may',
+  );
 });

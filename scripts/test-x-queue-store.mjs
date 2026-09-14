@@ -64,14 +64,43 @@ test('nextPending returns the oldest pending entry in insertion order', () => {
 test('markDispatching only transitions a pending entry, and only pending -> dispatching', () => {
   const store = new XQueueStore({ storagePath: tmpStorePath() });
   const entry = store.enqueue(taskFor());
-  const dispatching = store.markDispatching(entry.id);
+  const dispatching = store.markDispatching(entry.id, 'run-pre-1');
   assert.equal(dispatching.status, 'dispatching');
   assert.equal(typeof dispatching.dispatchingAt, 'string');
 
   // Cannot dispatching -> dispatching again.
-  assert.equal(store.markDispatching(entry.id), null);
+  assert.equal(store.markDispatching(entry.id, 'run-pre-2'), null);
   // Unknown id.
-  assert.equal(store.markDispatching('does-not-exist'), null);
+  assert.equal(store.markDispatching('does-not-exist', 'run-pre-3'), null);
+});
+
+// B2B requirement 1: markDispatching(id, runId) requires a non-empty string runId.
+test('markDispatching requires a non-empty string runId', () => {
+  const store = new XQueueStore({ storagePath: tmpStorePath() });
+  const entry = store.enqueue(taskFor());
+  assert.throws(() => store.markDispatching(entry.id, ''), TypeError);
+  assert.throws(() => store.markDispatching(entry.id, null), TypeError);
+  assert.throws(() => store.markDispatching(entry.id, undefined), TypeError);
+  assert.throws(() => store.markDispatching(entry.id, 42), TypeError);
+
+  // Still pending -- the rejected calls above must not have mutated anything.
+  assert.equal(store.nextPending().id, entry.id);
+  assert.equal(store.nextPending().status, 'pending');
+});
+
+// B2B requirement 2: pending -> dispatching persists that exact runId atomically,
+// in the SAME transition as the status/dispatchingAt change (one save() call).
+test('markDispatching(id, runId) persists status, dispatchingAt, and the exact runId together', () => {
+  const store = new XQueueStore({ storagePath: tmpStorePath() });
+  const entry = store.enqueue(taskFor());
+  const dispatching = store.markDispatching(entry.id, 'run-abc-123');
+  assert.equal(dispatching.status, 'dispatching');
+  assert.equal(dispatching.runId, 'run-abc-123');
+  assert.equal(typeof dispatching.dispatchingAt, 'string');
+
+  // The in-memory store's own view agrees -- one atomic transition, not two.
+  assert.equal(store.listDispatching().length, 1);
+  assert.equal(store.listDispatching()[0].runId, 'run-abc-123');
 });
 
 test('markDispatched only transitions dispatching -> dispatched, requires a real runId', () => {
@@ -81,7 +110,7 @@ test('markDispatched only transitions dispatching -> dispatched, requires a real
   // Cannot dispatch a still-pending entry directly.
   assert.equal(store.markDispatched(entry.id, 'run-1'), null);
 
-  store.markDispatching(entry.id);
+  store.markDispatching(entry.id, 'run-pre');
   assert.throws(() => store.markDispatched(entry.id, ''), TypeError);
   assert.throws(() => store.markDispatched(entry.id, null), TypeError);
 
@@ -101,18 +130,27 @@ test('returnToPending only reverts dispatching -> pending, never dispatched or a
   // Cannot revert a plain pending entry (nothing to revert from).
   assert.equal(store.returnToPending(entry.id), null);
 
-  store.markDispatching(entry.id);
+  store.markDispatching(entry.id, 'run-first-attempt');
   const reverted = store.returnToPending(entry.id);
   assert.equal(reverted.status, 'pending');
   assert.equal(reverted.dispatchingAt, null);
+  // B2B requirement 4: returnToPending clears runId back to null.
+  assert.equal(reverted.runId, null);
   assert.equal(store.nextPending().id, entry.id);
+  assert.equal(store.nextPending().runId, null);
 
   // Cannot revert an already-pending entry a second time.
   assert.equal(store.returnToPending(entry.id), null);
 
+  // B2B requirement 5: the next dispatch attempt for this same entry can
+  // use a fresh, different runId -- the store does not retain or reuse the
+  // cleared one.
+  const redispatched = store.markDispatching(entry.id, 'run-second-attempt');
+  assert.equal(redispatched.runId, 'run-second-attempt');
+  assert.notEqual(redispatched.runId, 'run-first-attempt');
+
   // Cannot revert a fully dispatched entry.
-  store.markDispatching(entry.id);
-  store.markDispatched(entry.id, 'run-1');
+  store.markDispatched(entry.id, 'run-second-attempt');
   assert.equal(store.returnToPending(entry.id), null);
 });
 
@@ -121,7 +159,11 @@ test('findDispatchedByRunId only finds an entry that has actually reached dispat
   const entry = store.enqueue(taskFor());
   assert.equal(store.findDispatchedByRunId('run-1'), null);
 
-  store.markDispatching(entry.id);
+  store.markDispatching(entry.id, 'run-1');
+  // Even though the entry now genuinely carries this runId while merely
+  // `dispatching`, it must still not be findable until it actually reaches
+  // `dispatched` -- proving findDispatchedByRunId checks status, not just
+  // a runId match.
   assert.equal(store.findDispatchedByRunId('run-1'), null, 'a dispatching (not yet dispatched) entry must not be findable by runId');
 
   store.markDispatched(entry.id, 'run-1');
@@ -139,12 +181,12 @@ test('markTerminal only deletes an entry that has reached dispatched -- never pe
   assert.ok(store.nextPending(), 'the pending entry must still be present');
 
   const dispatchingEntry = store.enqueue(taskFor('task-dispatching'));
-  store.markDispatching(dispatchingEntry.id);
+  store.markDispatching(dispatchingEntry.id, 'run-dispatching');
   assert.equal(store.markTerminal(dispatchingEntry.id), false, 'a stuck dispatching entry must never be pruned by markTerminal');
   assert.equal(store.listDispatching().length, 1);
 
   const dispatchedEntry = store.enqueue(taskFor('task-dispatched'));
-  store.markDispatching(dispatchedEntry.id);
+  store.markDispatching(dispatchedEntry.id, 'run-dispatched');
   store.markDispatched(dispatchedEntry.id, 'run-dispatched');
   assert.equal(store.markTerminal(dispatchedEntry.id), true);
   assert.equal(store.findDispatchedByRunId('run-dispatched'), null);
@@ -237,9 +279,9 @@ test('save/load round-trips pending, dispatching, dispatched, and review state e
 
   const pending = store.enqueue(taskFor('task-pending'));
   const stuckDispatching = store.enqueue(taskFor('task-stuck'));
-  store.markDispatching(stuckDispatching.id);
+  store.markDispatching(stuckDispatching.id, 'run-stuck');
   const dispatched = store.enqueue(taskFor('task-dispatched'));
-  store.markDispatching(dispatched.id);
+  store.markDispatching(dispatched.id, 'run-dispatched');
   store.markDispatched(dispatched.id, 'run-dispatched');
   store.recordReview({ runId: 'run-old', taskId: 'task-old', status: 'needs_review' });
 
@@ -250,11 +292,49 @@ test('save/load round-trips pending, dispatching, dispatched, and review state e
   assert.equal(reloaded.listDispatching().length, 1, 'a stuck dispatching entry must survive restart exactly as dispatching, not auto-reverted or auto-redispatched');
   assert.equal(reloaded.listDispatching()[0].id, stuckDispatching.id);
   assert.equal(reloaded.listDispatching()[0].status, 'dispatching');
+  // B2B requirement 3: reload preserves dispatching + runId.
+  assert.equal(reloaded.listDispatching()[0].runId, 'run-stuck');
 
   assert.equal(reloaded.listDispatched().length, 1);
   assert.equal(reloaded.findDispatchedByRunId('run-dispatched').id, dispatched.id);
 
   assert.equal(reloaded.hasReview('run-old'), true);
+});
+
+// B2B requirement 6: a LEGACY entry persisted before B2B (dispatching with
+// runId:null, written by the pre-B2B markDispatching(id) shape) must remain
+// loadable, completely unchanged -- never migrated, never invented a runId.
+// Seeded by writing the store's own on-disk JSON shape directly (the same
+// technique 'load falls back to the .bak file' below uses for corrupted
+// input), never through the new production markDispatching(id, runId) API,
+// which cannot produce this state at all once B2B ships.
+test('a legacy persisted dispatching entry with runId:null remains loadable, exactly as persisted', () => {
+  const storagePath = tmpStorePath();
+  const legacyPayload = {
+    schemaVersion: 1,
+    updatedAt: new Date().toISOString(),
+    entries: [{
+      id: 'legacy-entry-1',
+      task: taskFor('task-legacy'),
+      taskId: 'task-legacy',
+      status: 'dispatching',
+      createdAt: new Date().toISOString(),
+      dispatchingAt: new Date().toISOString(),
+      dispatchedAt: null,
+      runId: null,
+    }],
+    reviews: [],
+  };
+  fs.mkdirSync(path.dirname(storagePath), { recursive: true });
+  fs.writeFileSync(storagePath, JSON.stringify(legacyPayload, null, 2), 'utf8');
+
+  const store = new XQueueStore({ storagePath }).load();
+  assert.equal(store.listDispatching().length, 1);
+  const legacy = store.listDispatching()[0];
+  assert.equal(legacy.id, 'legacy-entry-1');
+  assert.equal(legacy.status, 'dispatching');
+  assert.equal(legacy.runId, null, 'a legacy entry must load with runId exactly null, never migrated or invented');
+  assert.equal(legacy.taskId, 'task-legacy');
 });
 
 test('load falls back to the .bak file when the primary store is corrupted', () => {
