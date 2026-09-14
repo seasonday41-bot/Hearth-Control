@@ -64,6 +64,36 @@ export class XRunStoreError extends Error {
 
 /** Rejects non-string, empty, and whitespace-only lease ids everywhere a real lease id is required. */
 const isValidLeaseId = (value) => typeof value === 'string' && value.trim().length > 0;
+// SQLite evaluates 'now' while executing the UPDATE, after any write-lock wait.
+const SQLITE_NOW_MS = `(CAST(strftime('%s', 'now') AS INTEGER) * 1000 + CAST(substr(strftime('%f', 'now'), 4, 3) AS INTEGER))`;
+const LIVE_CLAIM_PREDICATE = `EXISTS (SELECT 1 FROM x_task_claims AS claim
+  WHERE claim.task_id = x_runs.task_id AND claim.owner_id = ? AND claim.lease_id = x_runs.claim_lease_id
+    AND claim.state = 'active' AND claim.lease_expires_at > ${SQLITE_NOW_MS})`;
+
+const requireFencingIdentity = (ownerId, leaseId) => {
+  if (typeof ownerId !== 'string' || !ownerId.trim()) throw new TypeError('ownerId is required for a fenced transition.');
+  if (!isValidLeaseId(leaseId)) throw new TypeError('leaseId is required for a fenced transition.');
+};
+
+const validateCompletion = (runId, gateResult, xResult) => {
+  if (!runId || typeof runId !== 'string') throw new TypeError('runId is required.');
+  if (!gateResult || typeof gateResult.gate_status !== 'string') throw new TypeError('gateResult.gate_status is required.');
+  const mappedStatus = RUN_STATUS_BY_GATE_STATUS[gateResult.gate_status];
+  if (!mappedStatus) throw new TypeError(`Unrecognized gate_status '${gateResult.gate_status}'.`);
+  if (!xResult || typeof xResult !== 'object' || Array.isArray(xResult)) {
+    throw new TypeError('completeRun: xResult must be an object.');
+  }
+  if (typeof xResult.task_id !== 'string' || xResult.task_id.trim().length === 0) {
+    throw new TypeError('completeRun: xResult.task_id must be a non-empty string.');
+  }
+  if (xResult.gate_status !== gateResult.gate_status) {
+    throw new TypeError(`completeRun: xResult.gate_status ('${xResult.gate_status}') does not match gateResult.gate_status ('${gateResult.gate_status}').`);
+  }
+  if (xResult.hearth_outcome !== gateResult.hearth_outcome) {
+    throw new TypeError(`completeRun: xResult.hearth_outcome ('${xResult.hearth_outcome}') does not match gateResult.hearth_outcome ('${gateResult.hearth_outcome}').`);
+  }
+  return mappedStatus;
+};
 
 /**
  * Truncates to at most `maxBytes` UTF-8 bytes WITHOUT ever splitting a
@@ -257,27 +287,27 @@ export class XRunStore {
    * terminal) is reported as `null`.
    */
   completeRun({ runId, gateResult, xResult } = {}) {
-    if (!runId || typeof runId !== 'string') throw new TypeError('runId is required.');
-    if (!gateResult || typeof gateResult.gate_status !== 'string') throw new TypeError('gateResult.gate_status is required.');
-    const mappedStatus = RUN_STATUS_BY_GATE_STATUS[gateResult.gate_status];
-    if (!mappedStatus) throw new TypeError(`Unrecognized gate_status '${gateResult.gate_status}'.`);
-    if (!xResult || typeof xResult !== 'object' || Array.isArray(xResult)) {
-      throw new TypeError('completeRun: xResult must be an object.');
-    }
-    if (typeof xResult.task_id !== 'string' || xResult.task_id.trim().length === 0) {
-      throw new TypeError('completeRun: xResult.task_id must be a non-empty string.');
-    }
-    if (xResult.gate_status !== gateResult.gate_status) {
-      throw new TypeError(`completeRun: xResult.gate_status ('${xResult.gate_status}') does not match gateResult.gate_status ('${gateResult.gate_status}').`);
-    }
-    if (xResult.hearth_outcome !== gateResult.hearth_outcome) {
-      throw new TypeError(`completeRun: xResult.hearth_outcome ('${xResult.hearth_outcome}') does not match gateResult.hearth_outcome ('${gateResult.hearth_outcome}').`);
-    }
+    const mappedStatus = validateCompletion(runId, gateResult, xResult);
     const db = this._getDb();
     const now = this.now();
     const result = db.prepare(`UPDATE x_runs SET status = ?, gate_status = ?, hearth_outcome = ?, result_json = ?, error = NULL, updated_at = ?
       WHERE run_id = ? AND task_id = ? AND status = 'running'`)
       .run(mappedStatus, gateResult.gate_status, gateResult.hearth_outcome ?? null, JSON.stringify(xResult), now, runId, xResult.task_id);
+    if (result.changes === 0) return null;
+    this._applyRetention(db);
+    return this.getRun(runId);
+  }
+
+  /** Production terminal transition: the live claim and run update are one SQLite statement. */
+  completeRunFenced({ runId, ownerId, leaseId, gateResult, xResult } = {}) {
+    const mappedStatus = validateCompletion(runId, gateResult, xResult);
+    requireFencingIdentity(ownerId, leaseId);
+    const db = this._getDb();
+    const result = db.prepare(`UPDATE x_runs SET status = ?, gate_status = ?, hearth_outcome = ?, result_json = ?, error = NULL, updated_at = ${SQLITE_NOW_MS}
+      WHERE run_id = ? AND task_id = ? AND status = 'running' AND claim_lease_id = ?
+      AND ${LIVE_CLAIM_PREDICATE}`)
+      .run(mappedStatus, gateResult.gate_status, gateResult.hearth_outcome ?? null, JSON.stringify(xResult),
+        runId, xResult.task_id, leaseId, ownerId);
     if (result.changes === 0) return null;
     this._applyRetention(db);
     return this.getRun(runId);
@@ -299,6 +329,22 @@ export class XRunStore {
     const result = db.prepare(`UPDATE x_runs SET status = 'failed', gate_status = NULL, hearth_outcome = NULL, result_json = NULL, error = ?, updated_at = ?
       WHERE run_id = ? AND status IN ('queued','running')`)
       .run(bounded, now, runId);
+    if (result.changes === 0) return null;
+    this._applyRetention(db);
+    return this.getRun(runId);
+  }
+
+  /** Production orchestration failure, fenced for both claimed queued and running runs. */
+  failRunFenced({ runId, taskId, ownerId, leaseId, error } = {}) {
+    if (!runId || typeof runId !== 'string') throw new TypeError('runId is required.');
+    if (!taskId || typeof taskId !== 'string' || !taskId.trim()) throw new TypeError('taskId is required.');
+    requireFencingIdentity(ownerId, leaseId);
+    const db = this._getDb();
+    const bounded = truncateUtf8Safe(error ?? 'Unknown orchestration error', MAX_ERROR_BYTES);
+    const result = db.prepare(`UPDATE x_runs SET status = 'failed', gate_status = NULL, hearth_outcome = NULL, result_json = NULL, error = ?, updated_at = ${SQLITE_NOW_MS}
+      WHERE run_id = ? AND task_id = ? AND status IN ('queued','running') AND claim_lease_id = ?
+      AND ${LIVE_CLAIM_PREDICATE}`)
+      .run(bounded, runId, taskId, leaseId, ownerId);
     if (result.changes === 0) return null;
     this._applyRetention(db);
     return this.getRun(runId);
