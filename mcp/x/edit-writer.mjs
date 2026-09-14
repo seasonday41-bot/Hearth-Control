@@ -5,6 +5,7 @@ import { isProtectedPath } from '../skills/gateway.mjs';
 import {
   XContextScopeError, assertValidatedTaskShape, normalizePathString, isTraversal, scopeCheck,
 } from './context-loader.mjs';
+import { throwIfAborted } from './cancellation.mjs';
 
 /**
  * Bounded, scoped, atomic file-write primitives for x-task-v1 tasks -- the
@@ -350,15 +351,20 @@ function assertSafeTempPath(candidate, authorizedDirAbsolute) {
  * before any write, so even a hostile override cannot write outside the
  * one already-authorized directory.
  */
-async function writeTempFile(dir, content, mode, tempPathFor = defaultTempPathFor) {
+async function writeTempFile(dir, content, mode, tempPathFor = defaultTempPathFor, signal) {
+  throwIfAborted(signal);
   const tempAbsolute = assertSafeTempPath(tempPathFor(dir), dir);
   let createdByUs = false;
   try {
+    throwIfAborted(signal);
     await writeFile(tempAbsolute, content, { encoding: 'utf8', flag: 'wx', mode: mode ?? DEFAULT_NEW_FILE_MODE });
     createdByUs = true;
+    throwIfAborted(signal);
     if (mode !== undefined) await chmod(tempAbsolute, mode);
+    throwIfAborted(signal);
   } catch (err) {
     if (createdByUs) await unlink(tempAbsolute).catch(() => {});
+    throwIfAborted(signal);
     if (err?.code === 'EEXIST') {
       throw new XEditError('WRITE_FAILED', 'temp file name collision with a path this operation did not create; left untouched', 'EEXIST');
     }
@@ -368,11 +374,13 @@ async function writeTempFile(dir, content, mode, tempPathFor = defaultTempPathFo
 }
 
 /** Atomic no-clobber publish for `createFile`: `link()` fails with EEXIST if a competing writer already published `targetAbsolute`, so the competing file is never overwritten -- this is the OS-level compare-and-create, not a check-then-rename. */
-async function publishNoClobber(tempAbsolute, targetAbsolute) {
+async function publishNoClobber(tempAbsolute, targetAbsolute, signal) {
   try {
+    throwIfAborted(signal);
     await link(tempAbsolute, targetAbsolute);
   } catch (err) {
     await unlink(tempAbsolute).catch(() => {});
+    throwIfAborted(signal);
     if (err?.code === 'EEXIST') throw new XEditError('PRECONDITION_FAILED', 'a file already exists at this path; use replaceFile to modify it');
     throw new XEditError('WRITE_FAILED', err?.message || 'atomic no-clobber publish failed', err?.code || null);
   }
@@ -380,16 +388,22 @@ async function publishNoClobber(tempAbsolute, targetAbsolute) {
 }
 
 /** Publish for `replaceFile`/`applyEdits`: re-reads and re-hashes the live target immediately before the rename and aborts (temp discarded, target untouched) if it no longer matches `expectedBeforeHash`. */
-async function publishWithRevalidation(tempAbsolute, targetAbsolute, expectedBeforeHash) {
+async function publishWithRevalidation(tempAbsolute, targetAbsolute, expectedBeforeHash, signal) {
   const recheck = await readRawForWrite(targetAbsolute);
+  if (signal?.aborted) {
+    await unlink(tempAbsolute).catch(() => {});
+    throwIfAborted(signal);
+  }
   if (!recheck.ok || sha256(recheck.content) !== expectedBeforeHash) {
     await unlink(tempAbsolute).catch(() => {});
     throw new XEditError('PRECONDITION_FAILED', 'target content changed after inspection and before publish; write aborted');
   }
   try {
+    throwIfAborted(signal);
     await rename(tempAbsolute, targetAbsolute);
   } catch (err) {
     await unlink(tempAbsolute).catch(() => {});
+    throwIfAborted(signal);
     throw new XEditError('WRITE_FAILED', err?.message || 'atomic write failed', err?.code || null);
   }
 }
@@ -408,9 +422,10 @@ async function readBackEvidence(targetAbsolute) {
  * @param {object} task validated x-task-v1 (never mutated)
  * @param {string} relPath
  * @param {string} content
- * @param {{ limits?: object }} [options]
+ * @param {{ limits?: object, signal?: AbortSignal }} [options]
  */
 export async function createFile(task, relPath, content, options = {}) {
+  throwIfAborted(options.signal);
   assertValidatedTaskShape(task);
   const operation = 'create';
   if (typeof content !== 'string') return failure(operation, relPath, 'WRITE_FAILED', 'content must be a string');
@@ -419,6 +434,7 @@ export async function createFile(task, relPath, content, options = {}) {
   if (bytes > limits.maxBytesPerWrite) return failure(operation, relPath, 'WRITE_LIMIT_EXCEEDED', `content is ${bytes} bytes, over the ${limits.maxBytesPerWrite} byte limit`);
 
   const target = await resolveWriteTarget(task.scope, task.workspace.root, relPath);
+  throwIfAborted(options.signal);
   if (!target.ok) return failure(operation, normalizePathString(relPath), target.code, target.detail);
   if (target.exists) return failure(operation, target.relative, 'PRECONDITION_FAILED', 'a file already exists at this path; use replaceFile to modify it');
 
@@ -426,14 +442,15 @@ export async function createFile(task, relPath, content, options = {}) {
   if (!tempDir.ok) return failure(operation, target.relative, 'PATH_REJECTED', tempDir.detail);
 
   try {
-    const tempAbsolute = await writeTempFile(path.dirname(target.absolute), content, undefined, options.__testTempPathFor);
-    await publishNoClobber(tempAbsolute, target.absolute);
+    const tempAbsolute = await writeTempFile(path.dirname(target.absolute), content, undefined, options.__testTempPathFor, options.signal);
+    await publishNoClobber(tempAbsolute, target.absolute, options.signal);
     const { afterHash, bytesWritten } = await readBackEvidence(target.absolute);
     return {
       operation, path: target.relative, status: 'ok', code: null, detail: null,
       before_hash: null, after_hash: afterHash, bytes_written: bytesWritten, created: true, changed: true,
     };
   } catch (err) {
+    throwIfAborted(options.signal);
     if (err instanceof XEditError) return failure(operation, target.relative, err.code, err.message);
     return failure(operation, target.relative, 'WRITE_FAILED', err?.message || 'write failed');
   }
@@ -451,9 +468,10 @@ export async function createFile(task, relPath, content, options = {}) {
  * @param {object} task validated x-task-v1 (never mutated)
  * @param {string} relPath
  * @param {string} content
- * @param {{ expectedHash?: string, expectedContent?: string, limits?: object }} options
+ * @param {{ expectedHash?: string, expectedContent?: string, limits?: object, signal?: AbortSignal }} options
  */
 export async function replaceFile(task, relPath, content, options = {}) {
+  throwIfAborted(options.signal);
   assertValidatedTaskShape(task);
   const operation = 'replace';
   if (typeof content !== 'string') return failure(operation, relPath, 'WRITE_FAILED', 'content must be a string');
@@ -465,10 +483,12 @@ export async function replaceFile(task, relPath, content, options = {}) {
   if (bytes > limits.maxBytesPerWrite) return failure(operation, relPath, 'WRITE_LIMIT_EXCEEDED', `content is ${bytes} bytes, over the ${limits.maxBytesPerWrite} byte limit`);
 
   const target = await resolveWriteTarget(task.scope, task.workspace.root, relPath);
+  throwIfAborted(options.signal);
   if (!target.ok) return failure(operation, normalizePathString(relPath), target.code, target.detail);
   if (!target.exists) return failure(operation, target.relative, 'UNREADABLE_TARGET', 'no file exists at this path; use createFile to create it');
 
   const current = await readRawForWrite(target.absolute);
+  throwIfAborted(options.signal);
   if (!current.ok) return failure(operation, target.relative, current.code, current.detail);
   const beforeHash = sha256(current.content);
 
@@ -483,14 +503,15 @@ export async function replaceFile(task, relPath, content, options = {}) {
   if (!tempDir.ok) return { ...failure(operation, target.relative, 'PATH_REJECTED', tempDir.detail), before_hash: beforeHash };
 
   try {
-    const tempAbsolute = await writeTempFile(path.dirname(target.absolute), content, current.mode, options.__testTempPathFor);
-    await publishWithRevalidation(tempAbsolute, target.absolute, beforeHash);
+    const tempAbsolute = await writeTempFile(path.dirname(target.absolute), content, current.mode, options.__testTempPathFor, options.signal);
+    await publishWithRevalidation(tempAbsolute, target.absolute, beforeHash, options.signal);
     const { afterHash, bytesWritten } = await readBackEvidence(target.absolute);
     return {
       operation, path: target.relative, status: 'ok', code: null, detail: null,
       before_hash: beforeHash, after_hash: afterHash, bytes_written: bytesWritten, created: false, changed: afterHash !== beforeHash,
     };
   } catch (err) {
+    throwIfAborted(options.signal);
     if (err instanceof XEditError) return { ...failure(operation, target.relative, err.code, err.message), before_hash: beforeHash };
     return { ...failure(operation, target.relative, 'WRITE_FAILED', err?.message || 'write failed'), before_hash: beforeHash };
   }
@@ -521,9 +542,10 @@ export async function replaceFile(task, relPath, content, options = {}) {
  * @param {object} task validated x-task-v1 (never mutated)
  * @param {string} relPath
  * @param {{ old_string: string, new_string: string, replace_all?: boolean }[]} edits
- * @param {{ expectedHash?: string, limits?: object }} [options]
+ * @param {{ expectedHash?: string, limits?: object, signal?: AbortSignal }} [options]
  */
 export async function applyEdits(task, relPath, edits, options = {}) {
+  throwIfAborted(options.signal);
   assertValidatedTaskShape(task);
   const operation = 'patch';
   if (!Array.isArray(edits) || edits.length === 0) return failure(operation, relPath, 'WRITE_FAILED', 'edits must be a non-empty array');
@@ -550,10 +572,12 @@ export async function applyEdits(task, relPath, edits, options = {}) {
   }
 
   const target = await resolveWriteTarget(task.scope, task.workspace.root, relPath);
+  throwIfAborted(options.signal);
   if (!target.ok) return failure(operation, normalizePathString(relPath), target.code, target.detail);
   if (!target.exists) return failure(operation, target.relative, 'UNREADABLE_TARGET', 'no file exists at this path to patch');
 
   const current = await readRawForWrite(target.absolute);
+  throwIfAborted(options.signal);
   if (!current.ok) return failure(operation, target.relative, current.code, current.detail);
   const beforeHash = sha256(current.content);
 
@@ -594,14 +618,15 @@ export async function applyEdits(task, relPath, edits, options = {}) {
   if (!tempDir.ok) return { ...failure(operation, target.relative, 'PATH_REJECTED', tempDir.detail), before_hash: beforeHash };
 
   try {
-    const tempAbsolute = await writeTempFile(path.dirname(target.absolute), working, current.mode, options.__testTempPathFor);
-    await publishWithRevalidation(tempAbsolute, target.absolute, beforeHash);
+    const tempAbsolute = await writeTempFile(path.dirname(target.absolute), working, current.mode, options.__testTempPathFor, options.signal);
+    await publishWithRevalidation(tempAbsolute, target.absolute, beforeHash, options.signal);
     const { afterHash, bytesWritten } = await readBackEvidence(target.absolute);
     return {
       operation, path: target.relative, status: 'ok', code: null, detail: null,
       before_hash: beforeHash, after_hash: afterHash, bytes_written: bytesWritten, created: false, changed: afterHash !== beforeHash,
     };
   } catch (err) {
+    throwIfAborted(options.signal);
     if (err instanceof XEditError) return { ...failure(operation, target.relative, err.code, err.message), before_hash: beforeHash };
     return { ...failure(operation, target.relative, 'WRITE_FAILED', err?.message || 'write failed'), before_hash: beforeHash };
   }

@@ -1,6 +1,7 @@
 import { executeTask } from './local-executor.mjs';
 import { runRequiredValidation, runOptionalValidation } from './validation-runner.mjs';
 import { scopeCheck, XContextScopeError } from './context-loader.mjs';
+import { throwIfAborted } from './cancellation.mjs';
 
 /**
  * Orchestrates Phase 6 (`executeTask`) and Phase 7's own validation runner
@@ -161,10 +162,11 @@ const finalize = (taskId, status, rounds, blockers = []) => Object.freeze({
  *
  * @param {object} task validated x-task-v1
  * @param {{ generate: Function, cancel?: Function }} modelAdapter
- * @param {{ limits?: object, contextOptions?: object, writeLimits?: object, modelOptions?: object, validationLimits?: object }} [options]
+ * @param {{ limits?: object, contextOptions?: object, writeLimits?: object, modelOptions?: object, validationLimits?: object, signal?: AbortSignal }} [options]
  * @returns {Promise<{ task_id, status: 'validated'|'escalation_required', rounds, total_rounds, blockers }>}
  */
 export async function runTaskWithRepair(task, modelAdapter, options = {}) {
+  throwIfAborted(options.signal);
   const maxTotalRounds = task?.repair_budget?.max_total_rounds;
   if (!Number.isInteger(maxTotalRounds) || maxTotalRounds < 1) {
     throw new TypeError('task.repair_budget.max_total_rounds must be a positive integer');
@@ -172,24 +174,27 @@ export async function runTaskWithRepair(task, modelAdapter, options = {}) {
   const taskId = typeof task?.task_id === 'string' ? task.task_id : null;
   const executorOptions = {
     limits: options.limits, contextOptions: options.contextOptions,
-    writeLimits: options.writeLimits, modelOptions: options.modelOptions,
+    writeLimits: options.writeLimits, modelOptions: options.modelOptions, signal: options.signal,
   };
-  const validationOptions = { limits: options.validationLimits };
+  const validationOptions = { limits: options.validationLimits, signal: options.signal };
 
   const rounds = [];
   let roundTask = task;
 
   for (let round = 1; round <= maxTotalRounds; round += 1) {
+    throwIfAborted(options.signal);
     let executorResult;
     try {
       // eslint-disable-next-line no-await-in-loop -- rounds are strictly sequential by design.
       executorResult = await executeTask(roundTask, modelAdapter, executorOptions);
     } catch (err) {
+      throwIfAborted(options.signal);
       if (err instanceof XContextScopeError) {
         return finalize(taskId, 'escalation_required', rounds, [{ reason: 'invalid_task_scope', detail: err.message }]);
       }
       throw err;
     }
+    throwIfAborted(options.signal);
 
     if (executorResult.status !== 'completed') {
       const classification = classifyExecutorFailure(executorResult);
@@ -202,7 +207,9 @@ export async function runTaskWithRepair(task, modelAdapter, options = {}) {
     }
 
     // eslint-disable-next-line no-await-in-loop -- rounds are strictly sequential by design.
+    throwIfAborted(options.signal);
     const requiredResults = await runRequiredValidation(task, validationOptions);
+    throwIfAborted(options.signal);
 
     // A malformed/unauthorized validation COMMAND is a task-authoring
     // defect, not something an edit retry can ever fix -- the model never
@@ -221,8 +228,10 @@ export async function runTaskWithRepair(task, modelAdapter, options = {}) {
     const requiredPassed = requiredResults.every((result) => result.status === 'passed');
 
     if (requiredPassed) {
+      throwIfAborted(options.signal);
       // eslint-disable-next-line no-await-in-loop -- rounds are strictly sequential by design.
       const optionalResults = await runOptionalValidation(task, validationOptions);
+      throwIfAborted(options.signal);
       rounds.push(Object.freeze({
         round, kind: 'validation', executor: executorResult,
         validation: Object.freeze({ required: Object.freeze(requiredResults), optional: Object.freeze(optionalResults) }),
@@ -239,6 +248,7 @@ export async function runTaskWithRepair(task, modelAdapter, options = {}) {
     if (round === maxTotalRounds) {
       return finalize(taskId, 'escalation_required', rounds);
     }
+    throwIfAborted(options.signal);
     roundTask = buildRepairTask(task, rounds);
   }
 

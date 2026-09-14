@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { assertModelAdapterContract } from './model-adapter.mjs';
 import { loadTaskContext, XContextScopeError } from './context-loader.mjs';
 import { createFile, replaceFile, applyEdits } from './edit-writer.mjs';
+import { throwIfAborted } from './cancellation.mjs';
 
 /**
  * LocalExecutor: orchestration only.
@@ -363,8 +364,9 @@ const blockedActionResult = (operation, path, detail) => ({
  * Executes exactly one validated action through the one applicable Phase 5B
  * primitive. No other filesystem operation is reachable from here.
  */
-async function executeOneAction(task, action, context, writeLimits) {
-  if (action.type === 'create') return createFile(task, action.path, action.content, { limits: writeLimits });
+async function executeOneAction(task, action, context, writeLimits, signal) {
+  throwIfAborted(signal);
+  if (action.type === 'create') return createFile(task, action.path, action.content, { limits: writeLimits, signal });
 
   if (action.type === 'replace') {
     // The model never supplies a precondition. LocalExecutor binds it
@@ -374,7 +376,7 @@ async function executeOneAction(task, action, context, writeLimits) {
     if (!contextFile) {
       return blockedActionResult('replace', action.path, 'replace target has no complete (status: ok) snapshot in the loaded context; refusing to guess a precondition');
     }
-    return replaceFile(task, action.path, action.content, { expectedContent: stripContextLineNumbers(contextFile.content), limits: writeLimits });
+    return replaceFile(task, action.path, action.content, { expectedContent: stripContextLineNumbers(contextFile.content), limits: writeLimits, signal });
   }
 
   // patch: same complete-context provenance gate as replace. The model
@@ -388,7 +390,7 @@ async function executeOneAction(task, action, context, writeLimits) {
   if (!contextFile) {
     return blockedActionResult('patch', action.path, 'patch target has no complete (status: ok) snapshot in the loaded context; refusing to guess at unseen content');
   }
-  return applyEdits(task, action.path, action.edits, { expectedHash: sha256(stripContextLineNumbers(contextFile.content)), limits: writeLimits });
+  return applyEdits(task, action.path, action.edits, { expectedHash: sha256(stripContextLineNumbers(contextFile.content)), limits: writeLimits, signal });
 }
 
 const modelMetadataFrom = (modelResult, explanation = null, confidence = null) => (modelResult ? {
@@ -420,9 +422,10 @@ const blockedResult = (taskId, reason, detail, modelMetadata = null) => Object.f
  *
  * @param {object} task validated x-task-v1
  * @param {{ generate: Function, cancel?: Function }} modelAdapter a Phase 2 ModelAdapter (or a test stub with the same shape)
- * @param {{ limits?: object, contextOptions?: object, writeLimits?: object, modelOptions?: object }} [options]
+ * @param {{ limits?: object, contextOptions?: object, writeLimits?: object, modelOptions?: object, signal?: AbortSignal }} [options]
  */
 export async function executeTask(task, modelAdapter, options = {}) {
+  throwIfAborted(options.signal);
   assertModelAdapterContract(modelAdapter);
   const limits = resolveExecutorLimits(options.limits);
   const taskId = (task && typeof task === 'object' && typeof task.task_id === 'string') ? task.task_id : null;
@@ -431,17 +434,23 @@ export async function executeTask(task, modelAdapter, options = {}) {
   try {
     context = await loadTaskContext(task, options.contextOptions);
   } catch (err) {
+    throwIfAborted(options.signal);
     if (err instanceof XContextScopeError) throw err;
     return blockedResult(taskId, 'context_load_failed', err?.message || 'failed to load task context');
   }
+  throwIfAborted(options.signal);
 
   const request = buildModelRequest(task, context);
   let modelResult;
   try {
-    modelResult = await modelAdapter.generate(request, options.modelOptions);
+    modelResult = await modelAdapter.generate(request, options.signal
+      ? { ...options.modelOptions, signal: options.signal }
+      : options.modelOptions);
   } catch (err) {
+    throwIfAborted(options.signal);
     return blockedResult(taskId, 'model_request_failed', err?.message || 'model request failed');
   }
+  throwIfAborted(options.signal);
   if (!modelResult?.ok) {
     return blockedResult(taskId, 'model_request_failed', modelResult?.error?.message || 'model request failed', modelMetadataFrom(modelResult));
   }
@@ -460,8 +469,10 @@ export async function executeTask(task, modelAdapter, options = {}) {
   const changes = [];
   let failedChange = null;
   for (const action of actions) {
+    throwIfAborted(options.signal);
     // eslint-disable-next-line no-await-in-loop -- actions must apply strictly in order, one at a time.
-    const result = await executeOneAction(task, action, context, options.writeLimits);
+    const result = await executeOneAction(task, action, context, options.writeLimits, options.signal);
+    throwIfAborted(options.signal);
     changes.push(result);
     if (result.status !== 'ok') { failedChange = result; break; }
   }

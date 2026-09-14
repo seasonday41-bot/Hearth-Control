@@ -2,6 +2,7 @@ import path from 'node:path';
 import { realpath } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { assertValidatedTaskShape, normalizePathString, isTraversal } from './context-loader.mjs';
+import { throwIfAborted } from './cancellation.mjs';
 
 /**
  * Runs ONLY the validation commands already declared on a validated
@@ -154,9 +155,12 @@ const boundedAppend = (state, chunk, limit) => {
  * further bounded GRACE_MS if `close` still somehow never fired) a final
  * resolve, so the returned Promise can never hang and a process that
  * ignores SIGTERM is still actually terminated, not merely reported dead.
+ * An optional AbortSignal uses the same termination escalation; the caller
+ * receives XExecutionAbortedError only after the owned child has settled.
  */
-function spawnValidation(executable, args, cwd, limits) {
+function spawnValidation(executable, args, cwd, limits, signal) {
   return new Promise((resolve) => {
+    throwIfAborted(signal);
     const stdout = { chunks: [], bytes: 0, truncated: false };
     const stderr = { chunks: [], bytes: 0, truncated: false };
     const env = Object.fromEntries(['PATH', 'HOME', 'TMPDIR', 'LANG'].filter((key) => typeof process.env[key] === 'string').map((key) => [key, process.env[key]]));
@@ -182,6 +186,7 @@ function spawnValidation(executable, args, cwd, limits) {
       clearTimeout(timeoutTimer);
       clearTimeout(killTimer);
       clearTimeout(finalFallbackTimer);
+      abortSignal?.removeEventListener('abort', onAbort);
       resolve({
         exitCode: Number.isInteger(code) ? code : null,
         signal: signal || null,
@@ -201,8 +206,10 @@ function spawnValidation(executable, args, cwd, limits) {
     // the process -- is always preferred over any timer-driven guess.
     child.on('close', (code, signal) => finish(code, signal));
 
-    timeoutTimer = setTimeout(() => {
-      stopReason = 'timeout';
+    const abortSignal = signal;
+    const requestStop = (reason) => {
+      if (settled || stopReason) return;
+      stopReason = reason;
       try { child.kill('SIGTERM'); } catch { /* already gone */ }
       killTimer = setTimeout(() => {
         if (settled) return; // `close` already resolved us from the SIGTERM alone
@@ -214,7 +221,11 @@ function spawnValidation(executable, args, cwd, limits) {
         // process, which the OS guarantees independently of this timer.
         finalFallbackTimer = setTimeout(() => finish(null, 'SIGKILL'), GRACE_MS);
       }, GRACE_MS);
-    }, limits.timeoutMs);
+    };
+    const onAbort = () => requestStop('abort');
+    abortSignal?.addEventListener('abort', onAbort, { once: true });
+    if (abortSignal?.aborted) onAbort();
+    timeoutTimer = setTimeout(() => requestStop('timeout'), limits.timeoutMs);
   });
 }
 
@@ -243,13 +254,16 @@ const invalidCommandResult = (command, detail) => ({
   durationMs: 0, stdout: '', stderr: '', outputTruncated: false, pid: null, summary: `${command}: invalid_command -- ${detail}`,
 });
 
-async function runOneCommand(workspaceRoot, command, limits) {
+async function runOneCommand(workspaceRoot, command, limits, signal) {
+  throwIfAborted(signal);
   const parsed = parseValidationCommand(command);
   if (!parsed.ok) return invalidCommandResult(command, parsed.detail);
   const verified = await verifyCommandFiles(workspaceRoot, parsed.files);
+  throwIfAborted(signal);
   if (!verified.ok) return invalidCommandResult(command, verified.detail);
   const args = ['--test-isolation=none', '--test', ...verified.files];
-  const outcome = await spawnValidation(process.execPath, args, verified.canonicalRoot, limits);
+  const outcome = await spawnValidation(process.execPath, args, verified.canonicalRoot, limits, signal);
+  throwIfAborted(signal);
   const status = computeStatus(outcome);
   return {
     command, status,
@@ -269,9 +283,11 @@ async function runOneCommand(workspaceRoot, command, limits) {
  * @param {object} task validated x-task-v1
  * @param {'required'|'optional'} kind
  * @param {{ limits?: object }} [options]
+ * @param {{ limits?: object, signal?: AbortSignal }} [options]
  * @returns {Promise<Array<{command, status, exitCode, signal, timedOut, durationMs, stdout, stderr, outputTruncated, pid, summary}>>}
  */
 export async function runValidation(task, kind, options = {}) {
+  throwIfAborted(options.signal);
   if (kind !== 'required' && kind !== 'optional') {
     throw new TypeError("kind must be exactly 'required' or 'optional'");
   }
@@ -280,8 +296,10 @@ export async function runValidation(task, kind, options = {}) {
   const limits = resolveValidationLimits(options.limits);
   const results = [];
   for (const command of commands) {
+    throwIfAborted(options.signal);
     // eslint-disable-next-line no-await-in-loop -- validation commands run one at a time, in declared order.
-    results.push(await runOneCommand(task.workspace.root, command, limits));
+    results.push(await runOneCommand(task.workspace.root, command, limits, options.signal));
+    throwIfAborted(options.signal);
   }
   return results;
 }
