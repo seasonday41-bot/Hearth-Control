@@ -1,7 +1,18 @@
 import { runXTask } from './run-x-task.mjs';
 
-const TERMINAL_STATUSES = new Set(['completed', 'needs_review', 'failed']);
-const REVIEW_STATUSES = new Set(['needs_review', 'failed']);
+// Live x_run_terminal transport contract (Phase A) -- unchanged. This is the
+// ONLY set deriveTerminalEvent may use: broadening it would silently change
+// what the live x_run_terminal IPC/notification event reports.
+const EVENT_TERMINAL_STATUSES = new Set(['completed', 'needs_review', 'failed']);
+
+// Persisted XRunStore truth recognized by onXRunTerminal's own re-read --
+// distinct from EVENT_TERMINAL_STATUSES above. Includes 'interrupted'
+// (XRunStore's own startup-reconciliation outcome for a dead/stale claim,
+// see run-store.mjs's reconcileStartupState) so a queue entry whose run was
+// reconciled to 'interrupted' before this coordinator ever observes it is
+// still recognized as terminal, not stranded in `dispatched` forever.
+const PERSISTED_TERMINAL_STATUSES = new Set(['completed', 'needs_review', 'failed', 'interrupted']);
+const REVIEW_STATUSES = new Set(['needs_review', 'failed', 'interrupted']);
 
 /**
  * Derives the same `x_run_terminal` event shape mcp/tools.mjs's
@@ -11,12 +22,14 @@ const REVIEW_STATUSES = new Set(['needs_review', 'failed']);
  * (scripts/test-x-terminal-event.mjs for mcp/tools.mjs,
  * scripts/test-x-queue-coordinator.mjs for this module). Only `runId` from
  * this event is ever trusted by `onXRunTerminal` below -- see its own
- * doc comment.
+ * doc comment. Deliberately uses ONLY EVENT_TERMINAL_STATUSES, never
+ * PERSISTED_TERMINAL_STATUSES -- the live transport contract must not be
+ * broadened just because startup reconciliation recognizes 'interrupted'.
  * @param {{ run: object|null } | null} outcome
  */
 function deriveTerminalEvent(outcome) {
   const run = outcome?.run;
-  if (!run || !TERMINAL_STATUSES.has(run.status)) return null;
+  if (!run || !EVENT_TERMINAL_STATUSES.has(run.status)) return null;
   return {
     type: 'x_run_terminal',
     runId: run.runId, taskId: run.taskId, status: run.status,
@@ -218,7 +231,7 @@ export class XQueueCoordinator {
     if (!run) {
       return { handled: false, reason: 'run_not_found' };
     }
-    if (!TERMINAL_STATUSES.has(run.status)) {
+    if (!PERSISTED_TERMINAL_STATUSES.has(run.status)) {
       return { handled: false, reason: 'persisted_not_terminal' };
     }
 

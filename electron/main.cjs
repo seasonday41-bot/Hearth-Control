@@ -402,6 +402,13 @@ app.whenReady().then(async () => {
     onAntigravityAdmissionReleased(() => {
       xQueueCoordinator?.kick();
     });
+    for (const entry of xQueueStore.listDispatched()) {
+      try {
+        xQueueCoordinator.onXRunTerminal({ runId: entry.runId });
+      } catch (error) {
+        console.error('[Electron] X startup queue reconciliation failed:', error);
+      }
+    }
     xQueueCoordinator.kick();
   } catch (err) {
     console.error('Failed to initialize XQueueCoordinator:', err);

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 
-const REVIEW_STATUSES = new Set(['needs_review', 'failed']);
+const REVIEW_STATUSES = new Set(['needs_review', 'failed', 'interrupted']);
 
 /**
  * Persistent, JSON-file-backed store for XQueueCoordinator's own bookkeeping
@@ -206,7 +206,7 @@ export class XQueueStore {
     return true;
   }
 
-  /** Idempotent upsert keyed by runId: recording the same run's review twice returns the original record unchanged. Only 'needs_review' and 'failed' are valid review statuses; runId and taskId must both be non-empty strings. */
+  /** Idempotent upsert keyed by runId: recording the same run's review twice returns the original record unchanged. Only 'needs_review', 'failed', and 'interrupted' are valid review statuses; runId and taskId must both be non-empty strings. */
   recordReview({ runId, taskId, status }) {
     if (!runId || typeof runId !== 'string') {
       throw new TypeError('recordReview requires a non-empty string runId.');
@@ -215,7 +215,7 @@ export class XQueueStore {
       throw new TypeError('recordReview requires a non-empty string taskId.');
     }
     if (!REVIEW_STATUSES.has(status)) {
-      throw new TypeError(`recordReview only accepts 'needs_review' or 'failed', got '${status}'.`);
+      throw new TypeError(`recordReview only accepts 'needs_review', 'failed', or 'interrupted', got '${status}'.`);
     }
     const existing = this.reviews.get(runId);
     if (existing) return existing;

@@ -695,3 +695,207 @@ test('23 a throwing terminal handler never produces an unhandled rejection from 
     process.removeListener('unhandledRejection', onUnhandled);
   }
 });
+
+// ── B2A: persisted 'interrupted' reconciliation (dispatched entries only) ──
+//
+// 'interrupted' is XRunStore's own startup-reconciliation outcome for a
+// dead/stale claim (run-store.mjs's reconcileStartupState, already invoked
+// by getProductionXRuntime() before Electron's XQueueCoordinator is even
+// constructed). By the time a queue-level reconciliation ever runs, that
+// transition has already happened and the claim is already gone -- these
+// tests seed exactly that end state directly via the same public
+// XRunStore/XQueueStore APIs createRun/markRunning/markInterrupted and
+// enqueue/markDispatching/markDispatched already use elsewhere in this
+// repo's own run-store/queue-store test suites, rather than starting a real
+// runXTask and hoping to catch it mid-flight -- there is no live claim, no
+// live model, and no live runXTask promise for task-1 in either test below.
+
+/** Wraps a real XQueueStore, recording call order for recordReview/markTerminal only -- every other method is passed through unchanged. */
+function orderTrackingQueueStore(realStore, order) {
+  return {
+    enqueue: (...a) => realStore.enqueue(...a),
+    nextPending: (...a) => realStore.nextPending(...a),
+    markDispatching: (...a) => realStore.markDispatching(...a),
+    markDispatched: (...a) => realStore.markDispatched(...a),
+    returnToPending: (...a) => realStore.returnToPending(...a),
+    findDispatchedByRunId: (...a) => realStore.findDispatchedByRunId(...a),
+    listPending: (...a) => realStore.listPending(...a),
+    listDispatching: (...a) => realStore.listDispatching(...a),
+    listDispatched: (...a) => realStore.listDispatched(...a),
+    listReviews: (...a) => realStore.listReviews(...a),
+    hasReview: (...a) => realStore.hasReview(...a),
+    recordReview: (...a) => { order.push('recordReview'); return realStore.recordReview(...a); },
+    markTerminal: (...a) => { order.push('markTerminal'); return realStore.markTerminal(...a); },
+  };
+}
+
+test('24 tracked dispatched entry + persisted interrupted run -> handled true, review interrupted, recorded before prune, entry removed', () => {
+  const item = fixture();
+  const callOrder = [];
+  const spyStore = orderTrackingQueueStore(item.queueStore, callOrder);
+
+  const entry = item.queueStore.enqueue(taskFor(item, 'task-1'));
+  item.queueStore.markDispatching(entry.id);
+  const runId = 'run-task-1';
+  item.runStore.createRun({ runId, taskId: 'task-1' });
+  item.runStore.markRunning({ runId, claimLeaseId: 'lease-1' });
+  const interrupted = item.runStore.markInterrupted(runId);
+  assert.equal(interrupted.status, 'interrupted');
+  item.queueStore.markDispatched(entry.id, runId);
+
+  const coordinator = new XQueueCoordinator({
+    queueStore: spyStore, claimStore: item.claimStore, runStore: item.runStore,
+    modelAdapter: fastModel([create()]), ownerId: `owner-${Math.random().toString(36).slice(2)}`,
+  });
+
+  const result = coordinator.onXRunTerminal({ runId });
+  assert.equal(result.handled, true);
+
+  const reviews = item.queueStore.listReviews();
+  assert.equal(reviews.length, 1);
+  assert.equal(reviews[0].status, 'interrupted');
+  assert.equal(reviews[0].runId, runId);
+  assert.equal(reviews[0].taskId, 'task-1');
+  assert.equal(item.queueStore.findDispatchedByRunId(runId), null, 'the entry is pruned once its review is recorded');
+  assert.deepEqual(callOrder, ['recordReview', 'markTerminal'], 'review must be recorded BEFORE the queue entry is pruned');
+});
+
+test('25 interrupted does not block the next already-pending X task', async () => {
+  const item = fixture();
+
+  const entry1 = item.queueStore.enqueue(taskFor(item, 'task-1'));
+  item.queueStore.markDispatching(entry1.id);
+  const runId1 = 'run-task-1';
+  item.runStore.createRun({ runId: runId1, taskId: 'task-1' });
+  item.runStore.markRunning({ runId: runId1, claimLeaseId: 'lease-1' });
+  item.runStore.markInterrupted(runId1);
+  item.queueStore.markDispatched(entry1.id, runId1);
+
+  const model = controllableModel([create()]);
+  const coordinator = coordinatorFor(item, { modelAdapter: model });
+
+  const entry2 = coordinator.enqueue(taskFor(item, 'task-2'));
+  assert.equal(item.queueStore.listPending().some((e) => e.id === entry2.id), true, 'task-2 remains pending while task-1\'s stale dispatched entry blocks the serial gate');
+
+  const result = coordinator.onXRunTerminal({ runId: runId1 });
+  assert.equal(result.handled, true);
+  const reviews = item.queueStore.listReviews();
+  assert.equal(reviews.length, 1);
+  assert.equal(reviews[0].status, 'interrupted');
+  assert.equal(item.queueStore.findDispatchedByRunId(runId1), null);
+
+  await withTimeout(model.entered, 2000, 'task-2 dispatch after task-1 interrupted reconciliation');
+  await waitUntil(() => item.queueStore.listDispatched().some((e) => e.id === entry2.id), { label: 'task-2 to reach dispatched' });
+
+  model.release();
+  await waitUntil(() => isFullyIdle(item), { label: 'task-2 to fully finish' });
+});
+
+test('26 persisted running run stays persisted_not_terminal: dispatched entry preserved, no review, no next dispatch', async () => {
+  const item = fixture();
+  const controlled = controllableModel([create()]);
+  const coordinator = coordinatorFor(item, { modelAdapter: controlled });
+
+  coordinator.enqueue(taskFor(item, 'task-1'));
+  await controlled.entered;
+
+  await waitUntil(
+    () => item.queueStore.listDispatched().length === 1,
+    { label: 'task-1 to reach dispatched' },
+  );
+
+  const runId = item.queueStore.listDispatched()[0].runId;
+  assert.equal(item.runStore.getRun(runId).status, 'running');
+
+  const entry2 = coordinator.enqueue(taskFor(item, 'task-2'));
+
+  const result = coordinator.onXRunTerminal({ runId });
+
+  assert.equal(result.handled, false);
+  assert.equal(result.reason, 'persisted_not_terminal');
+
+  assert.equal(
+    item.queueStore.listDispatched().length,
+    1,
+    'task-1 entry preserved, not pruned',
+  );
+
+  assert.notEqual(
+    item.queueStore.findDispatchedByRunId(runId),
+    null,
+  );
+
+  assert.equal(
+    item.queueStore.listReviews().length,
+    0,
+    'no review recorded',
+  );
+
+  assert.equal(
+    item.queueStore.listPending().some((e) => e.id === entry2.id),
+    true,
+    'task-2 remains pending -- no next dispatch was triggered',
+  );
+
+  controlled.release();
+
+  await waitUntil(
+    () => isFullyIdle(item),
+    { label: 'cleanup' },
+  );
+});
+
+test('27 live deriveTerminalEvent contract remains limited to completed/needs_review/failed -- interrupted never broadens it', () => {
+  const source = fs.readFileSync(
+    new URL('../mcp/x/queue-coordinator.mjs', import.meta.url),
+    'utf8',
+  );
+
+  const eventSetMatch = source.match(
+    /const EVENT_TERMINAL_STATUSES = new Set\(\[([^\]]*)\]\);/,
+  );
+
+  assert.ok(
+    eventSetMatch,
+    'EVENT_TERMINAL_STATUSES must exist as a literal Set',
+  );
+
+  const eventStatuses = eventSetMatch[1]
+    .split(',')
+    .map((s) => s.trim().replace(/^'|'$/g, ''))
+    .filter(Boolean);
+
+  assert.deepEqual(
+    eventStatuses.sort(),
+    ['completed', 'failed', 'needs_review'],
+    'the live transport contract must remain exactly completed/needs_review/failed',
+  );
+
+  assert.equal(
+    eventStatuses.includes('interrupted'),
+    false,
+  );
+
+  const fnMatch = source.match(
+    /function deriveTerminalEvent\(outcome\) \{[\s\S]*?\n\}/,
+  );
+
+  assert.ok(
+    fnMatch,
+    'deriveTerminalEvent function body must be found',
+  );
+
+  const body = fnMatch[0];
+
+  assert.match(
+    body,
+    /EVENT_TERMINAL_STATUSES\.has\(run\.status\)/,
+    'deriveTerminalEvent must gate on EVENT_TERMINAL_STATUSES',
+  );
+
+  assert.doesNotMatch(
+    body,
+    /PERSISTED_TERMINAL_STATUSES/,
+    'deriveTerminalEvent must never reference the persisted-reconciliation terminal set',
+  );
+});

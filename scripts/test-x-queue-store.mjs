@@ -154,7 +154,7 @@ test('markTerminal only deletes an entry that has reached dispatched -- never pe
 
 // ── review bookkeeping ────────────────────────────────────────────────────
 
-test('recordReview only accepts needs_review or failed, and requires runId + taskId', () => {
+test('recordReview only accepts needs_review, failed, or interrupted, and requires runId + taskId', () => {
   const store = new XQueueStore({ storagePath: tmpStorePath() });
   assert.throws(() => store.recordReview({ runId: 'run-1', taskId: 'task-1', status: 'completed' }), TypeError);
   assert.throws(() => store.recordReview({ runId: '', taskId: 'task-1', status: 'failed' }), TypeError);
@@ -167,6 +167,43 @@ test('recordReview only accepts needs_review or failed, and requires runId + tas
   assert.equal(store.hasReview('run-1'), true);
 });
 
+// B2A: 'interrupted' (XRunStore's own startup-reconciliation outcome for a
+// dead/stale claim) must be an accepted review status, kept literally
+// 'interrupted' -- never remapped to 'failed'/'needs_review'/'completed'.
+test('recordReview accepts interrupted and records it with the exact record shape', () => {
+  const store = new XQueueStore({ storagePath: tmpStorePath() });
+  const record = store.recordReview({ runId: 'run-int', taskId: 'task-int', status: 'interrupted' });
+  assert.equal(record.status, 'interrupted');
+  assert.equal(record.runId, 'run-int');
+  assert.equal(record.taskId, 'task-int');
+  assert.equal(typeof record.recordedAt, 'string');
+  assert.deepEqual(Object.keys(record).sort(), ['recordedAt', 'runId', 'status', 'taskId']);
+  assert.equal(store.hasReview('run-int'), true);
+});
+
+test('recordReview(interrupted) is idempotent: recording the same runId twice returns the original record unchanged', () => {
+  const store = new XQueueStore({ storagePath: tmpStorePath() });
+  const first = store.recordReview({ runId: 'run-int', taskId: 'task-int', status: 'interrupted' });
+  const second = store.recordReview({ runId: 'run-int', taskId: 'task-int', status: 'interrupted' });
+  assert.deepEqual(second, first);
+  assert.equal(store.listReviews().length, 1);
+
+  // Even a conflicting later call for the same runId does not overwrite.
+  const third = store.recordReview({ runId: 'run-int', taskId: 'different-task', status: 'failed' });
+  assert.deepEqual(third, first);
+});
+
+test('an interrupted review record survives save/load exactly like needs_review/failed', () => {
+  const storagePath = tmpStorePath();
+  const store = new XQueueStore({ storagePath });
+  store.recordReview({ runId: 'run-int', taskId: 'task-int', status: 'interrupted' });
+
+  const reloaded = new XQueueStore({ storagePath }).load();
+  assert.equal(reloaded.hasReview('run-int'), true);
+  const record = reloaded.listReviews().find((r) => r.runId === 'run-int');
+  assert.equal(record.status, 'interrupted');
+});
+
 test('recordReview is idempotent: recording the same runId twice returns the original record unchanged', () => {
   const store = new XQueueStore({ storagePath: tmpStorePath() });
   const first = store.recordReview({ runId: 'run-1', taskId: 'task-1', status: 'failed' });
@@ -177,6 +214,19 @@ test('recordReview is idempotent: recording the same runId twice returns the ori
   // Even a conflicting later call for the same runId does not overwrite.
   const third = store.recordReview({ runId: 'run-1', taskId: 'different-task', status: 'needs_review' });
   assert.deepEqual(third, first);
+});
+
+// B2A requirement 4: existing needs_review/failed acceptance is unchanged
+// by adding 'interrupted' to the accepted set.
+test('needs_review and failed remain accepted alongside interrupted, each with independent idempotency', () => {
+  const store = new XQueueStore({ storagePath: tmpStorePath() });
+  const review = store.recordReview({ runId: 'run-review', taskId: 'task-review', status: 'needs_review' });
+  const failed = store.recordReview({ runId: 'run-failed', taskId: 'task-failed', status: 'failed' });
+  const interrupted = store.recordReview({ runId: 'run-interrupted', taskId: 'task-interrupted', status: 'interrupted' });
+  assert.equal(review.status, 'needs_review');
+  assert.equal(failed.status, 'failed');
+  assert.equal(interrupted.status, 'interrupted');
+  assert.equal(store.listReviews().length, 3);
 });
 
 // ── persistence round-trip ───────────────────────────────────────────────

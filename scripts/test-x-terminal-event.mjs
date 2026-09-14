@@ -534,8 +534,17 @@ test('EVT12 Electron relay recognizes x_run_terminal via the existing serverProc
   const registrationCount = (source.match(/serverProcess\.on\('message',/g) || []).length;
   assert.equal(registrationCount, 1, 'must not introduce a second serverProcess message-listener/transport');
 
-  assert.match(handlerBody, /message\?\.type === 'approval'\)\s*sendEvent\(message\)/, 'the pre-existing approval relay must be untouched');
-  assert.match(handlerBody, /message\?\.type === 'x_run_terminal'\)\s*sendEvent\(message\)/, 'x_run_terminal must be relayed through the same sendEvent bus');
+  assert.match(
+    handlerBody,
+    /message\?\.type === 'approval'\)\s*sendEvent\(message\)/,
+    'the pre-existing approval relay must be untouched',
+  );
+
+  assert.match(
+    handlerBody,
+    /if\s*\(message\?\.type === 'x_run_terminal'\)\s*\{[\s\S]*?sendEvent\(message\);[\s\S]*?xQueueCoordinator\?\.onXRunTerminal\(message\);[\s\S]*?\}/,
+    'x_run_terminal must both be relayed through the same sendEvent bus AND forwarded to xQueueCoordinator.onXRunTerminal',
+  );
 
   // Both branches route through the one existing `sendEvent` function --
   // grep the whole file for a second, different relay target to rule out.
