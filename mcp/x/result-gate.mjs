@@ -63,9 +63,12 @@ const HEARTH_OUTCOME_BY_GATE_STATUS = Object.freeze({
 const SAFETY_BOUNDARY_CODES = Object.freeze(new Set(['PROTECTED_PATH', 'SYMLINK_ESCAPE']));
 
 // Deterministic, objective, not model-retryable structural/authorization/
-// schema failures. reason_code is the code itself -- these are already
-// stable, documented identifiers from Phase 5B/6 (see FAILURE_CLASSIFICATION
-// in repair-loop.mjs), not re-bucketed under a synthetic name.
+// schema failures. All of these collapse to the single stable reason_code
+// 'structural_execution_failure' -- the underlying Phase 5B/6 identifier
+// (see FAILURE_CLASSIFICATION in repair-loop.mjs) is preserved only in
+// evidence.blocker.code/.reason, never promoted to reason_code itself, so
+// x-result-v1's reason_code taxonomy stays stable even if Phase 5B/6 ever
+// add or rename an underlying code.
 const KNOWN_FAILED_EXECUTION_CODES = Object.freeze(new Set([
   'PATH_REJECTED',
   'INVALID_SCOPE',
@@ -156,7 +159,7 @@ function classifyExecutionRound(repairOutcome, round) {
       return buildGateResult('NEEDS_REVIEW', 'safety_boundary_review', evidence, 'supervisor_review');
     }
     if (KNOWN_FAILED_EXECUTION_CODES.has(key)) {
-      return buildGateResult('FAILED', key, evidence);
+      return buildGateResult('FAILED', 'structural_execution_failure', evidence);
     }
     return buildGateResult('NEEDS_REVIEW', 'unrecognized_repair_outcome', evidence, 'supervisor_review');
   }

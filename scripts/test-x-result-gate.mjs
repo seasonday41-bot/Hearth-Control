@@ -106,22 +106,24 @@ test('escalation_required: unrecognized top-level blocker reason -> NEEDS_REVIEW
 });
 
 for (const code of ['PATH_REJECTED', 'INVALID_SCOPE', 'WRITE_FAILED', 'UNREADABLE_TARGET']) {
-  test(`escalation_required: execution blocker ${code} -> FAILED`, () => {
+  test(`escalation_required: execution blocker ${code} -> FAILED/structural_execution_failure, raw code preserved in evidence`, () => {
     const rounds = [executionRound(1, 'blocked', 'write_failed', 'escalate', code)];
     const result = evaluateResultGate(outcome('escalation_required', rounds));
     assert.equal(result.gate_status, 'FAILED');
     assert.equal(result.hearth_outcome, 'error');
-    assert.equal(result.reason_code, code);
+    assert.equal(result.reason_code, 'structural_execution_failure');
+    assert.equal(result.evidence.blocker.code, code);
     assert.equal(result.waiting_reason, null);
   });
 }
 
 for (const reason of ['context_load_failed', 'schema_invalid', 'unsupported_action', 'missing_field', 'too_many_actions', 'too_many_files']) {
-  test(`escalation_required: execution blocker reason ${reason} (no code) -> FAILED`, () => {
+  test(`escalation_required: execution blocker reason ${reason} (no code) -> FAILED/structural_execution_failure, raw reason preserved in evidence`, () => {
     const rounds = [executionRound(1, 'blocked', reason, 'escalate')];
     const result = evaluateResultGate(outcome('escalation_required', rounds));
     assert.equal(result.gate_status, 'FAILED');
-    assert.equal(result.reason_code, reason);
+    assert.equal(result.reason_code, 'structural_execution_failure');
+    assert.equal(result.evidence.blocker.reason, reason);
   });
 }
 
