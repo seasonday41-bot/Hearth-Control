@@ -29,6 +29,21 @@ const Icon = ({ name }: { name: IconName }) => {
 type LogEntry = { time: string; source: string; message: string; tone: string };
 type ApprovalRequest = { requestId: string; permission: string; action: string };
 
+// Pure FIFO queue logic for the approval collection -- kept outside the
+// component so it's a plain, deterministic function of (queue, event),
+// independent of React state timing. Duplicates are ignored on arrival
+// (never re-queued), and removal is always requestId-specific: resolving
+// or answering one request never disturbs any other pending one.
+export const upsertApproval = (queue: ApprovalRequest[], incoming: ApprovalRequest): ApprovalRequest[] => {
+  if (queue.some((item) => item.requestId === incoming.requestId)) return queue;
+  return [...queue, incoming];
+};
+
+export const removeApproval = (queue: ApprovalRequest[], requestId: string): ApprovalRequest[] => {
+  if (!queue.some((item) => item.requestId === requestId)) return queue;
+  return queue.filter((item) => item.requestId !== requestId);
+};
+
 const initialPermissions: Array<{ name: string; detail: string; value: Permission; disabled?: boolean }> = [
   { name: 'Files', detail: 'Read and write inside this workspace', value: 'Allow' },
   { name: 'Git', detail: 'Inspect status, history and diffs', value: 'Allow' },
@@ -77,7 +92,8 @@ export default function App() {
   const [activeNav, setActiveNav] = useState<NavItem>('Overview');
   const [dark, setDark] = useState(() => localStorage.getItem('control-theme') === 'dark');
   const [notice, setNotice] = useState('');
-  const [approval, setApproval] = useState<ApprovalRequest | null>(null);
+  const [approvalQueue, setApprovalQueue] = useState<ApprovalRequest[]>([]);
+  const approval = approvalQueue[0] ?? null;
   const [workspaceValid, setWorkspaceValid] = useState<boolean | null>(null);
   const [updaterInfo, setUpdaterInfo] = useState<UpdaterInfo | null>(null);
   const [updateCheck, setUpdateCheck] = useState<UpdateCheck | null>(null);
@@ -212,7 +228,10 @@ export default function App() {
         setLogs((current) => [...current, { time: now(), source: event.source ?? 'core', tone: event.tone ?? 'quiet', message: event.message ?? '' }]);
       }
       if (event.type === 'approval' && event.requestId && event.permission && event.action) {
-        setApproval({ requestId: event.requestId, permission: event.permission, action: event.action });
+        setApprovalQueue((current) => upsertApproval(current, { requestId: event.requestId!, permission: event.permission!, action: event.action! }));
+      }
+      if (event.type === 'approval:resolved' && event.requestId) {
+        setApprovalQueue((current) => removeApproval(current, event.requestId!));
       }
       if (event.type === 'goals:updated' && event.goal) {
         const updatedGoal = event.goal;
@@ -539,9 +558,14 @@ export default function App() {
 
   const answerApproval = async (allowedChoice: boolean) => {
     if (!approval) return;
-    await window.controlApp.respondToApproval({ requestId: approval.requestId, allowed: allowedChoice });
-    setLogs((current) => [...current, { time: now(), source: 'approval', tone: allowedChoice ? 'success' : 'warning', message: `${allowedChoice ? 'Allowed' : 'Denied'} once: ${approval.action}` }]);
-    setApproval(null);
+    const { requestId, action } = approval;
+    await window.controlApp.respondToApproval({ requestId, allowed: allowedChoice });
+    setLogs((current) => [...current, { time: now(), source: 'approval', tone: allowedChoice ? 'success' : 'warning', message: `${allowedChoice ? 'Allowed' : 'Denied'} once: ${action}` }]);
+    // Optimistic, requestId-specific removal -- a later approval:resolved
+    // for this same id (the normal server-side confirmation) is harmless
+    // (removeApproval no-ops on an already-absent requestId), and this
+    // never disturbs any other queued approval.
+    setApprovalQueue((current) => removeApproval(current, requestId));
   };
 
   const navigate = (item: NavItem) => {

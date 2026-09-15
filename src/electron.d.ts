@@ -1,7 +1,7 @@
 type PermissionValue = 'Allow' | 'Ask' | 'Blocked';
 interface ControlSettings { workspace: string; port: number; theme: 'light' | 'dark'; permissions: Record<string, PermissionValue>; }
 interface ServerState { running: boolean; port: number; pid: number | null; }
-interface ServerEvent { type: 'state' | 'log' | 'approval' | 'bridge:state' | 'goals:updated'; state?: ServerState | BridgeState; goal?: Goal; source?: string; tone?: string; message?: string; requestId?: string; permission?: string; action?: string; }
+interface ServerEvent { type: 'state' | 'log' | 'approval' | 'approval:resolved' | 'bridge:state' | 'goals:updated'; state?: ServerState | BridgeState; goal?: Goal; source?: string; tone?: string; message?: string; requestId?: string; permission?: string; action?: string; allowed?: boolean; reason?: 'user' | 'timeout' | 'aborted' | 'shutdown'; }
 
 interface AntigravityStatus {
   available: boolean;

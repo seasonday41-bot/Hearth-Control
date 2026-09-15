@@ -62,16 +62,53 @@ onAntigravityAdmissionReleased(() => {
   }
 });
 
+const settleApproval = (requestId, allowed, reason) => {
+  const pending = approvals.get(requestId);
+  if (!pending) return;
+  approvals.delete(requestId);
+  clearTimeout(pending.timer);
+  pending.resolve(allowed);
+  try {
+    process.send?.({
+      type: 'approval:resolved',
+      requestId,
+      allowed,
+      reason,
+    });
+  } catch {
+    /* best-effort only */
+  }
+};
+
 const requestApproval = ({ permission, action }) => new Promise((resolve) => {
   const requestId = crypto.randomUUID();
-  const timer = setTimeout(() => { approvals.delete(requestId); resolve(false); }, 60000);
-  approvals.set(requestId, (allowed) => { clearTimeout(timer); approvals.delete(requestId); resolve(allowed); });
-  if (process.send) process.send({ type: 'approval', requestId, permission, action });
-  else { clearTimeout(timer); approvals.delete(requestId); resolve(false); }
+  const timer = setTimeout(
+    () => settleApproval(requestId, false, 'timeout'),
+    60000,
+  );
+
+  approvals.set(requestId, { resolve, timer });
+
+  if (process.send) {
+    process.send({
+      type: 'approval',
+      requestId,
+      permission,
+      action,
+    });
+  } else {
+    settleApproval(requestId, false, 'aborted');
+  }
 });
 
 process.on('message', (message) => {
-  if (message?.type === 'approval:result') approvals.get(message.requestId)?.(message.allowed === true);
+  if (message?.type === 'approval:result') {
+    settleApproval(
+      message.requestId,
+      message.allowed === true,
+      'user',
+    );
+  }
   if (message?.type === 'settings:update' && message.permissions) Object.assign(permissions, message.permissions);
   if (message?.type === 'x_queue_enqueue_ack' || message?.type === 'x_queue_status_ack') {
     queueReplies.get(message.transportId)?.finish(null, message.ok ? message.receipt : { accepted: false, found: false, reason: message.error });
@@ -114,6 +151,12 @@ listener.on('error', (error) => {
   process.exit(1);
 });
 
-const shutdown = () => listener.close(() => process.exit(0));
+const shutdown = () => {
+  for (const requestId of [...approvals.keys()]) {
+    settleApproval(requestId, false, 'shutdown');
+  }
+
+  listener.close(() => process.exit(0));
+};
 process.on('message', (message) => { if (message?.type === 'shutdown') shutdown(); });
 process.on('SIGTERM', shutdown);

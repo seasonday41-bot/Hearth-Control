@@ -231,22 +231,46 @@ const cancelXQueueChild = (child) => {
 const requestXApproval = (record, child, action) => new Promise((resolve) => {
   const requestId = crypto.randomUUID();
   let settled = false;
-  const finish = (allowed) => {
+  // Every settlement path (user, timeout, abort/child-replacement, shutdown)
+  // funnels through here exactly once, and always makes the resolution
+  // visible to the renderer via approval:resolved -- lifecycle notification
+  // only, never re-derived/reinterpreted execution state.
+  const finish = (allowed, reason) => {
     if (settled) return;
     settled = true;
     clearTimeout(timer);
     record.abort.signal.removeEventListener('abort', onAbort);
     pendingXApprovals.delete(requestId);
     localApprovals.delete(requestId);
+
     resolve(allowed === true);
+
+    sendEvent({
+      type: 'approval:resolved',
+      requestId,
+      allowed: allowed === true,
+      reason,
+    });
   };
-  const onAbort = () => finish(false);
-  const timer = setTimeout(() => finish(false), 60000);
-  pendingXApprovals.set(requestId, { child, cancel: () => finish(false) });
-  localApprovals.set(requestId, finish);
+
+  const onAbort = () => finish(false, 'aborted');
+  const timer = setTimeout(() => finish(false, 'timeout'), 60000);
+
+  pendingXApprovals.set(requestId, {
+    child,
+    cancel: (reason = xShuttingDown ? 'shutdown' : 'aborted') =>
+      finish(false, reason),
+  });
+
+  localApprovals.set(requestId, (allowed) => finish(allowed, 'user'));
+
   record.abort.signal.addEventListener('abort', onAbort, { once: true });
-  if (record.abort.signal.aborted || xShuttingDown || serverProcess !== child) finish(false);
-  else sendEvent({ type: 'approval', requestId, permission: 'X', action });
+
+  if (record.abort.signal.aborted || xShuttingDown || serverProcess !== child) {
+    finish(false, xShuttingDown ? 'shutdown' : 'aborted');
+  } else {
+    sendEvent({ type: 'approval', requestId, permission: 'X', action });
+  }
 });
 const handleXQueueEnqueue = async (message, child, launchWorkspace, waiter) => {
   if (!xQueueStore || !xParseTask) throw xQueueError('queue_unavailable');
@@ -464,6 +488,10 @@ const startServer = async ({ workspace, port }) => {
       sendEvent({ type: 'log', source: 'mcp', tone: 'success', message: `Local control server listening on 127.0.0.1:${selectedPort}` });
     }
     if (message?.type === 'approval') sendEvent(message);
+    // Child-owned (Antigravity/Files/Terminal/Browser) approval lifecycle
+    // notification -- a plain relay, exactly like 'approval' above. Main
+    // never reinterprets it; it only forwards the child's own resolution.
+    if (message?.type === 'approval:resolved') sendEvent(message);
     if (message?.type === 'x_run_terminal') {
       sendEvent(message);
       try {
