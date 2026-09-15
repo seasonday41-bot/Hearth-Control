@@ -54,6 +54,12 @@ contextBridge.exposeInMainWorld('controlApp', {
   bridgeSetEnabled: (enabled) => ipcRenderer.invoke('bridge:set-enabled', enabled),
   bridgeApproveTask: (taskId) => ipcRenderer.invoke('bridge:approve-task', taskId),
   bridgeRejectTask: (taskId) => ipcRenderer.invoke('bridge:reject-task', taskId),
+  // Project X's OWN auth surface -- a separate namespace from every bridge* call above.
+  publicTasksGetState: () => ipcRenderer.invoke('publicTasks:get-state'),
+  publicTasksSaveAnonKey: (anonKey) => ipcRenderer.invoke('publicTasks:save-anon-key', anonKey),
+  publicTasksSignUp: (credentials) => ipcRenderer.invoke('publicTasks:sign-up', credentials),
+  publicTasksSignIn: (credentials) => ipcRenderer.invoke('publicTasks:sign-in', credentials),
+  publicTasksSignOut: () => ipcRenderer.invoke('publicTasks:sign-out'),
   goalsList: () => ipcRenderer.invoke('goals:list'),
   goalsGet: (goalId) => ipcRenderer.invoke('goals:get', goalId),
   goalsCreate: (data) => ipcRenderer.invoke('goals:create', data),

@@ -124,6 +124,11 @@ export class OllamaProvider {
     longResponse = false,
     timeoutMs,
     tools,
+    // Ollama's own structured-output constraint (e.g. "json"). Omitted by
+    // default so existing callers (e.g. free-form Local Chat) are
+    // completely unaffected -- only a caller that explicitly opts in (the
+    // X ModelAdapter) sets this.
+    format,
   } = {}) {
     if (!Array.isArray(messages) || messages.length === 0) {
       return providerError({ code: 'INVALID_REQUEST', message: 'messages must be a non-empty array' });
@@ -152,6 +157,7 @@ export class OllamaProvider {
         think: think === undefined ? runtimeProfile.think : Boolean(think),
         options: runtimeOptions,
         ...(Array.isArray(tools) && tools.length > 0 ? { tools } : {}),
+        ...(format ? { format } : {}),
       },
       signal,
       timeoutMs: requestTimeoutMs,
@@ -193,6 +199,8 @@ export class OllamaProvider {
     timeoutMs,
     onChunk,
     tools,
+    // See chat()'s `format` -- same opt-in-only structured-output constraint.
+    format,
   } = {}) {
     if (!Array.isArray(messages) || messages.length === 0) return providerError({ code: 'INVALID_REQUEST', message: 'messages must be a non-empty array' });
     if (!model || typeof model !== 'string' || !model.trim()) return providerError({ code: 'MODEL_REQUIRED', message: 'An Ollama model is required' });
@@ -230,6 +238,7 @@ export class OllamaProvider {
           think: think === undefined ? runtimeProfile.think : Boolean(think),
           options: runtimeOptions,
           ...(Array.isArray(tools) && tools.length > 0 ? { tools } : {}),
+          ...(format ? { format } : {}),
         }),
         signal: controller.signal,
       });

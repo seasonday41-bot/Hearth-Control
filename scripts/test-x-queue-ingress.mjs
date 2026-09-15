@@ -96,9 +96,20 @@ test('concurrent equal fingerprints share one X approval and one durable entry',
   const approvalId = await waitForApproval(h);
   h.api.localApprovals.get(approvalId)(true);
   const [one, two] = await Promise.all([first, second]);
-  assert.equal(one.queue_id, two.queue_id);
-  assert.equal(h.enqueueCount, 1);
-  assert.equal(h.events.length, 1);
+  assert.equal(one.queue_id, two.queue_id, 'both coalesced callers receive the SAME durable queue_id');
+  assert.equal(h.enqueueCount, 1, 'exactly one durable queue entry for two concurrent equal-fingerprint requests');
+  // Exactly one approval was ever requested and exactly one resolution was
+  // ever sent for it -- coalescing must never re-prompt a second time, and
+  // resolving it must never emit a second, duplicate settlement event. This
+  // is two events in total by design ('approval' then 'approval:resolved'
+  // once localApprovals.get(approvalId)(true) settles it above), not one.
+  const approvalRequests = h.events.filter((e) => e.type === 'approval');
+  const approvalResolutions = h.events.filter((e) => e.type === 'approval:resolved');
+  assert.equal(approvalRequests.length, 1, 'exactly one approval request for two coalesced callers');
+  assert.equal(approvalResolutions.length, 1, 'exactly one approval resolution, matching the single request');
+  assert.equal(approvalResolutions[0].requestId, approvalRequests[0].requestId);
+  assert.equal(approvalResolutions[0].allowed, true);
+  assert.equal(h.events.length, approvalRequests.length + approvalResolutions.length, 'no other event type was emitted');
   assert.equal(h.api.pendingXApprovals.size, 0);
 });
 

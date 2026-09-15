@@ -1,7 +1,7 @@
 type PermissionValue = 'Allow' | 'Ask' | 'Blocked';
 interface ControlSettings { workspace: string; port: number; theme: 'light' | 'dark'; permissions: Record<string, PermissionValue>; }
 interface ServerState { running: boolean; port: number; pid: number | null; }
-interface ServerEvent { type: 'state' | 'log' | 'approval' | 'approval:resolved' | 'bridge:state' | 'goals:updated'; state?: ServerState | BridgeState; goal?: Goal; source?: string; tone?: string; message?: string; requestId?: string; permission?: string; action?: string; allowed?: boolean; reason?: 'user' | 'timeout' | 'aborted' | 'shutdown'; }
+interface ServerEvent { type: 'state' | 'log' | 'approval' | 'approval:resolved' | 'bridge:state' | 'publicTasks:state' | 'goals:updated'; state?: ServerState | BridgeState | PublicTasksState; goal?: Goal; source?: string; tone?: string; message?: string; requestId?: string; permission?: string; action?: string; allowed?: boolean; reason?: 'user' | 'timeout' | 'aborted' | 'shutdown'; }
 
 interface AntigravityStatus {
   available: boolean;
@@ -56,6 +56,8 @@ interface BridgeTask {
   status: string;
   createdAt: string;
   requestId?: string | null;
+  /** Present and 'x' only for a Project X (public.tasks) row -- routes Approve through the X queue instead of Antigravity. */
+  routedTo?: 'x';
 }
 
 interface BridgeState {
@@ -68,6 +70,13 @@ interface BridgeState {
   pairingReady: boolean;
   pendingTasks: BridgeTask[];
   activeRemoteTaskId: string | null;
+}
+
+/** Project X's OWN auth state -- a separate namespace from BridgeState/the legacy bridge. */
+interface PublicTasksState {
+  configured: boolean;
+  signedIn: boolean;
+  accountEmail: string | null;
 }
 
 type UpdateStatus = 'idle' | 'checking' | 'up_to_date' | 'update_ready' | 'installing' | 'restarting' | 'rollback' | 'error';
@@ -166,8 +175,13 @@ interface Window { controlApp: {
   bridgeSignOut: () => Promise<BridgeState>;
   bridgeGetPairingSecret: () => Promise<string>;
   bridgeSetEnabled: (enabled: boolean) => Promise<BridgeState>;
-  bridgeApproveTask: (taskId: string) => Promise<{ success: boolean; taskId: string; conversationId?: string }>;
+  bridgeApproveTask: (taskId: string) => Promise<{ success: boolean; taskId: string; conversationId?: string; routedTo?: 'x'; queueId?: string }>;
   bridgeRejectTask: (taskId: string) => Promise<boolean>;
+  publicTasksGetState: () => Promise<PublicTasksState>;
+  publicTasksSaveAnonKey: (anonKey: string) => Promise<PublicTasksState>;
+  publicTasksSignUp: (credentials: { email: string; password: string }) => Promise<{ signedIn: boolean; needsEmailVerification: boolean }>;
+  publicTasksSignIn: (credentials: { email: string; password: string }) => Promise<PublicTasksState>;
+  publicTasksSignOut: () => Promise<PublicTasksState>;
   goalsList: () => Promise<Goal[]>;
   goalsGet: (goalId: string) => Promise<Goal | null>;
   goalsCreate: (data: { title: string; objective: string; workspace?: string; steps: Partial<GoalStep>[]; constraints?: string[]; route?: 'mcp' | 'antigravity' | 'hybrid' }) => Promise<Goal>;

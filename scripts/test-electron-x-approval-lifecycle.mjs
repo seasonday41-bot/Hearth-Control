@@ -22,7 +22,7 @@ const mainSource = fs.readFileSync(new URL('../electron/main.cjs', import.meta.u
 
 // ── extraction ───────────────────────────────────────────────────────────
 
-const requestXApprovalStart = mainSource.indexOf('const requestXApproval = (record, child, action) => new Promise((resolve) => {');
+const requestXApprovalStart = mainSource.indexOf('const requestXApproval = (record, child, action, options = {}) => new Promise((resolve) => {');
 const requestXApprovalEnd = mainSource.indexOf('\nconst handleXQueueEnqueue = async (message, child, launchWorkspace, waiter) => {');
 assert.ok(requestXApprovalStart !== -1 && requestXApprovalEnd !== -1, 'requestXApproval must be found in electron/main.cjs');
 const requestXApprovalSource = mainSource.slice(requestXApprovalStart, requestXApprovalEnd);

@@ -108,6 +108,15 @@ export default function App() {
   const [bridgePassword, setBridgePassword] = useState('');
   const [bridgeAuthMode, setBridgeAuthMode] = useState<'sign-in' | 'sign-up'>('sign-in');
 
+  // Project X Remote Tasks states -- a SEPARATE namespace from the bridge
+  // states above (own settings key, own encrypted session, own project).
+  const [publicXState, setPublicXState] = useState<PublicTasksState | null>(null);
+  const [publicXBusy, setPublicXBusy] = useState(false);
+  const [publicXAnonKey, setPublicXAnonKey] = useState('');
+  const [publicXEmail, setPublicXEmail] = useState('');
+  const [publicXPassword, setPublicXPassword] = useState('');
+  const [publicXAuthMode, setPublicXAuthMode] = useState<'sign-in' | 'sign-up'>('sign-in');
+
   // Task Console states
   const [executorStatus, setExecutorStatus] = useState<AntigravityStatus | null>(null);
   const [taskPrompt, setTaskPrompt] = useState('');
@@ -183,11 +192,12 @@ export default function App() {
       window.controlApp.getServerState(),
       window.controlApp.antigravityStatus().catch(() => null),
       window.controlApp.bridgeGetState().catch(() => null),
+      window.controlApp.publicTasksGetState().catch(() => null),
       window.controlApp.updaterGetInfo().catch(() => null),
       window.controlApp.updaterCheck().catch(() => null),
       window.controlApp.goalsList().catch(() => []),
       window.controlApp.antigravityListTasks().catch(() => []),
-    ]).then(([settings, state, executor, bridge, updateInfo, update, goalsList, taskList]) => {
+    ]).then(([settings, state, executor, bridge, publicX, updateInfo, update, goalsList, taskList]) => {
       if (!active) return;
       if (settings.workspace) setWorkspace(settings.workspace);
       setPort(settings.port);
@@ -197,6 +207,7 @@ export default function App() {
       setPid(state.pid);
       if (executor) setExecutorStatus(executor);
       if (bridge) setBridgeState(bridge);
+      if (publicX) setPublicXState(publicX);
       if (updateInfo) setUpdaterInfo(updateInfo);
       if (update) setUpdateCheck(update);
       if (goalsList) setGoals(goalsList);
@@ -223,6 +234,9 @@ export default function App() {
       }
       if (event.type === 'bridge:state' && event.state) {
         setBridgeState(event.state as BridgeState);
+      }
+      if (event.type === 'publicTasks:state' && event.state) {
+        setPublicXState(event.state as PublicTasksState);
       }
       if (event.type === 'log' && event.message) {
         setLogs((current) => [...current, { time: now(), source: event.source ?? 'core', tone: event.tone ?? 'quiet', message: event.message ?? '' }]);
@@ -825,6 +839,58 @@ export default function App() {
     }
   };
 
+  // Project X Remote Tasks handlers -- mirror the bridge handlers above but
+  // against the SEPARATE publicTasks* IPC namespace/session.
+  const handlePublicXSaveKey = async () => {
+    if (publicXBusy || !publicXAnonKey.trim()) return;
+    setPublicXBusy(true);
+    try {
+      setPublicXState(await window.controlApp.publicTasksSaveAnonKey(publicXAnonKey.trim()));
+      flash('Project X publishable key saved');
+    } catch (err: any) {
+      flash(err?.message || 'Could not save the Project X key');
+    } finally {
+      setPublicXBusy(false);
+    }
+  };
+
+  const handlePublicXAuth = async () => {
+    if (publicXBusy || !publicXEmail.trim() || publicXPassword.length < 8) return;
+    setPublicXBusy(true);
+    try {
+      if (publicXAuthMode === 'sign-up') {
+        const result = await window.controlApp.publicTasksSignUp({ email: publicXEmail.trim(), password: publicXPassword });
+        if (result.needsEmailVerification) {
+          flash('Check your email, then sign in');
+          setPublicXAuthMode('sign-in');
+        } else {
+          setPublicXState(await window.controlApp.publicTasksGetState());
+          flash('Hearth is connected to Project X');
+        }
+      } else {
+        setPublicXState(await window.controlApp.publicTasksSignIn({ email: publicXEmail.trim(), password: publicXPassword }));
+        flash('Hearth is connected to Project X');
+      }
+      setPublicXPassword('');
+    } catch (err: any) {
+      flash(err?.message || 'Could not connect to Project X');
+    } finally {
+      setPublicXBusy(false);
+    }
+  };
+
+  const handlePublicXSignOut = async () => {
+    if (publicXBusy) return;
+    setPublicXBusy(true);
+    try {
+      setPublicXState(await window.controlApp.publicTasksSignOut());
+      setPublicXPassword('');
+      flash('Signed out of Project X');
+    } finally {
+      setPublicXBusy(false);
+    }
+  };
+
   const copyPairingSecret = async () => {
     try {
       const secret = await window.controlApp.bridgeGetPairingSecret();
@@ -888,10 +954,18 @@ export default function App() {
     try {
       const res = await window.controlApp.bridgeApproveTask(task.id);
       setTaskData(null);
-      setActiveTaskId(res.taskId);
-      setActiveTaskSource('Remote');
-      setReviewTask(null);
-      flash(`Remote task approved (${res.taskId})`);
+      if (res.routedTo === 'x') {
+        // X tracks its own run progress via the X queue, not this
+        // Antigravity-shaped task panel -- leave it showing no active task.
+        setActiveTaskId(null);
+        setReviewTask(null);
+        flash(`Remote X task approved and queued (${res.taskId})`);
+      } else {
+        setActiveTaskId(res.taskId);
+        setActiveTaskSource('Remote');
+        setReviewTask(null);
+        flash(`Remote task approved (${res.taskId})`);
+      }
     } catch (err: any) {
       setTaskData(null);
       flash(`Failed to approve task: ${err?.message || 'Unknown error'}`);
@@ -1370,15 +1444,95 @@ export default function App() {
                         <button
                           className="remote-action-btn approve"
                           type="button"
-                          disabled={bridgeBusy || isTaskRunning || !executorStatus?.available || antigravityPerm === 'Blocked'}
+                          disabled={t.routedTo === 'x' ? bridgeBusy : (bridgeBusy || isTaskRunning || !executorStatus?.available || antigravityPerm === 'Blocked')}
                           onClick={() => handleApproveRemoteTask(t)}
-                          title={isTaskRunning ? 'Cannot run while another task is running' : 'Approve and dispatch to Antigravity'}
+                          title={t.routedTo === 'x' ? 'Approve and dispatch to X' : (isTaskRunning ? 'Cannot run while another task is running' : 'Approve and dispatch to Antigravity')}
                         >
                           Approve & Run
                         </button>
                       </div>
                     </div>
                   ))}
+                </div>
+              )}
+
+              {/* PROJECT X REMOTE TASKS -- a separate connection/session from the Remote Bridge above */}
+              <div className="remote-inbox-header" style={{ marginTop: '1.5rem' }}>
+                <div>
+                  <p className="kicker">PROJECT X</p>
+                  <h2>Project X Remote Tasks</h2>
+                </div>
+                <div className="remote-inbox-controls">
+                  <div className={`connection-pill ${publicXState?.signedIn ? 'online' : ''}`}>
+                    <span /> Project X · {publicXState?.signedIn ? 'Connected' : publicXState?.configured ? 'Not signed in' : 'Not configured'}
+                  </div>
+                  {publicXState?.signedIn && (
+                    <button className="bridge-signout-btn" type="button" disabled={publicXBusy} onClick={handlePublicXSignOut}>
+                      Sign out
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {!publicXState?.configured ? (
+                <div className="bridge-auth-panel">
+                  <div className="bridge-auth-copy">
+                    <strong>Connect to Project X</strong>
+                    <span>Enter Project X's publishable (anon) key to enable X-routed remote tasks.</span>
+                  </div>
+                  <div className="bridge-auth-fields">
+                    <input
+                      type="text"
+                      value={publicXAnonKey}
+                      onChange={(event) => setPublicXAnonKey(event.target.value)}
+                      onKeyDown={(event) => { if (event.key === 'Enter') void handlePublicXSaveKey(); }}
+                      placeholder="Project X publishable (anon) key"
+                    />
+                    <button type="button" disabled={publicXBusy || !publicXAnonKey.trim()} onClick={handlePublicXSaveKey}>
+                      {publicXBusy ? 'Saving…' : 'Save key'}
+                    </button>
+                  </div>
+                </div>
+              ) : !publicXState?.signedIn ? (
+                <div className="bridge-auth-panel">
+                  <div className="bridge-auth-copy">
+                    <strong>Sign in to Project X</strong>
+                    <span>A separate account from the Remote Bridge above. Your session is protected by macOS Keychain.</span>
+                  </div>
+                  <div className="bridge-auth-fields">
+                    <input
+                      autoComplete="email"
+                      type="email"
+                      value={publicXEmail}
+                      onChange={(event) => setPublicXEmail(event.target.value)}
+                      placeholder="Email"
+                    />
+                    <input
+                      autoComplete={publicXAuthMode === 'sign-in' ? 'current-password' : 'new-password'}
+                      type="password"
+                      minLength={8}
+                      value={publicXPassword}
+                      onChange={(event) => setPublicXPassword(event.target.value)}
+                      onKeyDown={(event) => { if (event.key === 'Enter') void handlePublicXAuth(); }}
+                      placeholder="Password (8+ characters)"
+                    />
+                    <button type="button" disabled={publicXBusy || !publicXEmail.trim() || publicXPassword.length < 8} onClick={handlePublicXAuth}>
+                      {publicXBusy ? 'Connecting…' : publicXAuthMode === 'sign-in' ? 'Sign in' : 'Create account'}
+                    </button>
+                  </div>
+                  <button
+                    className="bridge-auth-switch"
+                    type="button"
+                    onClick={() => setPublicXAuthMode((current) => current === 'sign-in' ? 'sign-up' : 'sign-in')}
+                  >
+                    {publicXAuthMode === 'sign-in' ? 'Create a Project X account' : 'I already have an account'}
+                  </button>
+                </div>
+              ) : (
+                <div className="remote-inbox-empty">
+                  <Icon name="radio" />
+                  <p>Connected to Project X</p>
+                  <small>{publicXState.accountEmail}. Queued Project X tasks appear in the Remote Inbox above once approved.</small>
                 </div>
               )}
             </section>
@@ -1823,7 +1977,7 @@ export default function App() {
               <button
                 className="allow-button"
                 autoFocus
-                disabled={bridgeBusy || isTaskRunning || !executorStatus?.available || antigravityPerm === 'Blocked'}
+                disabled={reviewTask.routedTo === 'x' ? bridgeBusy : (bridgeBusy || isTaskRunning || !executorStatus?.available || antigravityPerm === 'Blocked')}
                 onClick={() => handleApproveRemoteTask(reviewTask)}
               >
                 Approve & Run

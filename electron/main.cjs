@@ -21,6 +21,12 @@ const defaults = {
   updateDirectory: '',
   supabaseUrl: 'https://wxxocsfygxlwaklncmop.supabase.co',
   supabaseAnonKey: 'sb_publishable_eyK3gxO_LoDEMzYriH9DCQ_PUgeiuFC',
+  // Project X (public.tasks) is a SEPARATE Supabase project from the legacy
+  // bridge above -- it is never signed in via bridgeSession/bridgeClientInstance,
+  // and this anon key is intentionally blank until the user supplies Project
+  // X's own publishable key (see publicTasksClientInstance below).
+  publicTasksSupabaseUrl: 'https://pavrugcmxdgdxrjinzlm.supabase.co',
+  publicTasksSupabaseAnonKey: '',
   permissions: { Files: 'Allow', Git: 'Allow', Terminal: 'Ask', Browser: 'Blocked', Antigravity: 'Ask' },
 };
 let mainWindow;
@@ -49,6 +55,11 @@ const localApprovals = new Map();
 let bridgeClientInstance = null;
 let bridgeSession = null;
 let bridgePairingSecret = null;
+// Project X's own client + session -- deliberately separate from
+// bridgeClientInstance/bridgeSession above (a different Supabase project);
+// see publicTasksSupabaseUrl/publicTasksSupabaseAnonKey in `defaults`.
+let publicTasksClientInstance = null;
+let publicTasksSession = null;
 let bridgeState = {
   enabled: false,
   deviceId: '',
@@ -168,6 +179,15 @@ const loadBridgeSecrets = () => {
   const pairing = decryptLocalSecret(settings.bridgePairingEncrypted);
   bridgePairingSecret = typeof pairing?.secret === 'string' ? pairing.secret : null;
 };
+// A SEPARATE encrypted-at-rest session for Project X -- never derived from,
+// or falls back to, bridgeSession (see supabasePublicTasksAuthRequest /
+// applyPublicTasksSession / ensurePublicTasksSession below, and the
+// publicTasks:sign-in/-up/-out IPC handlers, which are Project X's OWN
+// sign-in flow, deliberately isolated from the legacy bridge's).
+const loadPublicTasksSecrets = () => {
+  const settings = readSettings();
+  publicTasksSession = decryptLocalSecret(settings.publicTasksSessionEncrypted);
+};
 const persistBridgeSession = (session) => {
   bridgeSession = session;
   saveSettings({ bridgeSessionEncrypted: encryptLocalSecret(session) });
@@ -176,6 +196,21 @@ const clearBridgeSession = () => {
   bridgeSession = null;
   saveSettings({ bridgeSessionEncrypted: null, bridgeEnabled: false });
 };
+const persistPublicTasksSession = (session) => {
+  publicTasksSession = session;
+  saveSettings({ publicTasksSessionEncrypted: encryptLocalSecret(session) });
+};
+const clearPublicTasksSession = () => {
+  publicTasksSession = null;
+  saveSettings({ publicTasksSessionEncrypted: null });
+};
+/** Small, renderer-facing snapshot -- never includes the access/refresh token itself. */
+const getPublicTasksState = () => ({
+  configured: Boolean(readSettings().publicTasksSupabaseAnonKey),
+  signedIn: Boolean(publicTasksSession?.accessToken && publicTasksSession?.ownerId),
+  accountEmail: publicTasksSession?.email || null,
+});
+const sendPublicTasksState = () => sendEvent({ type: 'publicTasks:state', state: getPublicTasksState() });
 const sendEvent = (event) => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('server:event', event); };
 
 const xQueueError = (code) => Object.assign(new Error(code), { code });
@@ -228,8 +263,47 @@ const cancelXQueueChild = (child) => {
   for (const [transportId, waiter] of xQueueRequests) if (waiter.child === child) cancelXQueueRequest(transportId);
   for (const pending of pendingXApprovals.values()) if (pending.child === child) pending.cancel();
 };
-const requestXApproval = (record, child, action) => new Promise((resolve) => {
+const SUPABASE_REQUEST_ID_PREFIX = 'supabase:';
+/**
+ * Slice 1D: when a terminal X run is reconciled for a requestId that came
+ * from Project X (requestId === `supabase:<public.tasks row id>`), forwards
+ * the already-locked terminal-truth mapping to that SAME public.tasks row.
+ * Read-only against XQueueStore/XRunStore (via the existing
+ * findReceiptByRunId + xQueueReceiptStatus helpers -- no X-core mutation);
+ * a sync failure never reruns X and never mutates queue/run state -- the
+ * durable local receipt/run remain the sole authoritative truth, and a
+ * later call (e.g. resyncTerminalPublicXTasks after bridge reconnect) can
+ * simply retry.
+ */
+const syncTerminalReceiptToPublicTasks = async (receipt) => {
+  if (!publicTasksClientInstance || !receipt || receipt.queueStatus !== 'terminal') return;
+  if (typeof receipt.requestId !== 'string' || !receipt.requestId.startsWith(SUPABASE_REQUEST_ID_PREFIX)) return;
+  const rowId = receipt.requestId.slice(SUPABASE_REQUEST_ID_PREFIX.length);
+  if (!rowId) return;
+  const status = xQueueReceiptStatus(receipt);
+  try {
+    await publicTasksClientInstance.updateTaskFromXRun({
+      id: rowId,
+      xStatus: receipt.terminalStatus,
+      result: status.result ?? null,
+      error: status.error ?? null,
+    });
+  } catch (err) {
+    console.warn(`[Bridge] Failed to sync X terminal result for public.tasks row '${rowId}' (will retry on reconnect):`, err.message);
+  }
+};
+/** Slice 1D retry: re-attempts syncTerminalReceiptToPublicTasks for every currently-terminal Project-X-originated receipt this store still holds. updateTaskFromXRun is an unconditional PATCH by id, so this is safe to call repeatedly (e.g. on bridge reconnect). */
+const resyncTerminalPublicXTasks = async () => {
+  if (!xQueueStore || !publicTasksClientInstance) return;
+  for (const receipt of xQueueStore.receipts.values()) {
+    if (receipt.queueStatus === 'terminal' && typeof receipt.requestId === 'string' && receipt.requestId.startsWith(SUPABASE_REQUEST_ID_PREFIX)) {
+      await syncTerminalReceiptToPublicTasks(receipt);
+    }
+  }
+};
+const requestXApproval = (record, child, action, options = {}) => new Promise((resolve) => {
   const requestId = crypto.randomUUID();
+  const isLive = options.isLive || (() => serverProcess === child);
   let settled = false;
   // Every settlement path (user, timeout, abort/child-replacement, shutdown)
   // funnels through here exactly once, and always makes the resolution
@@ -266,63 +340,100 @@ const requestXApproval = (record, child, action) => new Promise((resolve) => {
 
   record.abort.signal.addEventListener('abort', onAbort, { once: true });
 
-  if (record.abort.signal.aborted || xShuttingDown || serverProcess !== child) {
+  if (record.abort.signal.aborted || xShuttingDown || !isLive()) {
     finish(false, xShuttingDown ? 'shutdown' : 'aborted');
   } else {
     sendEvent({ type: 'approval', requestId, permission: 'X', action });
   }
 });
-const handleXQueueEnqueue = async (message, child, launchWorkspace, waiter) => {
-  if (!xQueueStore || !xParseTask) throw xQueueError('queue_unavailable');
-  if (typeof message.requestId !== 'string' || !message.requestId.trim() || message.requestId.length > 256) throw xQueueError('invalid_request_id');
-  let task;
-  try { task = xParseTask(message.task); } catch (error) { throw xQueueError(error?.code || 'invalid_x_task'); }
-  let childRoot, reportedRoot, settingsRoot, taskRoot;
+/**
+ * The Electron-owned X ingress core shared by BOTH the local HTTP transport
+ * (x_enqueue) and the remote-approved public.tasks path: task-workspace-
+ * vs-CURRENT-settings-workspace validation, canonical fingerprint, requestId
+ * / durable receipt idempotency (including in-flight coalescing across
+ * concurrent callers of the SAME requestId), permission/admission via
+ * requestXApproval, and xQueueCoordinator.enqueue()'s durable receipt.
+ *
+ * Callers parse their own raw payload with the SAME xParseTask before
+ * calling this, and own any further transport-specific checks of their own
+ * (e.g. the HTTP transport's child-process-liveness / 3-way childRoot-
+ * reportedRoot-settingsRoot check, done by handleXQueueEnqueue below,
+ * BEFORE it calls this) -- this core never knows about HTTP children,
+ * waiters, or Supabase rows.
+ *
+ * `isLive` gates requestXApproval's own admission and the post-approval
+ * recheck (record/process-identity liveness, e.g. serverProcess === child
+ * for the HTTP transport); `waiterActive` gates ONLY this specific call's
+ * own admission into an in-flight record (e.g. this one waiter.active) --
+ * they are deliberately different so that one disconnected waiter sharing
+ * an in-flight record with another still-connected waiter never aborts the
+ * other's approved request (see the concurrent-waiter regression test).
+ */
+const ingestXTask = async ({ requestId, task, settingsRoot: preResolvedSettingsRoot, waiterId, waiterActive, child, action, isLive, onInflightRecord }) => {
+  if (!xQueueStore) throw xQueueError('queue_unavailable');
+  if (typeof requestId !== 'string' || !requestId.trim() || requestId.length > 256) throw xQueueError('invalid_request_id');
+  let settingsRoot, taskRoot;
   try {
-    [childRoot, reportedRoot, settingsRoot, taskRoot] = await Promise.all([
-      fs.promises.realpath(launchWorkspace), fs.promises.realpath(message.workspace),
-      fs.promises.realpath(readSettings().workspace), fs.promises.realpath(task.workspace.root),
-    ]);
+    settingsRoot = preResolvedSettingsRoot || await fs.promises.realpath(readSettings().workspace);
+    taskRoot = await fs.promises.realpath(task.workspace.root);
   } catch { throw xQueueError('workspace_mismatch'); }
-  if (childRoot !== reportedRoot || childRoot !== settingsRoot) throw xQueueError('workspace_mismatch');
   const canonicalTask = { ...task, workspace: { ...task.workspace, root: taskRoot } };
   const fingerprint = crypto.createHash('sha256').update(canonicalJson(canonicalTask)).digest('hex');
   if (xQueueStore.recoveryRequired) throw xQueueError('queue_recovery_required');
-  const prior = xQueueStore.getReceipt(message.requestId);
+  const prior = xQueueStore.getReceipt(requestId);
   if (prior) {
     if (prior.fingerprint !== fingerprint) throw xQueueError('request_id_conflict');
     return { accepted: true, ...xQueueReceiptStatus(prior) };
   }
-  if (!waiter.active || xShuttingDown || serverProcess !== child) throw xQueueError('transport_unavailable');
+  if (!waiterActive() || xShuttingDown || !isLive()) throw xQueueError('transport_unavailable');
   if (!xQueueCoordinator) throw xQueueError('workspace_mismatch');
   if (taskRoot !== settingsRoot || !xQueueDispatchEnabled || !xQueueWorkspaceMatches(settingsRoot)) throw xQueueError('workspace_mismatch');
-  const existing = xQueueInflight.get(message.requestId);
+  const existing = xQueueInflight.get(requestId);
   if (existing) {
     if (existing.fingerprint !== fingerprint) throw xQueueError('request_id_conflict');
-    existing.waiters.add(waiter.transportId);
-    waiter.inflight = existing;
+    existing.waiters.add(waiterId);
+    onInflightRecord?.(existing);
     return existing.promise;
   }
-  const record = { fingerprint, waiters: new Set([waiter.transportId]), abort: new AbortController(), committed: false, promise: null };
-  waiter.inflight = record;
-  xQueueInflight.set(message.requestId, record);
+  const record = { fingerprint, waiters: new Set([waiterId]), abort: new AbortController(), committed: false, promise: null };
+  onInflightRecord?.(record);
+  xQueueInflight.set(requestId, record);
   record.promise = (async () => {
     const permission = readSettings().permissions.X ?? 'Ask';
     if (permission === 'Blocked') throw xQueueError('permission_blocked');
     if (permission !== 'Allow' && permission !== 'Ask') throw xQueueError('permission_blocked');
-    if (permission === 'Ask' && !(await requestXApproval(record, child, `Queue X task: ${canonicalTask.task_id}`))) throw xQueueError('permission_denied');
-    if (record.abort.signal.aborted || xShuttingDown || serverProcess !== child || record.waiters.size === 0) throw xQueueError('transport_unavailable');
+    if (permission === 'Ask' && !(await requestXApproval(record, child, action, { isLive }))) throw xQueueError('permission_denied');
+    if (record.abort.signal.aborted || xShuttingDown || !isLive() || record.waiters.size === 0) throw xQueueError('transport_unavailable');
     let currentRoot;
     try { currentRoot = await fs.promises.realpath(readSettings().workspace); } catch { throw xQueueError('workspace_mismatch'); }
-    if (record.abort.signal.aborted || xShuttingDown || serverProcess !== child || record.waiters.size === 0) throw xQueueError('transport_unavailable');
+    if (record.abort.signal.aborted || xShuttingDown || !isLive() || record.waiters.size === 0) throw xQueueError('transport_unavailable');
     if (currentRoot !== taskRoot || !xQueueDispatchEnabled || !xQueueWorkspaceMatches(currentRoot)) throw xQueueError('workspace_mismatch');
-    const accepted = xQueueCoordinator.enqueue(canonicalTask, { requestId: message.requestId, fingerprint, workspaceRoot: taskRoot });
+    const accepted = xQueueCoordinator.enqueue(canonicalTask, { requestId, fingerprint, workspaceRoot: taskRoot });
     if (accepted.error) throw xQueueError(accepted.error);
     record.committed = true;
     return { accepted: true, ...xQueueReceiptStatus(accepted.receipt) };
   })();
   try { return await record.promise; }
-  finally { if (xQueueInflight.get(message.requestId) === record) xQueueInflight.delete(message.requestId); }
+  finally { if (xQueueInflight.get(requestId) === record) xQueueInflight.delete(requestId); }
+};
+const handleXQueueEnqueue = async (message, child, launchWorkspace, waiter) => {
+  if (!xQueueStore || !xParseTask) throw xQueueError('queue_unavailable');
+  let task;
+  try { task = xParseTask(message.task); } catch (error) { throw xQueueError(error?.code || 'invalid_x_task'); }
+  let childRoot, reportedRoot, settingsRoot;
+  try {
+    [childRoot, reportedRoot, settingsRoot] = await Promise.all([
+      fs.promises.realpath(launchWorkspace), fs.promises.realpath(message.workspace), fs.promises.realpath(readSettings().workspace),
+    ]);
+  } catch { throw xQueueError('workspace_mismatch'); }
+  if (childRoot !== reportedRoot || childRoot !== settingsRoot) throw xQueueError('workspace_mismatch');
+  return ingestXTask({
+    requestId: message.requestId, task, settingsRoot, child,
+    waiterId: waiter.transportId, waiterActive: () => waiter.active,
+    isLive: () => serverProcess === child,
+    action: `Queue X task: ${task.task_id}`,
+    onInflightRecord: (record) => { waiter.inflight = record; },
+  });
 };
 
 // Fast-restart X liveness: a single one-shot wakeup, never polling/setInterval.
@@ -451,6 +562,54 @@ const ensureBridgeSession = async () => {
   return applyBridgeSession(refreshed);
 };
 
+// Project X's OWN auth request/session/refresh helpers -- an exact mirror of
+// supabaseAuthRequest/applyBridgeSession/ensureBridgeSession above, but
+// against publicTasksSupabaseUrl/publicTasksSupabaseAnonKey and
+// publicTasksSession, NEVER the legacy bridge's settings/session. Kept as a
+// deliberate duplication of this small, already-proven pattern rather than
+// a shared parameterized helper, so the two projects' credentials can never
+// accidentally cross-wire through a shared code path.
+const supabasePublicTasksAuthRequest = async (pathName, body) => {
+  const settings = readSettings();
+  if (!settings.publicTasksSupabaseUrl || !settings.publicTasksSupabaseAnonKey) {
+    throw new Error('Project X is not configured. Enter its publishable key first.');
+  }
+  const response = await fetch(`${settings.publicTasksSupabaseUrl}/auth/v1/${pathName}`, {
+    method: 'POST',
+    headers: {
+      apikey: settings.publicTasksSupabaseAnonKey,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.msg || data?.message || 'Project X authentication failed.');
+  return data;
+};
+
+const applyPublicTasksSession = (data) => {
+  if (!data?.access_token || !data?.refresh_token || !data?.user?.id) {
+    throw new Error('Project X did not return a valid session.');
+  }
+  const session = {
+    accessToken: data.access_token,
+    refreshToken: data.refresh_token,
+    ownerId: data.user.id,
+    email: data.user.email || null,
+    expiresAt: Date.now() + Math.max(60, Number(data.expires_in) || 3600) * 1000,
+  };
+  persistPublicTasksSession(session);
+  publicTasksClientInstance?.setSession({ accessToken: session.accessToken, ownerId: session.ownerId });
+  return session;
+};
+
+const ensurePublicTasksSession = async () => {
+  if (!publicTasksSession?.refreshToken) throw new Error('Sign in to Project X first.');
+  if (publicTasksSession.expiresAt > Date.now() + 60000) return publicTasksSession;
+  const refreshed = await supabasePublicTasksAuthRequest('token?grant_type=refresh_token', { refresh_token: publicTasksSession.refreshToken });
+  return applyPublicTasksSession(refreshed);
+};
+
 const stopServer = async () => {
   if (!serverProcess) return serverState;
   const child = serverProcess;
@@ -495,6 +654,9 @@ const startServer = async ({ workspace, port }) => {
     if (message?.type === 'x_run_terminal') {
       sendEvent(message);
       try {
+        // The Project-X remote-result sync now fires centrally from
+        // within the wrapped onXRunTerminal itself (see its construction
+        // above) -- this relay no longer needs its own copy of that call.
         const handled = xQueueCoordinator?.onXRunTerminal(message);
         if (handled?.reason === 'not_tracked') xQueueCoordinator?.kick();
       } catch (err) {
@@ -686,6 +848,29 @@ app.whenReady().then(async () => {
       onAdmissionAccepted: () => armXWakeup(),
       onCapacityBlocked: () => armXQueueCapacityWakeup(),
     });
+    // Slice 1D fix: wrap onXRunTerminal ONCE, centrally, so every genuine
+    // terminal event -- however it was discovered (the coordinator's own
+    // live dispatchNext().done.then() completion, the HTTP child's
+    // x_run_terminal relay, wakeup-triggered reconciliation, or startup
+    // reconciliation) -- also triggers the SAME Project-X remote-result
+    // sync. This is required precisely because a LIVE task (local or
+    // remote) actually completes via the coordinator's own internal
+    // dispatchNext() completion path, which no external x_run_terminal
+    // message ever reaches -- adding the sync call only inside the
+    // serverProcess message relay (as before) silently never fired for
+    // that common case. No X-core file is modified; onXRunTerminal's own
+    // return value/contract is passed through unchanged to every caller.
+    {
+      const baseOnXRunTerminal = xQueueCoordinator.onXRunTerminal.bind(xQueueCoordinator);
+      xQueueCoordinator.onXRunTerminal = (event) => {
+        const handled = baseOnXRunTerminal(event);
+        if (handled?.handled && xQueueStore && event?.runId) {
+          const receipt = xQueueStore.findReceiptByRunId(event.runId);
+          if (receipt) void syncTerminalReceiptToPublicTasks(receipt);
+        }
+        return handled;
+      };
+    }
     onAntigravityAdmissionReleased(() => {
       if (xQueueDispatchEnabled) xQueueCoordinator?.kick();
     });
@@ -1268,8 +1453,10 @@ app.whenReady().then(async () => {
   try {
     const { getOrCreateDeviceId, generatePairingSecret } = await importFromHere('../mcp/bridge/identity.mjs');
     const { HearthBridgeClient } = await importFromHere('../mcp/bridge/client.mjs');
+    const { PublicTasksClient } = await importFromHere('../mcp/bridge/public-tasks-client.mjs');
     const settings = readSettings();
     loadBridgeSecrets();
+    loadPublicTasksSecrets();
     const deviceId = getOrCreateDeviceId(app.getPath('userData'));
     bridgeState.deviceId = deviceId;
     bridgeState.enabled = Boolean(settings.bridgeEnabled);
@@ -1289,6 +1476,29 @@ app.whenReady().then(async () => {
       ownerId: bridgeSession?.ownerId || null,
     });
     bridgeClientInstance.enabled = bridgeState.enabled && bridgeState.signedIn;
+
+    // Project X's OWN client, deliberately never sharing bridgeSession's JWT
+    // (a different Supabase project). With no sign-in flow yet wired to it,
+    // publicTasksSession stays null and this client simply reports
+    // not-ready -- syncPublicXTasks/bridge:approve-task below fail closed
+    // (skip / throw a clear error) rather than ever guessing credentials.
+    publicTasksClientInstance = new PublicTasksClient({
+      supabaseUrl: settings.publicTasksSupabaseUrl || '',
+      supabaseAnonKey: settings.publicTasksSupabaseAnonKey || '',
+    });
+    publicTasksClientInstance.setSession({
+      accessToken: publicTasksSession?.accessToken || null,
+      ownerId: publicTasksSession?.ownerId || null,
+    });
+    const publicTasksReady = () => Boolean(
+      publicTasksClientInstance.supabaseUrl && publicTasksClientInstance.accessToken && publicTasksClientInstance.ownerId,
+    );
+    // A restored session at startup is itself a reconnect (the whole point
+    // of persisting it via safeStorage is to avoid a fresh sign-in) -- retry
+    // syncing any already-terminal local X truth now, exactly as sign-in
+    // already does. Read-only/PATCH-by-id and idempotent; never reruns X,
+    // never creates a queue entry, never mutates X queue/run state.
+    if (publicTasksReady()) void resyncTerminalPublicXTasks();
 
     const registerBridgeDevice = async () => {
       const session = await ensureBridgeSession();
@@ -1340,9 +1550,48 @@ app.whenReady().then(async () => {
       }
     };
 
+    // Main-process-only lookup from a public.tasks row id to its full,
+    // already-validated x-task-v1 payload (never sent to the renderer --
+    // bridgeState.pendingTasks only ever gets a small display-shaped
+    // summary of it). Repopulated wholesale on every syncPublicXTasks poll.
+    let publicXTaskRowsById = new Map();
+
+    /**
+     * R2: a PURE read -- fetchQueuedTasks() never claims or executes
+     * anything. Returns a small array of display-shaped BridgeTask-like
+     * summaries to merge into bridgeState.pendingTasks; the full parsed
+     * task stays in publicXTaskRowsById for bridge:approve-task to use.
+     * Silently returns [] when Project X isn't configured/signed in yet
+     * (the auth boundary -- see publicTasksReady above) rather than ever
+     * guessing credentials or spamming errors for an expected state.
+     */
+    const syncPublicXTasks = async () => {
+      // A best-effort silent refresh -- if it fails, publicTasksReady() below
+      // simply reports not-ready, exactly as if no session existed at all.
+      if (publicTasksSession?.refreshToken) { try { await ensurePublicTasksSession(); } catch {} }
+      if (!publicTasksReady()) { publicXTaskRowsById = new Map(); return []; }
+      let rows;
+      try { rows = await publicTasksClientInstance.fetchQueuedTasks(); }
+      catch (err) { console.warn('[Bridge] Failed to fetch Project X queued tasks:', err.message); return []; }
+      const nextRows = new Map();
+      const summaries = rows.map((row) => {
+        nextRows.set(row.id, row);
+        const objective = row.task.objective || '';
+        return {
+          id: row.id, deviceId: '', source: 'x', routedTo: 'x',
+          title: objective.length > 80 ? `${objective.slice(0, 80)}…` : objective,
+          prompt: `${objective}\n\n${row.task.problem || ''}`.trim(),
+          status: 'pending', createdAt: row.createdAt, requestId: `${SUPABASE_REQUEST_ID_PREFIX}${row.id}`,
+        };
+      });
+      publicXTaskRowsById = nextRows;
+      return summaries;
+    };
+
     const syncBridgeTasks = async (tasks) => {
       bridgeState.connected = true;
-      bridgeState.pendingTasks = tasks;
+      const xTasks = await syncPublicXTasks();
+      bridgeState.pendingTasks = [...tasks, ...xTasks];
       sendEvent({ type: 'bridge:state', state: bridgeState });
       try {
         const { flushPendingRemoteSyncs } = await importFromHere('../mcp/bridge/client.mjs');
@@ -1404,6 +1653,55 @@ app.whenReady().then(async () => {
       return bridgeState;
     });
 
+    // Project X's OWN auth IPC surface -- a SEPARATE namespace from every
+    // bridge:* handler above (different settings keys, different encrypted
+    // session, different Supabase project). Reuses the exact same
+    // email/password Supabase-auth pattern the legacy bridge panel already
+    // uses, just against publicTasksSupabaseUrl/publicTasksSupabaseAnonKey.
+    ipcMain.handle('publicTasks:get-state', () => getPublicTasksState());
+
+    ipcMain.handle('publicTasks:save-anon-key', async (_event, anonKey) => {
+      if (typeof anonKey !== 'string' || !anonKey.trim()) throw new Error('Enter Project X\'s publishable (anon) key.');
+      saveSettings({ publicTasksSupabaseAnonKey: anonKey.trim() });
+      publicTasksClientInstance.supabaseAnonKey = anonKey.trim();
+      sendPublicTasksState();
+      return getPublicTasksState();
+    });
+
+    ipcMain.handle('publicTasks:sign-up', async (_event, { email, password }) => {
+      if (typeof email !== 'string' || typeof password !== 'string' || password.length < 8) {
+        throw new Error('Enter a valid email and a password of at least 8 characters.');
+      }
+      const data = await supabasePublicTasksAuthRequest('signup', { email: email.trim(), password });
+      if (data?.access_token) {
+        applyPublicTasksSession(data);
+        sendPublicTasksState();
+        void resyncTerminalPublicXTasks();
+        return { signedIn: true, needsEmailVerification: false };
+      }
+      return { signedIn: false, needsEmailVerification: true };
+    });
+
+    ipcMain.handle('publicTasks:sign-in', async (_event, { email, password }) => {
+      if (typeof email !== 'string' || typeof password !== 'string') throw new Error('Email and password are required.');
+      const data = await supabasePublicTasksAuthRequest('token?grant_type=password', { email: email.trim(), password });
+      applyPublicTasksSession(data);
+      sendPublicTasksState();
+      // Slice: once Project X becomes ready/reconnects, retry syncing any
+      // already-terminal local X truth back to its row -- this NEVER reruns
+      // X, creates another queue entry, or mutates X terminal truth (it is
+      // a pure PATCH-by-id retry over already-durable receipts).
+      void resyncTerminalPublicXTasks();
+      return getPublicTasksState();
+    });
+
+    ipcMain.handle('publicTasks:sign-out', async () => {
+      publicTasksClientInstance?.setSession({ accessToken: null, ownerId: null });
+      clearPublicTasksSession();
+      sendPublicTasksState();
+      return getPublicTasksState();
+    });
+
     ipcMain.handle('bridge:get-pairing-secret', async () => {
       if (!bridgeState.signedIn) throw new Error('Sign in to Supabase first.');
       await registerBridgeDevice();
@@ -1431,7 +1729,61 @@ app.whenReady().then(async () => {
       return bridgeState;
     });
 
+    /**
+     * Slice 1B/1C/1D remote-X approval path: Remote Inbox row -> manual
+     * Approve -> conditional public.tasks claim (queued -> running) ->
+     * the SAME shared Electron X ingress core (ingestXTask) the local
+     * x_enqueue transport uses -- same parseXTask, same task-workspace-
+     * vs-CURRENT-settings-workspace check, same fingerprint, same
+     * requestId idempotency, same permission/admission, same durable X
+     * queue receipt. taskStore/monitorTaskTransition/JobManager are never
+     * touched here -- the X queue receipt + XRunStore + Result Gate are
+     * this path's own durable local truth (see syncTerminalReceiptToPublicTasks
+     * for how a terminal run is later synced back to this SAME row).
+     */
+    const approveRemotePublicXTask = async (taskId) => {
+      const row = publicXTaskRowsById.get(taskId);
+      if (!row) throw new Error('Task not found in pending inbox.');
+      const claim = await publicTasksClientInstance.claimQueuedTask({ id: taskId });
+      if (!claim.claimed) {
+        publicXTaskRowsById.delete(taskId);
+        bridgeState.pendingTasks = bridgeState.pendingTasks.filter((t) => t.id !== taskId);
+        sendEvent({ type: 'bridge:state', state: bridgeState });
+        throw new Error('Task was already claimed or cancelled.');
+      }
+      bridgeState.activeRemoteTaskId = taskId;
+      sendEvent({ type: 'bridge:state', state: bridgeState });
+      const requestId = `${SUPABASE_REQUEST_ID_PREFIX}${taskId}`;
+      try {
+        const result = await ingestXTask({
+          requestId, task: row.task, child: null,
+          waiterId: requestId, waiterActive: () => true, isLive: () => true,
+          action: `Approve remote X task: ${row.task.task_id}`,
+        });
+        publicXTaskRowsById.delete(taskId);
+        bridgeState.pendingTasks = bridgeState.pendingTasks.filter((t) => t.id !== taskId);
+        bridgeState.activeRemoteTaskId = null;
+        sendEvent({ type: 'bridge:state', state: bridgeState });
+        return { success: true, taskId: requestId, routedTo: 'x', queueId: result.queue_id };
+      } catch (err) {
+        bridgeState.activeRemoteTaskId = null;
+        sendEvent({ type: 'bridge:state', state: bridgeState });
+        // The row was already claimed (queued -> running) but never actually
+        // dispatched to X (e.g. workspace_mismatch/permission_denied) --
+        // Slice 1C: "preserve remote task safely for review" means making
+        // the failure visible on the SAME row, never silently rerunning X
+        // and never leaving it stuck at 'running' with no record of why.
+        try {
+          await publicTasksClientInstance.updateTaskFromXRun({ id: taskId, xStatus: 'failed', result: null, error: err.message || String(err) });
+        } catch (syncErr) {
+          console.warn('[Bridge] Failed to mark an unrun X task as failed on public.tasks:', syncErr.message);
+        }
+        throw err;
+      }
+    };
+
     ipcMain.handle('bridge:approve-task', async (_event, taskId) => {
+      if (publicXTaskRowsById.has(taskId)) return approveRemotePublicXTask(taskId);
       const {
         hasRunningTask,
         isTaskActivelyRunning,
@@ -1625,6 +1977,16 @@ app.whenReady().then(async () => {
     });
 
     ipcMain.handle('bridge:reject-task', async (_event, taskId) => {
+      // A Project X row has no remote-reject concept in this slice (Slice 1A's
+      // adapter intentionally exposes only fetch/claim/update) -- rejecting
+      // here is a LOCAL dismissal from this inbox only; the row stays
+      // 'queued' remotely and may resurface on a later poll.
+      if (publicXTaskRowsById.has(taskId)) {
+        publicXTaskRowsById.delete(taskId);
+        bridgeState.pendingTasks = bridgeState.pendingTasks.filter((t) => t.id !== taskId);
+        sendEvent({ type: 'bridge:state', state: bridgeState });
+        return true;
+      }
       if (bridgeClientInstance?.supabaseUrl) {
         await bridgeClientInstance.rejectTask({ taskId });
       }

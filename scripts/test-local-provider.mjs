@@ -46,6 +46,35 @@ test('LOCAL4 chat returns normalized response', async () => {
   assert.equal(JSON.parse(request.options.body).stream, false);
 });
 
+test('FORMAT1 chat omits format by default -- free-form Local Chat callers are unaffected', async () => {
+  let request;
+  const provider = new OllamaProvider({ model: 'local', fetchFn: mockFetch((_url, options) => { request = JSON.parse(options.body); return response(200, { message: { content: 'prose answer' }, done: true }); }) });
+  await provider.chat({ messages: [{ role: 'user', content: 'hello' }] });
+  assert.equal(Object.hasOwn(request, 'format'), false, 'no format field is sent unless a caller explicitly opts in');
+});
+
+test('FORMAT2 chat forwards an explicit format: "json" request to Ollama unchanged', async () => {
+  let request;
+  const provider = new OllamaProvider({ model: 'local', fetchFn: mockFetch((_url, options) => { request = JSON.parse(options.body); return response(200, { message: { content: '{"actions":[]}' }, done: true }); }) });
+  await provider.chat({ messages: [{ role: 'user', content: 'hello' }], format: 'json' });
+  assert.equal(request.format, 'json');
+  // Everything else about the request stays exactly as before.
+  assert.equal(request.model, 'local');
+  assert.equal(request.stream, false);
+});
+
+test('FORMAT3 chatStream also forwards an explicit format request, and omits it by default', async () => {
+  let requestA;
+  const providerDefault = new OllamaProvider({ model: 'local', fetchFn: mockFetch((_url, options) => { requestA = JSON.parse(options.body); return streamResponse([{ message: { content: 'hi' }, done: true, done_reason: 'stop' }]); }) });
+  await providerDefault.chatStream({ messages: [{ role: 'user', content: 'hello' }], onChunk: () => {} });
+  assert.equal(Object.hasOwn(requestA, 'format'), false);
+
+  let requestB;
+  const providerJson = new OllamaProvider({ model: 'local', fetchFn: mockFetch((_url, options) => { requestB = JSON.parse(options.body); return streamResponse([{ message: { content: '{}' }, done: true, done_reason: 'stop' }]); }) });
+  await providerJson.chatStream({ messages: [{ role: 'user', content: 'hello' }], format: 'json', onChunk: () => {} });
+  assert.equal(requestB.format, 'json');
+});
+
 test('SKILL_PROVIDER1 chat forwards read-only tool definitions and normalizes tool calls', async () => {
   let request;
   const provider = new OllamaProvider({ model: 'local', fetchFn: mockFetch((_url, options) => { request = JSON.parse(options.body); return response(200, { message: { content: '', tool_calls: [{ function: { name: 'repo_list', arguments: '{}' } }] }, done: true }); }) });

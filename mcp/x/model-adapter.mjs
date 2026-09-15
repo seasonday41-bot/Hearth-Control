@@ -108,6 +108,12 @@ export const createModelAdapter = ({ provider } = {}) => {
       try {
         const result = await provider.chat({
           messages,
+          // X requires a single top-level JSON object in every response
+          // (see local-executor.mjs's SCHEMA_INSTRUCTIONS/validateIntent) --
+          // constrain the provider's own output to JSON at the request
+          // boundary rather than relying on prompt text alone. A caller may
+          // still override this via request.format/options.format.
+          format: options.format ?? request.format ?? 'json',
           ...(typeof model === 'string' && model.trim() ? { model: model.trim() } : {}),
           ...(options.profile ?? request.profile ? { profile: options.profile ?? request.profile } : {}),
           ...(options.context ?? request.options ? { options: options.context ?? request.options } : {}),

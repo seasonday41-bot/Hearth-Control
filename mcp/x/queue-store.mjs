@@ -307,6 +307,24 @@ export class XQueueStore {
     return null;
   }
 
+  /**
+   * Read-only lookup: finds the receipt (dispatched OR already-terminal) carrying
+   * this exact `runId`, so a caller (Electron's remote-result sync) can recover
+   * which durable requestId a terminal X run belongs to. Never mutates queue or
+   * receipt state, never changes admission/recovery/fencing behavior. A `runId`
+   * with no matching receipt (never dispatched under this store, or the receipt
+   * was never persisted with a runId) returns null. Receipts are keyed by
+   * requestId and each requestId is only ever accepted once (see
+   * `enqueueWithReceipt`), so a given runId can match at most one receipt.
+   */
+  findReceiptByRunId(runId) {
+    if (!runId || typeof runId !== 'string') return null;
+    for (const receipt of this.receipts.values()) {
+      if (receipt.runId === runId) return receipt;
+    }
+    return null;
+  }
+
   /** Prunes an entry ONLY once it has actually reached `dispatched` and its run has hit ANY terminal outcome. Never deletes a `pending` or stuck-`dispatching` entry. */
   markTerminal(id, terminalStatus = null) {
     const entry = this.entries.get(id);

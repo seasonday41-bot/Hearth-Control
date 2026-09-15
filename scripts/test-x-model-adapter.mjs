@@ -47,6 +47,20 @@ test('MODEL3 configured model and runtime options are forwarded', async () => {
   assert.equal(result.model, 'configured-model');
 });
 
+test('MODEL3b X always requests Ollama structured-output JSON enforcement by default', async () => {
+  let request;
+  const adapter = createModelAdapter({ provider: { chat: async (value) => { request = value; return { ok: true, provider: 'local', response: '{}' }; } } });
+  await adapter.generate({ messages: [{ role: 'user', content: 'write' }] });
+  assert.equal(request.format, 'json');
+});
+
+test('MODEL3c a caller may still override the default format', async () => {
+  let request;
+  const adapter = createModelAdapter({ provider: { chat: async (value) => { request = value; return { ok: true, provider: 'local', response: 'ok' }; } } });
+  await adapter.generate({ messages: [{ role: 'user', content: 'write' }], format: 'a-future-schema' });
+  assert.equal(request.format, 'a-future-schema');
+});
+
 test('MODEL4 messages are forwarded unchanged', async () => {
   let request;
   const messages = [{ role: 'system', content: 'bounded context' }, { role: 'user', content: 'inspect' }];

@@ -239,6 +239,54 @@ test('findDispatchedByRunId only finds an entry that has actually reached dispat
   assert.equal(store.findDispatchedByRunId('unknown-run'), null);
 });
 
+// ── findReceiptByRunId (read-only, remote-result-correlation lookup) ────
+
+test('findReceiptByRunId finds a live (dispatched) receipt by its exact runId, without mutating it', () => {
+  const store = new XQueueStore({ storagePath: tmpStorePath() });
+  const { entry, receipt } = store.enqueueWithReceipt(taskFor(), { requestId: 'supabase:row-1', fingerprint: 'hash-1', workspaceRoot: '/workspace' });
+  assert.equal(store.findReceiptByRunId('run-1'), null, 'not findable before any runId is recorded');
+
+  store.markDispatching(entry.id, 'run-1');
+  assert.equal(store.findReceiptByRunId('run-1'), null, 'a dispatching (not yet dispatched) receipt has runId cleared, not findable');
+
+  store.markDispatched(entry.id, 'run-1');
+  const found = store.findReceiptByRunId('run-1');
+  assert.equal(found.requestId, 'supabase:row-1');
+  assert.equal(found.runId, 'run-1');
+  assert.equal(found.queueStatus, 'dispatched');
+  assert.equal(found, receipt, 'returns the actual live receipt object, not a copy');
+});
+
+test('findReceiptByRunId finds an already-terminal (pruned-entry) receipt by its exact runId', () => {
+  const store = new XQueueStore({ storagePath: tmpStorePath() });
+  const { entry } = store.enqueueWithReceipt(taskFor(), { requestId: 'supabase:row-2', fingerprint: 'hash-2', workspaceRoot: '/workspace' });
+  store.markDispatching(entry.id, 'run-2');
+  store.markDispatched(entry.id, 'run-2');
+  store.markTerminal(entry.id, 'completed');
+
+  const found = store.findReceiptByRunId('run-2');
+  assert.equal(found.requestId, 'supabase:row-2');
+  assert.equal(found.runId, 'run-2');
+  assert.equal(found.queueStatus, 'terminal');
+  assert.equal(found.terminalStatus, 'completed');
+  assert.equal(store.entries.has(entry.id), false, 'the queue entry itself is still pruned, exactly as markTerminal already guarantees');
+});
+
+test('findReceiptByRunId returns null for an unknown runId and never mutates the store', () => {
+  const store = new XQueueStore({ storagePath: tmpStorePath() });
+  const { entry } = store.enqueueWithReceipt(taskFor(), { requestId: 'request-1', fingerprint: 'hash-1', workspaceRoot: '/workspace' });
+  store.markDispatching(entry.id, 'run-known');
+  store.markDispatched(entry.id, 'run-known');
+
+  assert.equal(store.findReceiptByRunId('run-unknown'), null);
+  assert.equal(store.findReceiptByRunId(''), null);
+  assert.equal(store.findReceiptByRunId(null), null);
+
+  // A read-only lookup must never alter dispatched/receipt state.
+  assert.equal(store.listDispatched().length, 1);
+  assert.equal(store.getReceipt('request-1').queueStatus, 'dispatched');
+});
+
 // ── markTerminal invariant ───────────────────────────────────────────────
 
 test('markTerminal only deletes an entry that has reached dispatched -- never pending or dispatching', () => {
