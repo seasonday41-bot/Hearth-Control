@@ -527,6 +527,17 @@ const createWindow = () => {
   });
   const devServer = process.env.VITE_DEV_SERVER_URL;
   if (devServer) mainWindow.loadURL(devServer); else mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+
+  // Clear the stale reference once this exact window is destroyed, so later
+  // code (second-instance, activate) never calls a method on a destroyed
+  // BrowserWindow. Identity-checked (`mainWindow === window`) rather than an
+  // unconditional `mainWindow = null`, so a 'closed' event from an OLDER
+  // window (already superseded by a newer createWindow() call) can never
+  // clobber a currently-live mainWindow reference.
+  const window = mainWindow;
+  window.on('closed', () => {
+    if (mainWindow === window) mainWindow = null;
+  });
 };
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
@@ -534,10 +545,12 @@ if (!hasSingleInstanceLock) {
   app.quit();
 } else {
 app.on('second-instance', () => {
-  if (mainWindow) {
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.focus();
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow();
+    return;
   }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.focus();
 });
 app.whenReady().then(async () => {
   try {
