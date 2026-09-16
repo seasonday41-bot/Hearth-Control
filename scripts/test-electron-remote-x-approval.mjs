@@ -380,3 +380,34 @@ test('Slice 1C: an x-task-v1 whose workspace.root does NOT match CURRENT setting
   assert.equal(updateCalls[0].xStatus, 'failed');
   assert.match(updateCalls[0].error, /workspace_mismatch/);
 });
+
+// ── Phase 2 security-boundary canary ────────────────────────────────────
+// Phase 2 (trusted, click-free Chat-authored execution) was AUDITED and
+// deliberately NOT implemented: no existing mechanism (Project X session,
+// conversation_id, origin_device_id, the legacy bridge's pairing secret,
+// safeStorage, device identity) lets Hearth verify WHO authored a
+// public.tasks row as opposed to WHOM it belongs to -- every row with a
+// given user_id is equally "authenticated," so a self-asserted field like
+// metadata.preauthorized would be exactly as forgeable by any other holder
+// of that same user's JWT as by a legitimate trusted author. These tests
+// are a regression guard against that self-asserted bypass ever being
+// added later without a deliberate, reviewed design change.
+
+test('Phase 2 canary: no code path anywhere reads a self-asserted preauthorized/pre_authorized/metadata-trusted flag to gate X execution', () => {
+  for (const source of [mainSource, fs.readFileSync(new URL('../mcp/bridge/public-tasks-client.mjs', import.meta.url), 'utf8')]) {
+    assert.doesNotMatch(source, /preauthoriz|pre_authoriz|metadata\s*\.\s*trusted|is_trusted|trustedChat/i);
+  }
+});
+
+test('Phase 2 canary: syncPublicXTasks (the poll) never itself calls claim/ingest/approve -- fetching queued rows can never execute X', () => {
+  assert.doesNotMatch(syncPublicXTasksSource, /claimQueuedTask|ingestXTask|approveRemotePublicXTask/);
+});
+
+test('Phase 2 canary: the ONLY way a public.tasks row reaches X is bridge:approve-task -> approveRemotePublicXTask, requiring an explicit taskId from a user click', () => {
+  // approveRemotePublicXTask itself is never invoked from anywhere except
+  // the bridge:approve-task IPC handler (the renderer's Approve button).
+  // (Its own definition site uses `= async (taskId) =>`, not `(taskId)`,
+  // so this pattern only matches actual CALLS, never the definition.)
+  const callSites = [...mainSource.matchAll(/approveRemotePublicXTask\(/g)].length;
+  assert.equal(callSites, 1, 'approveRemotePublicXTask must have exactly one production call site (bridge:approve-task)');
+});
