@@ -9,6 +9,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { XQueueStore } from '../mcp/x/queue-store.mjs';
 import { XClaimStore } from '../mcp/x/claim-store.mjs';
 import { parseXTask } from '../mcp/x/task-contract.mjs';
+import { canonicalJson, canonicalizeXTask, computeXTaskFingerprint } from '../mcp/x/fingerprint.mjs';
 import { getNextXQueueCapacityDeadline, __resetProductionXRuntimeForTests } from '../mcp/x/production-runtime.mjs';
 
 const source = fs.readFileSync(new URL('../electron/main.cjs', import.meta.url), 'utf8');
@@ -54,6 +55,7 @@ function harness(permission = 'Allow', persistedRun = null, fsImpl = fs) {
   const factory = new Function(
     'fs', 'crypto', 'xQueueStore', 'xQueueCoordinator', 'xParseTask', 'xRunStore',
     'readSettings', 'sendEvent', 'serverProcess', 'xQueueDispatchEnabled', 'xShuttingDown', 'localApprovals', 'setTimeout', 'clearTimeout',
+    'canonicalJson', 'canonicalizeXTask', 'computeXTaskFingerprint',
     `const xQueueInflight = new Map(); const xQueueRequests = new Map(); const pendingXApprovals = new Map();
      ${mainIngressSource}
      return { handleXQueueEnqueue, cancelXQueueRequest, cancelXQueueChild, xQueueReceiptStatus,
@@ -62,7 +64,8 @@ function harness(permission = 'Allow', persistedRun = null, fsImpl = fs) {
   const api = factory(fsImpl, crypto, store, coordinator, parseXTask, { getRun: () => persistedRun },
     () => settings, (event) => events.push(event), child, true, false, localApprovals,
     (fn, ms) => { const timer = { fn, ms, cleared: false }; timers.push(timer); return timer; },
-    (timer) => { timer.cleared = true; });
+    (timer) => { timer.cleared = true; },
+    canonicalJson, canonicalizeXTask, computeXTaskFingerprint);
   const request = (transportId, task = taskFor(root), requestId = 'request-1') => {
     const waiter = { transportId, child, active: true, inflight: null };
     api.xQueueRequests.set(transportId, waiter);

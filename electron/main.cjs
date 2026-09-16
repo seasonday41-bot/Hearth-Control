@@ -218,23 +218,16 @@ const getPublicTasksState = () => ({
 const sendPublicTasksState = () => sendEvent({ type: 'publicTasks:state', state: getPublicTasksState() });
 const sendEvent = (event) => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('server:event', event); };
 
-const xQueueError = (code) => Object.assign(new Error(code), { code });
-const canonicalJson = (value) => JSON.stringify(value, (_key, item) => {
-  if (!item || Array.isArray(item) || typeof item !== 'object') return item;
-  return Object.fromEntries(Object.keys(item).sort().map((key) => [key, item[key]]));
+let canonicalJson = null;
+let canonicalizeXTask = null;
+let computeXTaskFingerprint = null;
+void importFromHere('../mcp/x/fingerprint.mjs').then((m) => {
+  canonicalJson = m.canonicalJson;
+  canonicalizeXTask = m.canonicalizeXTask;
+  computeXTaskFingerprint = m.computeXTaskFingerprint;
 });
-/**
- * The REAL, single canonicalization + fingerprint formula for an x-task-v1
- * payload -- used by ingestXTask's own idempotency/conflict detection AND
- * by Goal-level X approval (resolveGoalXApproval below) to verify an
- * approved Goal snapshot's per-step fingerprints against the CURRENT xTask
- * content. Never duplicated: both callers share this exact function so the
- * two can never silently drift into disagreeing about what "unchanged"
- * means.
- */
-const canonicalizeXTask = (task, taskRoot) => ({ ...task, workspace: { ...task.workspace, root: taskRoot } });
-const computeXTaskFingerprint = (task, taskRoot) =>
-  crypto.createHash('sha256').update(canonicalJson(canonicalizeXTask(task, taskRoot))).digest('hex');
+
+const xQueueError = (code) => Object.assign(new Error(code), { code });
 const hasLiveXQueueEntries = () => Boolean(xQueueStore &&
   (xQueueStore.listPending().length || xQueueStore.listDispatching().length || xQueueStore.listDispatched().length));
 const xQueueWorkspaceMatches = (workspace) => {
@@ -896,6 +889,26 @@ const startServer = async ({ workspace, port }) => {
       if (serverProcess === child) {
         try { child.send({ type: 'review_queue_retry_ack', transportId: message.transportId, ok, result, error }); }
         catch (sendError) { console.error('[Electron] Review Queue retry ack failed:', sendError); }
+      }
+    }
+    if (message?.type === 'goal_get_context_request') {
+      if (typeof message.transportId !== 'string' || !/^[0-9a-f-]{36}$/i.test(message.transportId)) return;
+      let context = null;
+      let ok = true;
+      let error = null;
+      try {
+        if (!goalRunner) { ok = false; error = 'goal_runner_unavailable'; }
+        else {
+          context = await goalRunner.getGoalContext(message.goalId);
+          ok = true;
+        }
+      } catch (err) {
+        ok = false;
+        error = err?.message || 'goal_get_context_failed';
+      }
+      if (serverProcess === child) {
+        try { child.send({ type: 'goal_get_context_ack', transportId: message.transportId, ok, context, error }); }
+        catch (sendError) { console.error('[Electron] Goal context ack failed:', sendError); }
       }
     }
   });

@@ -35,6 +35,7 @@ export const toolNames = [
   'review_queue_acknowledge',
   'review_queue_resolve',
   'review_queue_retry',
+  'goal_get_context',
 ];
 
 const text = (value) => ({ content: [{ type: 'text', text: String(value) }] });
@@ -575,6 +576,23 @@ export const registerWorkspaceTools = (server, options) => {
       return text(JSON.stringify(result, null, 2));
     } catch (error) {
       return text(JSON.stringify({ ok: false, reason: error?.message || 'retry_failed' }));
+    }
+  });
+
+  server.registerTool('goal_get_context', {
+    title: 'Get durable Goal continuation context',
+    description: 'Read-only: derives a compact continuation context (x-context-v1) for a Goal from live GoalRunner state. Shows completed steps, current step, authored xTask, execution/review status, and next legal action. Zero state mutations, zero dispatches.',
+    inputSchema: {
+      goal_id: z.string().min(1).max(200).describe('Goal ID to get context for'),
+    },
+  }, async ({ goal_id } = {}) => {
+    const transport = options.goalTransport || options.reviewQueueTransport;
+    if (!transport?.getGoalContext) return text(JSON.stringify({ error: 'transport_unavailable' }));
+    try {
+      const result = await transport.getGoalContext({ goalId: goal_id });
+      return text(JSON.stringify(result, null, 2));
+    } catch (error) {
+      return text(JSON.stringify({ error: error?.message || 'get_goal_context_failed' }));
     }
   });
 };

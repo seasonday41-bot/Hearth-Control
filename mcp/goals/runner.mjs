@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import crypto from 'node:crypto';
 import { redactSecrets } from '../executors/antigravity.mjs';
 import { getJobManager } from '../runtime/job-manager.mjs';
 import { parseXTask } from '../x/task-contract.mjs';
@@ -8,6 +9,12 @@ import {
   createReviewQueueItem,
   validateGoal,
 } from './model.mjs';
+
+import {
+  canonicalJson,
+  canonicalizeXTask,
+  computeXTaskFingerprint,
+} from '../x/fingerprint.mjs';
 
 /**
  * Derives the durable X requestId for a Goal step.
@@ -1418,5 +1425,384 @@ export class GoalRunner {
       return this.retry_review(goalIdOrParams.goalId, goalIdOrParams.reviewItemId, goalIdOrParams);
     }
     return this.retry_review(goalIdOrParams, reviewItemId, options);
+  }
+
+  /**
+   * Operation 14: get_goal_context (x-context-v1)
+   *
+   * Derives a compact, read-only continuation context for a Goal.
+   * STRICT: ZERO state mutations, ZERO file writes, ZERO execution generation allocation.
+   *
+   * @param {string} goalId
+   * @returns {Promise<object>} x-context-v1 payload
+   */
+  async get_goal_context(goalId) {
+    if (!goalId || typeof goalId !== 'string') throw new Error('goalId is required');
+    const goal = this.storage.getGoal(goalId);
+    if (!goal) throw new Error(`Goal '${goalId}' not found`);
+
+    const now = new Date().toISOString();
+
+    // Completed step IDs
+    const completedStepIds = goal.steps.filter((s) => s.status === 'completed').map((s) => s.id);
+
+    // Current step resolution
+    let currentStep = null;
+    if (goal.status !== 'completed') {
+      if (goal.currentStepId) {
+        currentStep = goal.steps.find((s) => s.id === goal.currentStepId) || null;
+      }
+      if (!currentStep) {
+        currentStep = goal.steps.find((s) => s.status !== 'completed') || null;
+      }
+    }
+
+    const currentStepId = currentStep ? currentStep.id : null;
+
+    // Remaining step IDs
+    const remainingStepIds = currentStep
+      ? goal.steps
+          .filter((s) => s.status !== 'completed' && s.id !== currentStep.id)
+          .map((s) => s.id)
+      : [];
+
+    // Current step summary
+    const currentStepDetails = currentStep
+      ? {
+          id: currentStep.id,
+          title: currentStep.title,
+          route: currentStep.route,
+          required: currentStep.required !== false,
+          status: currentStep.status,
+          execution_generation: currentStep.executionGeneration ?? null,
+        }
+      : null;
+
+    const authoredTask = currentStep && currentStep.route === 'x' && currentStep.xTask ? currentStep.xTask : null;
+
+    // Current request ID and execution status check (Read-only primitive)
+    let currentRequestId = null;
+    let requestStatus = null;
+    if (currentStep && currentStep.route === 'x') {
+      currentRequestId = getXRequestId(goal, currentStep);
+      if (this.xExecutor?.getXTaskStatus) {
+        try {
+          requestStatus = await this.xExecutor.getXTaskStatus(currentRequestId);
+        } catch {
+          requestStatus = { found: false, reason: 'status_check_error' };
+        }
+      } else {
+        requestStatus = { found: false, reason: 'executor_unavailable' };
+      }
+    }
+
+    // Review Queue item derivation
+    const reviewQueue = goal.reviewQueue || [];
+    const activeReviewItem =
+      (currentStepId && reviewQueue.find((item) => item.stepId === currentStepId && ['open', 'acknowledged'].includes(item.lifecycle))) ||
+      reviewQueue.find((item) => ['open', 'acknowledged'].includes(item.lifecycle)) ||
+      null;
+
+    const supersededReviewItem = currentStep
+      ? reviewQueue.find((item) => item.stepId === currentStep.id && item.lifecycle === 'superseded')
+      : null;
+
+    const reviewDetails = activeReviewItem
+      ? {
+          active_item_id: activeReviewItem.id,
+          status: activeReviewItem.status,
+          lifecycle: activeReviewItem.lifecycle,
+          reason: activeReviewItem.reason || null,
+          result_id: activeReviewItem.resultId || null,
+        }
+      : null;
+
+    // Execution evidence references
+    let latestRunId = activeReviewItem?.runId || null;
+    let latestResultId = activeReviewItem?.resultId || null;
+    let latestTerminalStatus = activeReviewItem?.status || null;
+
+    if (!latestRunId && currentStep?.evidence && typeof currentStep.evidence === 'object') {
+      latestRunId = currentStep.evidence.runId || null;
+      latestResultId = currentStep.evidence.resultId || null;
+    }
+
+    const executionDetails = currentStep
+      ? {
+          current_request_id: currentRequestId,
+          request_status: requestStatus,
+          latest_run_id: latestRunId,
+          latest_result_id: latestResultId,
+          latest_terminal_status: latestTerminalStatus,
+        }
+      : null;
+
+    // Goal X approval derivation
+    let approvalDetails = {
+      snapshot_present: false,
+      snapshot_granted_at: null,
+      validity: 'none',
+    };
+
+    if (goal.xApproval) {
+      approvalDetails.snapshot_present = true;
+      approvalDetails.snapshot_granted_at = goal.xApproval.approvedAt || null;
+
+      if (currentStep && currentStep.route === 'x' && currentStep.xTask) {
+        try {
+          let taskRoot = currentStep.xTask.workspace?.root || goal.workspace;
+          let approvalRoot = goal.xApproval.workspaceRoot;
+          try {
+            const fsSync = await import('node:fs');
+            taskRoot = fsSync.realpathSync(taskRoot);
+            approvalRoot = fsSync.realpathSync(approvalRoot);
+          } catch {}
+          const currentFingerprint = computeXTaskFingerprint(currentStep.xTask, taskRoot);
+          const match = goal.xApproval.steps?.find(
+            (s) => s.stepId === currentStep.id && s.xTaskFingerprint === currentFingerprint
+          );
+          if (match && approvalRoot === taskRoot) {
+            approvalDetails.validity = 'valid';
+          } else {
+            approvalDetails.validity = 'invalid';
+          }
+        } catch {
+          approvalDetails.validity = 'unknown';
+        }
+      } else {
+        approvalDetails.validity = 'none';
+      }
+    }
+
+    // Recent checkpoints (max 3)
+    const recentCheckpoints = (goal.checkpoints || []).slice(-3).map((cp) => ({
+      id: cp.id,
+      timestamp: cp.timestamp,
+      summary: cp.summary,
+      step_id: cp.stepId,
+      completed_steps: cp.completedSteps,
+      next_step: cp.nextStep,
+    }));
+
+    // Next Legal Action derivation (Priority Order)
+    let nextLegalAction = null;
+
+    // 2. GOAL_COMPLETED
+    if (goal.status === 'completed') {
+      nextLegalAction = {
+        type: 'GOAL_COMPLETED',
+        step_id: null,
+        reason: 'Goal is completed.',
+      };
+    }
+
+    // 3. Active unresolved Review Queue item
+    if (!nextLegalAction && activeReviewItem) {
+      if (activeReviewItem.status === 'needs_review') {
+        nextLegalAction = {
+          type: 'WAIT_FOR_REVIEW',
+          step_id: activeReviewItem.stepId || currentStepId,
+          reason: `Step '${activeReviewItem.stepId || currentStepId}' needs review (lifecycle: ${activeReviewItem.lifecycle}).`,
+        };
+      } else if (activeReviewItem.status === 'failed') {
+        nextLegalAction = {
+          type: 'RETRY_REQUIRES_NEW_XTASK',
+          step_id: activeReviewItem.stepId || currentStepId,
+          reason: `Step '${activeReviewItem.stepId || currentStepId}' failed. A new xTask must be authored to retry.`,
+        };
+      }
+    }
+
+    // 4. Manual waiting step
+    if (
+      !nextLegalAction &&
+      currentStep &&
+      currentStep.route === 'manual' &&
+      (currentStep.status === 'waiting' || goal.status === 'waiting')
+    ) {
+      nextLegalAction = {
+        type: 'WAIT_FOR_MANUAL_SIGNOFF',
+        step_id: currentStep.id,
+        reason: `Step '${currentStep.title}' is waiting for manual signoff.`,
+      };
+    }
+
+    // 5. Current X request exists and is non-terminal
+    if (
+      !nextLegalAction &&
+      requestStatus?.found &&
+      ['admitted', 'queued', 'running'].includes(requestStatus.status)
+    ) {
+      nextLegalAction = {
+        type: 'WAIT_FOR_X',
+        step_id: currentStep.id,
+        reason: `X task execution for step '${currentStep.title}' is currently ${requestStatus.status}.`,
+      };
+    }
+
+    // 6. Current request is terminal but Goal state has not reconciled with it
+    if (
+      !nextLegalAction &&
+      requestStatus?.found &&
+      ['completed', 'needs_review', 'failed', 'interrupted'].includes(requestStatus.status)
+    ) {
+      if (currentStep.status === 'running' || currentStep.status === 'pending') {
+        nextLegalAction = {
+          type: 'RECOVERY_REQUIRED',
+          step_id: currentStep.id,
+          reason: `X request ${currentRequestId} is terminal (${requestStatus.status}) but Goal step status is '${currentStep.status}'. Reconciliation required.`,
+        };
+      }
+    }
+
+    // 7. Interrupted recovery already allocated: waiting/paused step + executionGeneration >= 2 + request not found
+    if (
+      !nextLegalAction &&
+      currentStep &&
+      ['waiting', 'paused'].includes(currentStep.status) &&
+      (currentStep.executionGeneration ?? 1) >= 2 &&
+      (!requestStatus || !requestStatus.found)
+    ) {
+      nextLegalAction = {
+        type: 'RESUME_CURRENT_STEP',
+        step_id: currentStep.id,
+        reason: `Step '${currentStep.title}' was interrupted; execution generation ${currentStep.executionGeneration} allocated for recovery.`,
+      };
+    }
+
+    // 8. Human retry prepared: pending step + executionGeneration >= 2 + superseded prior review + request not found
+    if (
+      !nextLegalAction &&
+      currentStep &&
+      currentStep.status === 'pending' &&
+      (currentStep.executionGeneration ?? 1) >= 2 &&
+      supersededReviewItem &&
+      (!requestStatus || !requestStatus.found)
+    ) {
+      nextLegalAction = {
+        type: 'RESUME_CURRENT_STEP',
+        step_id: currentStep.id,
+        reason: `Human retry prepared for step '${currentStep.title}' (generation ${currentStep.executionGeneration}); ready to resume.`,
+      };
+    }
+
+    // Goal paused with pending/paused step and no active request
+    if (
+      !nextLegalAction &&
+      goal.status === 'paused' &&
+      currentStep &&
+      ['pending', 'paused'].includes(currentStep.status) &&
+      (!requestStatus || !requestStatus.found)
+    ) {
+      if ((currentStep.executionGeneration ?? 1) >= 2) {
+        nextLegalAction = {
+          type: 'RESUME_CURRENT_STEP',
+          step_id: currentStep.id,
+          reason: `Goal is paused with allocated execution generation ${currentStep.executionGeneration}; ready to resume step.`,
+        };
+      } else {
+        nextLegalAction = {
+          type: 'RESUME_GOAL',
+          step_id: currentStep.id,
+          reason: `Goal is paused at step '${currentStep.title}'; resume required.`,
+        };
+      }
+    }
+
+    // 9. First-run pending X step: generation null/1 + request not found -> approval check
+    if (
+      !nextLegalAction &&
+      currentStep &&
+      currentStep.route === 'x' &&
+      currentStep.status === 'pending' &&
+      (!currentStep.executionGeneration || currentStep.executionGeneration <= 1) &&
+      (!requestStatus || !requestStatus.found)
+    ) {
+      if (approvalDetails.validity !== 'valid') {
+        nextLegalAction = {
+          type: 'WAIT_FOR_APPROVAL',
+          step_id: currentStep.id,
+          reason: `Step '${currentStep.title}' requires Goal-level X approval before execution.`,
+        };
+      } else {
+        nextLegalAction = {
+          type: 'RUN_CURRENT_STEP',
+          step_id: currentStep.id,
+          reason: `Step '${currentStep.title}' is approved and ready for first execution.`,
+        };
+      }
+    }
+
+    // Non-X first-run pending step
+    if (
+      !nextLegalAction &&
+      currentStep &&
+      currentStep.status === 'pending' &&
+      (!currentStep.executionGeneration || currentStep.executionGeneration <= 1)
+    ) {
+      nextLegalAction = {
+        type: 'RUN_CURRENT_STEP',
+        step_id: currentStep.id,
+        reason: `Step '${currentStep.title}' is ready for first execution.`,
+      };
+    }
+
+    // 10. Completed current step + next pending authored step
+    if (!nextLegalAction && currentStep && currentStep.status === 'completed' && remainingStepIds.length > 0) {
+      nextLegalAction = {
+        type: 'CONTINUE_NEXT_STEP',
+        step_id: remainingStepIds[0],
+        reason: `Step '${currentStep.id}' completed; next step '${remainingStepIds[0]}' is ready to continue.`,
+      };
+    }
+
+    // 11. Goal error with no represented recovery path
+    if (!nextLegalAction && goal.status === 'error') {
+      nextLegalAction = {
+        type: 'GOAL_FAILED',
+        step_id: currentStepId,
+        reason: goal.error || 'Goal entered unrecoverable error state.',
+      };
+    }
+
+    // Fallback
+    if (!nextLegalAction) {
+      nextLegalAction = {
+        type: 'RECOVERY_REQUIRED',
+        step_id: currentStepId,
+        reason: 'Canonical state is contradictory or unknown. Recovery required.',
+      };
+    }
+
+    return {
+      version: 'x-context-v1',
+      generated_at: now,
+      goal: {
+        id: goal.id,
+        title: goal.title,
+        objective: goal.objective,
+        status: goal.status,
+        workspace: goal.workspace,
+      },
+      progress: {
+        completed_step_ids: completedStepIds,
+        current_step_id: currentStepId,
+        remaining_step_ids: remainingStepIds,
+      },
+      current_step: currentStepDetails,
+      authored_task: authoredTask,
+      execution: executionDetails,
+      review: reviewDetails,
+      approval: approvalDetails,
+      recent_checkpoints: recentCheckpoints,
+      next_legal_action: nextLegalAction,
+    };
+  }
+
+  async getGoalContext(goalIdOrParams) {
+    if (goalIdOrParams && typeof goalIdOrParams === 'object') {
+      return this.get_goal_context(goalIdOrParams.goalId);
+    }
+    return this.get_goal_context(goalIdOrParams);
   }
 }

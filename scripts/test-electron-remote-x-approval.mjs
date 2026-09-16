@@ -12,6 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { XQueueStore } from '../mcp/x/queue-store.mjs';
+import { canonicalJson, canonicalizeXTask, computeXTaskFingerprint } from '../mcp/x/fingerprint.mjs';
 
 const mainSource = fs.readFileSync(new URL('../electron/main.cjs', import.meta.url), 'utf8');
 
@@ -285,6 +286,7 @@ function buildIntegrationHarness({ settingsWorkspace, permission = 'Allow', clai
     'fs', 'crypto', 'xQueueStore', 'xQueueCoordinator', 'xParseTask', 'xRunStore',
     'readSettings', 'sendEvent', 'serverProcess', 'xQueueDispatchEnabled', 'xShuttingDown', 'localApprovals', 'setTimeout', 'clearTimeout',
     'publicTasksClientInstance', 'publicTasksReady', 'bridgeState',
+    'canonicalJson', 'canonicalizeXTask', 'computeXTaskFingerprint',
     factorySource,
   );
   const localApprovals = new Map();
@@ -292,6 +294,7 @@ function buildIntegrationHarness({ settingsWorkspace, permission = 'Allow', clai
     fs, crypto, store, coordinator, null, { getRun: () => null },
     () => settings, (event) => events.push(event), null, true, false, localApprovals, setTimeout, clearTimeout,
     fakeClient, () => true, bridgeState,
+    canonicalJson, canonicalizeXTask, computeXTaskFingerprint,
   );
   return { ...api, events, bridgeState, enqueueCount: () => enqueueCount };
 }

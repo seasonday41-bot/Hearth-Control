@@ -17,6 +17,7 @@ import { X_TASK_VERSION } from '../mcp/x/task-contract.mjs';
 import { createGoal, validateGoal } from '../mcp/goals/model.mjs';
 import { GoalStorage } from '../mcp/goals/storage.mjs';
 import { GoalRunner } from '../mcp/goals/runner.mjs';
+import { canonicalJson, canonicalizeXTask, computeXTaskFingerprint } from '../mcp/x/fingerprint.mjs';
 
 const mainSource = fs.readFileSync(new URL('../electron/main.cjs', import.meta.url), 'utf8');
 
@@ -82,11 +83,8 @@ function threeStepGoal(root, { title = 'Approval Goal' } = {}) {
 
 /**
  * Builds a harness around the REAL extracted resolveGoalXApproval/
- * ingestXTask/canonicalizeXTask/computeXTaskFingerprint AND the REAL
- * extracted goalRunner.xExecutor.dispatchXTask wrapper body, composed
- * exactly as electron/main.cjs composes them. Approval events are captured
- * (never auto-resolved) so each test drives Approve/Deny explicitly, the
- * same convention scripts/test-x-queue-ingress.mjs already established.
+ * ingestXTask AND the REAL extracted goalRunner.xExecutor.dispatchXTask
+ * wrapper body, composed exactly as electron/main.cjs composes them.
  */
 function harness({ permission = 'Ask', root: providedRoot } = {}) {
   const root = providedRoot || fs.mkdtempSync(path.join(os.tmpdir(), 'hearth-goal-x-approval-'));
@@ -99,17 +97,13 @@ function harness({ permission = 'Ask', root: providedRoot } = {}) {
   let enqueueCount = 0;
   const coordinator = { enqueue(task, identity) { enqueueCount += 1; return store.enqueueWithReceipt(task, identity); } };
 
-  // Purely this test's OWN bookkeeping (so a test can look up/inspect a
-  // goal by id) -- resolveGoalXApproval itself no longer consults any
-  // storage/goalRunner lookup; it operates directly on the `goal`/`step`
-  // objects `dispatch()` below passes it, exactly like the real
-  // GoalRunner.executeStep -> xExecutor.dispatchXTask call.
   const goals = new Map();
 
   const factory = new Function(
     'fs', 'crypto', 'xQueueStore', 'xQueueCoordinator', 'xRunStore',
     'readSettings', 'sendEvent', 'serverProcess', 'xQueueDispatchEnabled', 'xShuttingDown',
     'localApprovals', 'setTimeout', 'clearTimeout',
+    'canonicalJson', 'canonicalizeXTask', 'computeXTaskFingerprint',
     `const xQueueInflight = new Map(); const xQueueRequests = new Map(); const pendingXApprovals = new Map();
      ${ingressSource}
      const dispatchXTask = async ({ requestId, task, action, goal, step }) => ${dispatchXTaskBodySource};
@@ -122,6 +116,7 @@ function harness({ permission = 'Ask', root: providedRoot } = {}) {
     localApprovals,
     (fn, ms) => { const timer = { fn, ms, cleared: false }; timers.push(timer); return timer; },
     (timer) => { timer.cleared = true; },
+    canonicalJson, canonicalizeXTask, computeXTaskFingerprint,
   );
 
   const registerGoal = (goal) => { goals.set(goal.id, goal); return goal; };

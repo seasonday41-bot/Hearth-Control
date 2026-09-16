@@ -89,6 +89,7 @@ const reviewQueueTransportFor = (response) => {
       roundTrip('review_queue_resolve_request', { goalId, reviewItemId, action: action || 'accept', note: note || null }),
     retry: ({ goalId, reviewItemId, xTask, note, actor } = {}) =>
       roundTrip('review_queue_retry_request', { goalId, reviewItemId, xTask: xTask || null, note: note || null, actor: actor || null }),
+    getGoalContext: ({ goalId } = {}) => roundTrip('goal_get_context_request', { goalId }),
   };
 };
 
@@ -154,6 +155,9 @@ process.on('message', (message) => {
   }
   if (message?.type === 'review_queue_acknowledge_ack' || message?.type === 'review_queue_resolve_ack' || message?.type === 'review_queue_retry_ack') {
     queueReplies.get(message.transportId)?.finish(null, message.ok ? message.result : { ok: false, reason: message.error });
+  }
+  if (message?.type === 'goal_get_context_ack') {
+    queueReplies.get(message.transportId)?.finish(null, message.ok ? message.context : { error: message.error });
   }
 });
 process.on('disconnect', () => {
