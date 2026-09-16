@@ -31,6 +31,7 @@ export const toolNames = [
   'x_task',
   'x_enqueue',
   'x_queue_status',
+  'review_queue_list',
 ];
 
 const text = (value) => ({ content: [{ type: 'text', text: String(value) }] });
@@ -504,5 +505,15 @@ export const registerWorkspaceTools = (server, options) => {
     if (!options.queueIngressTransport) return text(JSON.stringify({ found: false, reason: 'transport_unavailable' }));
     try { return text(JSON.stringify(await options.queueIngressTransport.status({ requestId: request_id }))); }
     catch (error) { return text(JSON.stringify({ found: false, reason: error?.code || 'transport_unavailable' })); }
+  });
+
+  server.registerTool('review_queue_list', {
+    title: 'List durable Goal Review Queue items',
+    description: 'Read-only: lists durable Review Queue items (a Goal step whose X terminal truth was NEEDS_REVIEW or FAILED) from the SAME live GoalRunner the running Hearth app uses -- never a second GoalRunner/storage, and it makes no writes: it does not dispatch X, resume a Goal, or create/clear Review Queue items. Pass goal_id to scope to one Goal; omit it to list across every Goal, newest first.',
+    inputSchema: { goal_id: z.string().min(1).max(200).optional() },
+  }, async ({ goal_id } = {}) => {
+    if (!options.reviewQueueTransport) return text(JSON.stringify({ items: [], reason: 'transport_unavailable' }));
+    try { return text(JSON.stringify(await options.reviewQueueTransport.list({ goalId: goal_id }), null, 2)); }
+    catch (error) { return text(JSON.stringify({ items: [], reason: error?.code || 'transport_unavailable' })); }
   });
 };

@@ -794,6 +794,29 @@ const startServer = async ({ workspace, port }) => {
         }
       }).finally(() => cancelXQueueRequest(message.transportId));
     }
+    if (message?.type === 'review_queue_list_request') {
+      if (typeof message.transportId !== 'string' || !/^[0-9a-f-]{36}$/i.test(message.transportId)) return;
+      // Read-only: calls the SAME live goalRunner.list_review_queue() the
+      // running app itself uses -- never a second GoalRunner/GoalStorage,
+      // and list_review_queue() itself makes no writes (see mcp/goals/
+      // runner.mjs). No waiter/cancel bookkeeping needed: this is a single
+      // synchronous read, not an in-flight X admission.
+      let items = [];
+      let ok = true;
+      let error = null;
+      try {
+        items = goalRunner ? goalRunner.list_review_queue(message.goalId ? { goalId: message.goalId } : {}) : [];
+        if (!goalRunner) { ok = false; error = 'goal_runner_unavailable'; }
+      } catch (err) {
+        ok = false;
+        error = err?.message || 'review_queue_list_failed';
+        items = [];
+      }
+      if (serverProcess === child) {
+        try { child.send({ type: 'review_queue_list_ack', transportId: message.transportId, ok, items, error }); }
+        catch (sendError) { console.error('[Electron] Review Queue list ack failed:', sendError); }
+      }
+    }
   });
   serverProcess.once('exit', (code, signal) => {
     cancelXQueueChild(child);

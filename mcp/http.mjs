@@ -22,7 +22,18 @@ const approvals = new Map();
 const queueReplies = new Map();
 const queueError = (code) => Object.assign(new Error(code), { code });
 
-const queueIngressTransportFor = (response) => {
+/**
+ * Shared request/ack round trip over the fork-IPC channel to Electron main
+ * (process.send/process.on('message')) -- the SAME mechanism
+ * x_queue_enqueue_request/x_queue_status_request already use, generalized
+ * so a new request kind (e.g. review_queue_list_request) can reuse the
+ * identical transportId correlation, timeout, and response-close cleanup
+ * instead of re-implementing it. `cancelType`, when given, is sent on
+ * timeout/response-close exactly like x_queue_request_cancel already is;
+ * omit it for a request with no server-side in-flight state worth
+ * cancelling (e.g. a pure read like review_queue_list_request).
+ */
+const createRoundTripTransport = (response, { cancelType } = {}) => {
   const active = new Set();
   const roundTrip = (type, payload) => new Promise((resolve, reject) => {
     if (typeof process.send !== 'function' || !process.connected) { reject(queueError('transport_unavailable')); return; }
@@ -36,7 +47,7 @@ const queueIngressTransportFor = (response) => {
       if (error) reject(error); else resolve(result);
     };
     const timer = setTimeout(() => {
-      try { process.send({ type: 'x_queue_request_cancel', transportId }); } catch {}
+      if (cancelType) { try { process.send({ type: cancelType, transportId }); } catch {} }
       finish(queueError('transport_timeout'));
     }, 120000);
     active.add(transportId);
@@ -46,13 +57,32 @@ const queueIngressTransportFor = (response) => {
   });
   response.on('close', () => {
     for (const transportId of active) {
-      try { process.send?.({ type: 'x_queue_request_cancel', transportId }); } catch {}
+      if (cancelType) { try { process.send?.({ type: cancelType, transportId }); } catch {} }
       queueReplies.get(transportId)?.finish(queueError('transport_unavailable'));
     }
   });
+  return roundTrip;
+};
+
+const queueIngressTransportFor = (response) => {
+  const roundTrip = createRoundTripTransport(response, { cancelType: 'x_queue_request_cancel' });
   return {
     enqueue: ({ requestId, task, workspace }) => roundTrip('x_queue_enqueue_request', { requestId, task, workspace }),
     status: ({ requestId }) => roundTrip('x_queue_status_request', { requestId }),
+  };
+};
+
+/**
+ * Read-only bridge to the LIVE GoalRunner instance Electron main owns --
+ * never a second GoalRunner/GoalStorage. Electron main's own
+ * review_queue_list_request handler (electron/main.cjs) calls the SAME
+ * goalRunner.list_review_queue() the running app itself uses; this makes
+ * zero writes on either side of the channel.
+ */
+const reviewQueueTransportFor = (response) => {
+  const roundTrip = createRoundTripTransport(response);
+  return {
+    list: ({ goalId } = {}) => roundTrip('review_queue_list_request', { goalId: goalId || null }),
   };
 };
 
@@ -113,6 +143,9 @@ process.on('message', (message) => {
   if (message?.type === 'x_queue_enqueue_ack' || message?.type === 'x_queue_status_ack') {
     queueReplies.get(message.transportId)?.finish(null, message.ok ? message.receipt : { accepted: false, found: false, reason: message.error });
   }
+  if (message?.type === 'review_queue_list_ack') {
+    queueReplies.get(message.transportId)?.finish(null, message.ok ? { items: message.items } : { items: [], reason: message.error });
+  }
 });
 process.on('disconnect', () => {
   for (const pending of queueReplies.values()) pending.finish(queueError('transport_unavailable'));
@@ -125,7 +158,11 @@ app.get('/health', (_request, response) => {
 app.get('/tools', (_request, response) => response.json({ tools: toolNames }));
 
 app.post('/mcp', async (request, response) => {
-  const server = createMcpServer({ workspace, permissions, requestApproval, queueIngressTransport: queueIngressTransportFor(response) });
+  const server = createMcpServer({
+    workspace, permissions, requestApproval,
+    queueIngressTransport: queueIngressTransportFor(response),
+    reviewQueueTransport: reviewQueueTransportFor(response),
+  });
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   response.on('close', () => {
     void transport.close();
