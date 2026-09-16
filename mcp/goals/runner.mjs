@@ -173,265 +173,274 @@ export class GoalRunner {
     }
 
     // Single active execution lock
-    if (this.activeGoalId && this.activeGoalId !== goalId) {
+    if (this.activeGoalId) {
+      if (this.activeGoalId === goalId) {
+        throw new Error(`Goal '${goalId}' is already executing`);
+      }
       throw new Error(`Another goal ('${this.activeGoalId}') is currently executing`);
     }
 
     this.activeGoalId = goalId;
     this.pausedGoals.delete(goalId);
 
-    const now = new Date().toISOString();
-    goal.status = 'running';
-    if (!goal.startedAt) goal.startedAt = now;
-    goal.updatedAt = now;
-    this.storage.saveGoal(goal);
-
-    if (options.onProgress) options.onProgress(goal);
-
-    // Find current or next pending step
-    let stepIndex = 0;
-    if (goal.currentStepId) {
-      const idx = goal.steps.findIndex((s) => s.id === goal.currentStepId);
-      if (idx !== -1) {
-        // If current step is completed/skipped, advance to next
-        if (['completed', 'skipped'].includes(goal.steps[idx].status)) {
-          stepIndex = idx + 1;
-        } else {
-          stepIndex = idx;
-        }
-      }
-    }
-
-    while (stepIndex < goal.steps.length) {
-      // Check if paused
-      if (this.pausedGoals.has(goalId)) {
-        goal.status = 'paused';
-        goal.updatedAt = new Date().toISOString();
-        this.storage.saveGoal(goal);
-        this.activeGoalId = null;
-        if (options.onProgress) options.onProgress(goal);
-        return goal;
-      }
-
-      const step = goal.steps[stepIndex];
-      goal.currentStepId = step.id;
-
-      // Skip already completed/skipped steps
-      if (['completed', 'skipped'].includes(step.status)) {
-        stepIndex++;
-        continue;
-      }
-
-      if (Array.isArray(goal.reviewQueue)) {
-        const unresolvedItem = goal.reviewQueue.find(
-          (it) => it.stepId === step.id && ['open', 'acknowledged'].includes(it.lifecycle)
-        );
-        if (unresolvedItem) {
-          goal.status = 'waiting';
-          this.activeGoalId = null;
-          this.storage.saveGoal(goal);
-          throw new Error(
-            `Cannot run goal '${goalId}' on step '${step.title}': blocked by unresolved review item '${unresolvedItem.id}' (${unresolvedItem.status}/${unresolvedItem.lifecycle}). Human decision is required.`
-          );
-        }
-      }
-
-      step.status = 'running';
-      step.startedAt = new Date().toISOString();
-      goal.updatedAt = new Date().toISOString();
+    try {
+      const now = new Date().toISOString();
+      goal.status = 'running';
+      if (!goal.startedAt) goal.startedAt = now;
+      goal.updatedAt = now;
       this.storage.saveGoal(goal);
+
       if (options.onProgress) options.onProgress(goal);
 
-      try {
-        // Execute the step
-        const stepResult = await this.executeStep(goal, step, options);
-
-        if (stepResult.status === 'completed') {
-          step.status = 'completed';
-          step.result = stepResult.result ? redactSecrets(stepResult.result) : 'Step completed successfully';
-          step.evidence = stepResult.evidence || null;
-          step.finishedAt = new Date().toISOString();
-
-          // Create checkpoint for this completed step
-          const completedCount = goal.steps.filter((s) => s.status === 'completed').length;
-          const nextStepObj = goal.steps[stepIndex + 1];
-          this.checkpoint_goal(goal.id, step.id, {
-            summary: `Step ${stepIndex + 1} (${step.title}) completed: ${step.result}`,
-            completedSteps: completedCount,
-            evidence: step.evidence,
-            checks: stepResult.checks || {},
-            nextStep: nextStepObj ? nextStepObj.id : null,
-            route: step.route,
-          }, goal);
-
-          this.storage.saveGoal(goal);
-          if (options.onProgress) options.onProgress(goal);
-
-          stepIndex++;
-
-          // If pause was requested during this step execution
-          if (this.pausedGoals.has(goalId)) {
-            goal.status = 'paused';
-            goal.updatedAt = new Date().toISOString();
-            const hasPauseCp = goal.checkpoints.some((c) => c.summary.toLowerCase().includes('pause'));
-            if (!hasPauseCp) {
-              const cp = createGoalCheckpoint({
-                goalId: goal.id,
-                stepId: goal.currentStepId,
-                summary: 'Goal paused by user',
-                completedSteps: goal.steps.filter((s) => s.status === 'completed').length,
-                nextStep: goal.currentStepId,
-                route: 'manual',
-              });
-              goal.checkpoints.push(cp);
-            }
-            this.activeGoalId = null;
-            this.storage.saveGoal(goal);
-            if (options.onProgress) options.onProgress(goal);
-            return goal;
+      // Find current or next pending step
+      let stepIndex = 0;
+      if (goal.currentStepId) {
+        const idx = goal.steps.findIndex((s) => s.id === goal.currentStepId);
+        if (idx !== -1) {
+          // If current step is completed/skipped, advance to next
+          if (['completed', 'skipped'].includes(goal.steps[idx].status)) {
+            stepIndex = idx + 1;
+          } else {
+            stepIndex = idx;
           }
-        } else if (stepResult.status === 'waiting') {
-          step.status = 'waiting';
-          step.result = stepResult.result ? redactSecrets(stepResult.result) : 'Step waiting for input or verification';
-          goal.status = 'waiting';
+        }
+      }
+
+      while (stepIndex < goal.steps.length) {
+        // Check if paused
+        if (this.pausedGoals.has(goalId)) {
+          goal.status = 'paused';
           goal.updatedAt = new Date().toISOString();
-
-          // INTERRUPTED RECOVERY: allocate a new executionGeneration exactly
-          // once before saving. The new generation becomes durable here; the
-          // next resume_goal/run_goal will compute a new requestId via
-          // getXRequestId and dispatch a genuinely fresh X execution.
-          // Idempotent across Hearth restarts: if the process crashes after
-          // this save, the next restart sees the already-incremented value and
-          // does not increment again.
-          if (stepResult.interruptedRecovery) {
-            const prevGen = step.executionGeneration ?? 1;
-            step.executionGeneration = prevGen + 1;
-            // Append a durable checkpoint describing the recovery allocation.
-            this.checkpoint_goal(goal.id, step.id, {
-              summary: `Interrupted recovery: step '${step.title}' allocated new execution generation ${step.executionGeneration}. Resume the goal to dispatch a fresh X run.`,
-              completedSteps: goal.steps.filter((s) => s.status === 'completed').length,
-              evidence: {
-                interruptedRequestId: stepResult.evidence?.requestId || null,
-                interruptedRunId: stepResult.evidence?.runId || null,
-                newExecutionGeneration: step.executionGeneration,
-              },
-              nextStep: step.id,
-              route: step.route,
-            }, goal);
-          }
-
-          // NEEDS_REVIEW (never INTERRUPTED -- see executeStep's route:'x'
-          // branch, the only current source of reviewNeeded): create/
-          // update the durable Review Queue item BEFORE checkpointing/
-          // saving, so both land in the SAME save below.
-          let waitingReviewItem = null;
-          if (stepResult.reviewNeeded) {
-            waitingReviewItem = this.recordReviewItem(goal, {
-              stepId: step.id,
-              taskId: step.xTask?.task_id || null,
-              runId: stepResult.evidence?.runId || null,
-              resultId: stepResult.evidence?.resultId || null,
-              status: stepResult.reviewStatus || 'needs_review',
-              reason: stepResult.reviewReason || step.result,
-              evidence: stepResult.evidence || null,
-            });
-          }
-
-          if (!stepResult.interruptedRecovery) {
-            this.checkpoint_goal(goal.id, step.id, {
-              summary: `Step ${stepIndex + 1} (${step.title}) waiting: ${step.result}`,
-              completedSteps: goal.steps.filter((s) => s.status === 'completed').length,
-              evidence: stepResult.evidence,
-              nextStep: step.id,
-              route: step.route,
-            }, goal);
-          }
-
           this.storage.saveGoal(goal);
-          // Fired only AFTER the item is durably saved -- see the
-          // onReviewItemPersisted doc comment in the constructor.
-          if (waitingReviewItem && this.onReviewItemPersisted) {
-            try { this.onReviewItemPersisted(waitingReviewItem, goal); }
-            catch (err) { console.error('[GoalRunner] onReviewItemPersisted callback failed:', err); }
-          }
           this.activeGoalId = null;
           if (options.onProgress) options.onProgress(goal);
           return goal;
-        } else if (stepResult.status === 'error') {
-          step.status = 'error';
-          step.result = stepResult.error ? redactSecrets(stepResult.error) : 'Step execution error';
-          step.finishedAt = new Date().toISOString();
+        }
 
-          if (step.required) {
-            // FAILED: record the Review Queue item and a checkpoint BEFORE
-            // the save below, so fail_goal's own subsequent fetch (it
-            // re-reads from storage by id) sees both already persisted.
-            let errorReviewItem = null;
+        const step = goal.steps[stepIndex];
+        goal.currentStepId = step.id;
+
+        // Skip already completed/skipped steps
+        if (['completed', 'skipped'].includes(step.status)) {
+          stepIndex++;
+          continue;
+        }
+
+        if (Array.isArray(goal.reviewQueue)) {
+          const unresolvedItem = goal.reviewQueue.find(
+            (it) => it.stepId === step.id && ['open', 'acknowledged'].includes(it.lifecycle)
+          );
+          if (unresolvedItem) {
+            goal.status = 'waiting';
+            this.activeGoalId = null;
+            this.storage.saveGoal(goal);
+            throw new Error(
+              `Cannot run goal '${goalId}' on step '${step.title}': blocked by unresolved review item '${unresolvedItem.id}' (${unresolvedItem.status}/${unresolvedItem.lifecycle}). Human decision is required.`
+            );
+          }
+        }
+
+        step.status = 'running';
+        step.startedAt = new Date().toISOString();
+        goal.updatedAt = new Date().toISOString();
+        this.storage.saveGoal(goal);
+        if (options.onProgress) options.onProgress(goal);
+
+        try {
+          // Execute the step
+          const stepResult = await this.executeStep(goal, step, options);
+
+          if (stepResult.status === 'completed') {
+            step.status = 'completed';
+            step.result = stepResult.result ? redactSecrets(stepResult.result) : 'Step completed successfully';
+            step.evidence = stepResult.evidence || null;
+            step.finishedAt = new Date().toISOString();
+
+            // Create checkpoint for this completed step
+            const completedCount = goal.steps.filter((s) => s.status === 'completed').length;
+            const nextStepObj = goal.steps[stepIndex + 1];
+            this.checkpoint_goal(goal.id, step.id, {
+              summary: `Step ${stepIndex + 1} (${step.title}) completed: ${step.result}`,
+              completedSteps: completedCount,
+              evidence: step.evidence,
+              checks: stepResult.checks || {},
+              nextStep: nextStepObj ? nextStepObj.id : null,
+              route: step.route,
+            }, goal);
+
+            this.storage.saveGoal(goal);
+            if (options.onProgress) options.onProgress(goal);
+
+            stepIndex++;
+
+            // If pause was requested during this step execution
+            if (this.pausedGoals.has(goalId)) {
+              goal.status = 'paused';
+              goal.updatedAt = new Date().toISOString();
+              const hasPauseCp = goal.checkpoints.some((c) => c.summary.toLowerCase().includes('pause'));
+              if (!hasPauseCp) {
+                const cp = createGoalCheckpoint({
+                  goalId: goal.id,
+                  stepId: goal.currentStepId,
+                  summary: 'Goal paused by user',
+                  completedSteps: goal.steps.filter((s) => s.status === 'completed').length,
+                  nextStep: goal.currentStepId,
+                  route: 'manual',
+                });
+                goal.checkpoints.push(cp);
+              }
+              this.activeGoalId = null;
+              this.storage.saveGoal(goal);
+              if (options.onProgress) options.onProgress(goal);
+              return goal;
+            }
+          } else if (stepResult.status === 'waiting') {
+            step.status = 'waiting';
+            step.result = stepResult.result ? redactSecrets(stepResult.result) : 'Step waiting for input or verification';
+            goal.status = 'waiting';
+            goal.updatedAt = new Date().toISOString();
+
+            // INTERRUPTED RECOVERY: allocate a new executionGeneration exactly
+            // once before saving. The new generation becomes durable here; the
+            // next resume_goal/run_goal will compute a new requestId via
+            // getXRequestId and dispatch a genuinely fresh X execution.
+            // Idempotent across Hearth restarts: if the process crashes after
+            // this save, the next restart sees the already-incremented value and
+            // does not increment again.
+            if (stepResult.interruptedRecovery) {
+              const prevGen = step.executionGeneration ?? 1;
+              step.executionGeneration = prevGen + 1;
+              // Append a durable checkpoint describing the recovery allocation.
+              this.checkpoint_goal(goal.id, step.id, {
+                summary: `Interrupted recovery: step '${step.title}' allocated new execution generation ${step.executionGeneration}. Resume the goal to dispatch a fresh X run.`,
+                completedSteps: goal.steps.filter((s) => s.status === 'completed').length,
+                evidence: {
+                  interruptedRequestId: stepResult.evidence?.requestId || null,
+                  interruptedRunId: stepResult.evidence?.runId || null,
+                  newExecutionGeneration: step.executionGeneration,
+                },
+                nextStep: step.id,
+                route: step.route,
+              }, goal);
+            }
+
+            // NEEDS_REVIEW (never INTERRUPTED -- see executeStep's route:'x'
+            // branch, the only current source of reviewNeeded): create/
+            // update the durable Review Queue item BEFORE checkpointing/
+            // saving, so both land in the SAME save below.
+            let waitingReviewItem = null;
             if (stepResult.reviewNeeded) {
-              errorReviewItem = this.recordReviewItem(goal, {
+              waitingReviewItem = this.recordReviewItem(goal, {
                 stepId: step.id,
                 taskId: step.xTask?.task_id || null,
                 runId: stepResult.evidence?.runId || null,
                 resultId: stepResult.evidence?.resultId || null,
-                status: stepResult.reviewStatus || 'failed',
+                status: stepResult.reviewStatus || 'needs_review',
                 reason: stepResult.reviewReason || step.result,
                 evidence: stepResult.evidence || null,
               });
             }
+
+            if (!stepResult.interruptedRecovery) {
+              this.checkpoint_goal(goal.id, step.id, {
+                summary: `Step ${stepIndex + 1} (${step.title}) waiting: ${step.result}`,
+                completedSteps: goal.steps.filter((s) => s.status === 'completed').length,
+                evidence: stepResult.evidence,
+                nextStep: step.id,
+                route: step.route,
+              }, goal);
+            }
+
+            this.storage.saveGoal(goal);
+            // Fired only AFTER the item is durably saved -- see the
+            // onReviewItemPersisted doc comment in the constructor.
+            if (waitingReviewItem && this.onReviewItemPersisted) {
+              try { this.onReviewItemPersisted(waitingReviewItem, goal); }
+              catch (err) { console.error('[GoalRunner] onReviewItemPersisted callback failed:', err); }
+            }
+            this.activeGoalId = null;
+            if (options.onProgress) options.onProgress(goal);
+            return goal;
+          } else if (stepResult.status === 'error') {
+            step.status = 'error';
+            step.result = stepResult.error ? redactSecrets(stepResult.error) : 'Step execution error';
+            step.finishedAt = new Date().toISOString();
+
+            if (step.required) {
+              // FAILED: record the Review Queue item and a checkpoint BEFORE
+              // the save below, so fail_goal's own subsequent fetch (it
+              // re-reads from storage by id) sees both already persisted.
+              let errorReviewItem = null;
+              if (stepResult.reviewNeeded) {
+                errorReviewItem = this.recordReviewItem(goal, {
+                  stepId: step.id,
+                  taskId: step.xTask?.task_id || null,
+                  runId: stepResult.evidence?.runId || null,
+                  resultId: stepResult.evidence?.resultId || null,
+                  status: stepResult.reviewStatus || 'failed',
+                  reason: stepResult.reviewReason || step.result,
+                  evidence: stepResult.evidence || null,
+                });
+              }
+              this.checkpoint_goal(goal.id, step.id, {
+                summary: `Step ${stepIndex + 1} (${step.title}) failed: ${step.result}`,
+                completedSteps: goal.steps.filter((s) => s.status === 'completed').length,
+                evidence: stepResult.evidence,
+                nextStep: null,
+                route: step.route,
+              }, goal);
+              this.storage.saveGoal(goal);
+              if (errorReviewItem && this.onReviewItemPersisted) {
+                try { this.onReviewItemPersisted(errorReviewItem, goal); }
+                catch (err) { console.error('[GoalRunner] onReviewItemPersisted callback failed:', err); }
+              }
+              return this.fail_goal(goal.id, `Required step '${step.title}' failed: ${step.result}`);
+            }
+            // Optional step failed, create checkpoint and proceed
+            this.storage.saveGoal(goal);
+            stepIndex++;
+          }
+        } catch (err) {
+          step.status = 'error';
+          step.result = redactSecrets(err.message);
+          step.finishedAt = new Date().toISOString();
+
+          if (step.required) {
+            // A thrown exception (e.g. "X executor is not configured", a
+            // network failure before X ever admitted the task) is still a
+            // FAILED outcome from Hearth's perspective -- it still needs a
+            // Review Queue item, even though no X runId/evidence exists yet.
+            const catchReviewItem = this.recordReviewItem(goal, {
+              stepId: step.id,
+              taskId: step.xTask?.task_id || null,
+              status: 'failed',
+              reason: err.message,
+            });
             this.checkpoint_goal(goal.id, step.id, {
               summary: `Step ${stepIndex + 1} (${step.title}) failed: ${step.result}`,
               completedSteps: goal.steps.filter((s) => s.status === 'completed').length,
-              evidence: stepResult.evidence,
               nextStep: null,
               route: step.route,
             }, goal);
             this.storage.saveGoal(goal);
-            if (errorReviewItem && this.onReviewItemPersisted) {
-              try { this.onReviewItemPersisted(errorReviewItem, goal); }
-              catch (err) { console.error('[GoalRunner] onReviewItemPersisted callback failed:', err); }
+            if (catchReviewItem && this.onReviewItemPersisted) {
+              try { this.onReviewItemPersisted(catchReviewItem, goal); }
+              catch (callbackErr) { console.error('[GoalRunner] onReviewItemPersisted callback failed:', callbackErr); }
             }
-            return this.fail_goal(goal.id, `Required step '${step.title}' failed: ${step.result}`);
+            return this.fail_goal(goal.id, `Required step '${step.title}' threw error: ${err.message}`);
           }
-          // Optional step failed, create checkpoint and proceed
           this.storage.saveGoal(goal);
           stepIndex++;
         }
-      } catch (err) {
-        step.status = 'error';
-        step.result = redactSecrets(err.message);
-        step.finishedAt = new Date().toISOString();
+      }
 
-        if (step.required) {
-          // A thrown exception (e.g. "X executor is not configured", a
-          // network failure before X ever admitted the task) is still a
-          // FAILED outcome from Hearth's perspective -- it still needs a
-          // Review Queue item, even though no X runId/evidence exists yet.
-          const catchReviewItem = this.recordReviewItem(goal, {
-            stepId: step.id,
-            taskId: step.xTask?.task_id || null,
-            status: 'failed',
-            reason: err.message,
-          });
-          this.checkpoint_goal(goal.id, step.id, {
-            summary: `Step ${stepIndex + 1} (${step.title}) failed: ${step.result}`,
-            completedSteps: goal.steps.filter((s) => s.status === 'completed').length,
-            nextStep: null,
-            route: step.route,
-          }, goal);
-          this.storage.saveGoal(goal);
-          if (catchReviewItem && this.onReviewItemPersisted) {
-            try { this.onReviewItemPersisted(catchReviewItem, goal); }
-            catch (callbackErr) { console.error('[GoalRunner] onReviewItemPersisted callback failed:', callbackErr); }
-          }
-          return this.fail_goal(goal.id, `Required step '${step.title}' threw error: ${err.message}`);
-        }
-        this.storage.saveGoal(goal);
-        stepIndex++;
+      // All steps processed: verify completion contract
+      return this.complete_goal(goal.id);
+    } finally {
+      if (this.activeGoalId === goalId) {
+        this.activeGoalId = null;
       }
     }
-
-    // All steps processed: verify completion contract
-    return this.complete_goal(goal.id);
   }
 
   /**
