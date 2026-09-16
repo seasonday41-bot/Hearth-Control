@@ -595,4 +595,68 @@ export const registerWorkspaceTools = (server, options) => {
       return text(JSON.stringify({ error: error?.message || 'get_goal_context_failed' }));
     }
   });
+
+  server.registerTool('goal_request_specialist_handoff', {
+    title: 'Request durable specialist handoff',
+    description: 'Creates a durable specialist handoff request record for an X step in NEEDS_REVIEW or FAILED state. Zero X dispatch, zero specialist dispatch, zero review item lifecycle mutation. Pass goal_id, step_id, target ("codex" or "work"), and optional reason and requested_action.',
+    inputSchema: {
+      goal_id: z.string().min(1).max(200),
+      step_id: z.string().min(1).max(200),
+      target: z.enum(['codex', 'work']),
+      reason: z.string().max(2000).optional(),
+      requested_action: z.string().max(2000).optional(),
+      actor: z.string().min(1).max(200).optional(),
+    },
+  }, async ({ goal_id, step_id, target, reason, requested_action, actor } = {}) => {
+    const transport = options.goalTransport || options.reviewQueueTransport;
+    if (!transport?.requestSpecialistHandoff) return text(JSON.stringify({ ok: false, reason: 'transport_unavailable' }));
+    try {
+      const result = await transport.requestSpecialistHandoff({
+        goalId: goal_id,
+        stepId: step_id,
+        target,
+        reason,
+        requestedAction: requested_action,
+        actor,
+      });
+      return text(JSON.stringify(result, null, 2));
+    } catch (error) {
+      return text(JSON.stringify({ ok: false, reason: error?.message || 'request_specialist_handoff_failed' }));
+    }
+  });
+
+  server.registerTool('goal_get_specialist_handoff', {
+    title: 'Get specialist handoff package',
+    description: 'Read-only: derives a specialist-handoff-v1 continuation package from canonical Goal state. Zero state writes, zero dispatches. Pass goal_id and handoff_id.',
+    inputSchema: {
+      goal_id: z.string().min(1).max(200),
+      handoff_id: z.string().min(1).max(300),
+    },
+  }, async ({ goal_id, handoff_id } = {}) => {
+    const transport = options.goalTransport || options.reviewQueueTransport;
+    if (!transport?.getSpecialistHandoff) return text(JSON.stringify({ error: 'transport_unavailable' }));
+    try {
+      const result = await transport.getSpecialistHandoff({ goalId: goal_id, handoffId: handoff_id });
+      return text(JSON.stringify(result, null, 2));
+    } catch (error) {
+      return text(JSON.stringify({ error: error?.message || 'get_specialist_handoff_failed' }));
+    }
+  });
+
+  server.registerTool('goal_list_specialist_handoffs', {
+    title: 'List specialist handoff requests',
+    description: 'Read-only: lists all durable specialist handoff request records for a Goal. Pass goal_id.',
+    inputSchema: {
+      goal_id: z.string().min(1).max(200),
+    },
+  }, async ({ goal_id } = {}) => {
+    const transport = options.goalTransport || options.reviewQueueTransport;
+    if (!transport?.listSpecialistHandoffs) return text(JSON.stringify({ error: 'transport_unavailable' }));
+    try {
+      const result = await transport.listSpecialistHandoffs({ goalId: goal_id });
+      return text(JSON.stringify(result, null, 2));
+    } catch (error) {
+      return text(JSON.stringify({ error: error?.message || 'list_specialist_handoffs_failed' }));
+    }
+  });
 };

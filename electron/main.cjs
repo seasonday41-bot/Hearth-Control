@@ -911,6 +911,72 @@ const startServer = async ({ workspace, port }) => {
         catch (sendError) { console.error('[Electron] Goal context ack failed:', sendError); }
       }
     }
+    if (message?.type === 'goal_request_specialist_handoff_request') {
+      if (typeof message.transportId !== 'string' || !/^[0-9a-f-]{36}$/i.test(message.transportId)) return;
+      let result = null;
+      let ok = true;
+      let error = null;
+      try {
+        if (!goalRunner) { ok = false; error = 'goal_runner_unavailable'; }
+        else {
+          result = await goalRunner.request_specialist_handoff(message.goalId, message.stepId, {
+            target: message.target,
+            reason: message.reason,
+            requestedAction: message.requestedAction,
+            actor: message.actor,
+          });
+          ok = true;
+          sendEvent({ type: 'goals:updated', goal: result.goal });
+        }
+      } catch (err) {
+        ok = false;
+        error = err?.message || 'request_specialist_handoff_failed';
+      }
+      if (serverProcess === child) {
+        try { child.send({ type: 'goal_request_specialist_handoff_ack', transportId: message.transportId, ok, result, error }); }
+        catch (sendError) { console.error('[Electron] Request specialist handoff ack failed:', sendError); }
+      }
+    }
+    if (message?.type === 'goal_get_specialist_handoff_request') {
+      if (typeof message.transportId !== 'string' || !/^[0-9a-f-]{36}$/i.test(message.transportId)) return;
+      let handoffPackage = null;
+      let ok = true;
+      let error = null;
+      try {
+        if (!goalRunner) { ok = false; error = 'goal_runner_unavailable'; }
+        else {
+          handoffPackage = await goalRunner.build_specialist_handoff(message.goalId, message.handoffId);
+          ok = true;
+        }
+      } catch (err) {
+        ok = false;
+        error = err?.message || 'get_specialist_handoff_failed';
+      }
+      if (serverProcess === child) {
+        try { child.send({ type: 'goal_get_specialist_handoff_ack', transportId: message.transportId, ok, result: handoffPackage, error }); }
+        catch (sendError) { console.error('[Electron] Get specialist handoff ack failed:', sendError); }
+      }
+    }
+    if (message?.type === 'goal_list_specialist_handoffs_request') {
+      if (typeof message.transportId !== 'string' || !/^[0-9a-f-]{36}$/i.test(message.transportId)) return;
+      let handoffs = null;
+      let ok = true;
+      let error = null;
+      try {
+        if (!goalRunner) { ok = false; error = 'goal_runner_unavailable'; }
+        else {
+          handoffs = await goalRunner.list_specialist_handoffs(message.goalId);
+          ok = true;
+        }
+      } catch (err) {
+        ok = false;
+        error = err?.message || 'list_specialist_handoffs_failed';
+      }
+      if (serverProcess === child) {
+        try { child.send({ type: 'goal_list_specialist_handoffs_ack', transportId: message.transportId, ok, handoffs, error }); }
+        catch (sendError) { console.error('[Electron] List specialist handoffs ack failed:', sendError); }
+      }
+    }
   });
   serverProcess.once('exit', (code, signal) => {
     cancelXQueueChild(child);

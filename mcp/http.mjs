@@ -90,6 +90,12 @@ const reviewQueueTransportFor = (response) => {
     retry: ({ goalId, reviewItemId, xTask, note, actor } = {}) =>
       roundTrip('review_queue_retry_request', { goalId, reviewItemId, xTask: xTask || null, note: note || null, actor: actor || null }),
     getGoalContext: ({ goalId } = {}) => roundTrip('goal_get_context_request', { goalId }),
+    requestSpecialistHandoff: ({ goalId, stepId, target, reason, requestedAction, actor } = {}) =>
+      roundTrip('goal_request_specialist_handoff_request', { goalId, stepId, target, reason: reason || null, requestedAction: requestedAction || null, actor: actor || null }),
+    getSpecialistHandoff: ({ goalId, handoffId } = {}) =>
+      roundTrip('goal_get_specialist_handoff_request', { goalId, handoffId }),
+    listSpecialistHandoffs: ({ goalId } = {}) =>
+      roundTrip('goal_list_specialist_handoffs_request', { goalId }),
   };
 };
 

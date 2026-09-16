@@ -203,6 +203,9 @@ export const validateGoal = (goal) => {
   const reviewQueue = Array.isArray(goal.reviewQueue)
     ? goal.reviewQueue.map(validateReviewQueueItem).filter(Boolean)
     : [];
+  const specialistHandoffs = Array.isArray(goal.specialistHandoffs)
+    ? goal.specialistHandoffs.map(validateSpecialistHandoff).filter(Boolean)
+    : [];
 
   const now = new Date().toISOString();
 
@@ -218,11 +221,55 @@ export const validateGoal = (goal) => {
     checkpoints,
     xApproval,
     reviewQueue,
+    specialistHandoffs,
     createdAt: goal.createdAt || now,
     startedAt: goal.startedAt || null,
     updatedAt: goal.updatedAt || now,
     finishedAt: goal.finishedAt || null,
     error: goal.error ? redactSecrets(String(goal.error)) : null,
+  };
+};
+
+export const HANDOFF_TARGETS = Object.freeze(['codex', 'work']);
+export const HANDOFF_LIFECYCLE_STATES = Object.freeze(['requested']);
+
+/**
+ * Validates a durable specialist handoff record.
+ * @param {any} item
+ * @returns {object|null}
+ */
+export const validateSpecialistHandoff = (item) => {
+  if (!item || typeof item !== 'object') return null;
+  if (typeof item.id !== 'string' || !item.id.trim()) return null;
+  if (typeof item.goalId !== 'string' || !item.goalId.trim()) return null;
+  if (typeof item.stepId !== 'string' || !item.stepId.trim()) return null;
+  if (!HANDOFF_TARGETS.includes(item.target)) return null;
+  if (!item.source || typeof item.source !== 'object') return null;
+  if (typeof item.source.requestId !== 'string' || !item.source.requestId.trim()) return null;
+
+  const now = new Date().toISOString();
+  return {
+    version: 'specialist-handoff-request-v1',
+    id: item.id.trim().slice(0, 300),
+    goalId: item.goalId.trim().slice(0, 200),
+    stepId: item.stepId.trim().slice(0, 200),
+    target: item.target,
+    source: {
+      worker: 'x',
+      taskId: typeof item.source.taskId === 'string' ? item.source.taskId.slice(0, 200) : null,
+      requestId: item.source.requestId.slice(0, 200),
+      executionGeneration: Number.isInteger(item.source.executionGeneration) ? item.source.executionGeneration : null,
+      runId: typeof item.source.runId === 'string' ? item.source.runId.slice(0, 200) : null,
+      resultId: typeof item.source.resultId === 'string' ? item.source.resultId.slice(0, 200) : null,
+      terminalStatus: typeof item.source.terminalStatus === 'string' ? item.source.terminalStatus.slice(0, 100) : 'needs_review',
+      xTaskFingerprint: typeof item.source.xTaskFingerprint === 'string' ? item.source.xTaskFingerprint.slice(0, 200) : null,
+    },
+    reviewItemId: typeof item.reviewItemId === 'string' ? item.reviewItemId.slice(0, 200) : null,
+    reason: typeof item.reason === 'string' ? redactSecrets(item.reason).slice(0, 2000) : '',
+    requestedAction: typeof item.requestedAction === 'string' ? redactSecrets(item.requestedAction).slice(0, 2000) : '',
+    lifecycle: HANDOFF_LIFECYCLE_STATES.includes(item.lifecycle) ? item.lifecycle : 'requested',
+    createdAt: typeof item.createdAt === 'string' ? item.createdAt : now,
+    createdBy: typeof item.createdBy === 'string' ? redactSecrets(item.createdBy).slice(0, 200) : null,
   };
 };
 

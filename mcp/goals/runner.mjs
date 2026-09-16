@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import crypto from 'node:crypto';
 import { redactSecrets } from '../executors/antigravity.mjs';
 import { getJobManager } from '../runtime/job-manager.mjs';
@@ -8,6 +9,8 @@ import {
   createGoalCheckpoint,
   createReviewQueueItem,
   validateGoal,
+  validateSpecialistHandoff,
+  HANDOFF_TARGETS,
 } from './model.mjs';
 
 import {
@@ -1517,6 +1520,53 @@ export class GoalRunner {
         }
       : null;
 
+    // Specialist handoff derivation
+    const specialistHandoffs = goal.specialistHandoffs || [];
+    const currentHandoffs = currentStep
+      ? specialistHandoffs.filter((h) => h.stepId === currentStep.id)
+      : [];
+    const activeHandoff = currentStep
+      ? currentHandoffs.find((h) => {
+          if (h.lifecycle !== 'requested') return false;
+          const reqId = getXRequestId(goal, currentStep);
+          if (h.source.requestId !== reqId) return false;
+          if (h.source.executionGeneration !== (currentStep.executionGeneration ?? null)) return false;
+          if (h.source.xTaskFingerprint && currentStep.xTask) {
+            try {
+              let taskRoot = currentStep.xTask.workspace?.root || goal.workspace;
+              try {
+                taskRoot = fsSync.realpathSync(taskRoot);
+              } catch {}
+              const currentFingerprint = computeXTaskFingerprint(currentStep.xTask, taskRoot);
+              if (currentFingerprint !== h.source.xTaskFingerprint) return false;
+            } catch {
+              return false;
+            }
+          }
+          if (h.reviewItemId) {
+            const rev = (goal.reviewQueue || []).find((item) => item.id === h.reviewItemId);
+            if (!rev || !['open', 'acknowledged'].includes(rev.lifecycle)) return false;
+          }
+          return true;
+        })
+      : null;
+
+    const specialistHandoffDetails = activeHandoff
+      ? {
+          id: activeHandoff.id,
+          target: activeHandoff.target,
+          lifecycle: activeHandoff.lifecycle,
+          stale: false,
+        }
+      : currentHandoffs.length > 0
+        ? {
+            id: currentHandoffs[currentHandoffs.length - 1].id,
+            target: currentHandoffs[currentHandoffs.length - 1].target,
+            lifecycle: currentHandoffs[currentHandoffs.length - 1].lifecycle,
+            stale: true,
+          }
+        : null;
+
     // Execution evidence references
     let latestRunId = activeReviewItem?.runId || null;
     let latestResultId = activeReviewItem?.resultId || null;
@@ -1553,7 +1603,6 @@ export class GoalRunner {
           let taskRoot = currentStep.xTask.workspace?.root || goal.workspace;
           let approvalRoot = goal.xApproval.workspaceRoot;
           try {
-            const fsSync = await import('node:fs');
             taskRoot = fsSync.realpathSync(taskRoot);
             approvalRoot = fsSync.realpathSync(approvalRoot);
           } catch {}
@@ -1593,6 +1642,17 @@ export class GoalRunner {
         type: 'GOAL_COMPLETED',
         step_id: null,
         reason: 'Goal is completed.',
+      };
+    }
+
+    // 2b. Active non-stale Specialist Handoff request
+    if (!nextLegalAction && activeHandoff) {
+      nextLegalAction = {
+        type: 'SPECIALIST_HANDOFF_REQUESTED',
+        step_id: currentStep.id,
+        reason: `Specialist handoff (${activeHandoff.target}) requested for step '${currentStep.title}'; awaiting execution by future specialist adapter.`,
+        handoff_id: activeHandoff.id,
+        target: activeHandoff.target,
       };
     }
 
@@ -1793,6 +1853,7 @@ export class GoalRunner {
       authored_task: authoredTask,
       execution: executionDetails,
       review: reviewDetails,
+      specialist_handoff: specialistHandoffDetails,
       approval: approvalDetails,
       recent_checkpoints: recentCheckpoints,
       next_legal_action: nextLegalAction,
@@ -1804,5 +1865,249 @@ export class GoalRunner {
       return this.get_goal_context(goalIdOrParams.goalId);
     }
     return this.get_goal_context(goalIdOrParams);
+  }
+
+  /**
+   * Slice 5: Creates a durable, auditable specialist handoff request record for an X step.
+   * STRICT: Performs ZERO X dispatch, ZERO Codex/Work dispatch, ZERO review item lifecycle mutation.
+   *
+   * @param {string} goalId
+   * @param {string} stepId
+   * @param {{ target?: string, reason?: string, requestedAction?: string, actor?: string }} options
+   * @returns {Promise<{ handoff: object, goal: object }>}
+   */
+  async request_specialist_handoff(goalId, stepId, options = {}) {
+    if (!goalId || typeof goalId !== 'string') throw new Error('goalId is required');
+    if (!stepId || typeof stepId !== 'string') throw new Error('stepId is required');
+
+    const target = options.target || options.requested_specialist;
+    if (!target || !HANDOFF_TARGETS.includes(target)) {
+      throw new Error(`Invalid target '${target}': must be one of ${HANDOFF_TARGETS.join(', ')}`);
+    }
+
+    const reason = options.reason || '';
+    const requestedAction = options.requestedAction || options.requested_action || '';
+    const actor = options.actor || 'MainBrain';
+
+    const goal = this.storage.getGoal(goalId);
+    if (!goal) throw new Error(`Goal '${goalId}' not found`);
+
+    const step = goal.steps.find((s) => s.id === stepId);
+    if (!step) throw new Error(`Step '${stepId}' not found in Goal '${goalId}'`);
+
+    if (step.status === 'running' || goal.status === 'running') {
+      throw new Error(`Cannot request specialist handoff while step '${step.title}' is running`);
+    }
+
+    const sourceRequestId = getXRequestId(goal, step);
+    if (this.xExecutor?.getXTaskStatus) {
+      try {
+        const reqStatus = await this.xExecutor.getXTaskStatus(sourceRequestId);
+        if (reqStatus?.found && ['admitted', 'queued', 'running'].includes(reqStatus.status)) {
+          throw new Error(`Cannot request specialist handoff while X execution is active (${reqStatus.status})`);
+        }
+      } catch (err) {
+        if (err.message?.includes('active')) throw err;
+      }
+    }
+
+    const reviewQueue = goal.reviewQueue || [];
+    const activeReviewItem = reviewQueue.find(
+      (item) => item.stepId === step.id && ['open', 'acknowledged'].includes(item.lifecycle)
+    );
+
+    if (!activeReviewItem) {
+      throw new Error(`Specialist handoff is only permitted for steps with an active NEEDS_REVIEW or FAILED review item`);
+    }
+
+    const handoffId = `handoff:${goal.id}:${step.id}:${target}:${sourceRequestId}`;
+
+    const existingHandoffs = goal.specialistHandoffs || [];
+    const existing = existingHandoffs.find((h) => h.id === handoffId);
+    if (existing) {
+      if (existing.reason === reason && existing.requestedAction === requestedAction) {
+        return { handoff: existing, goal };
+      }
+      throw new Error(`Conflicting specialist handoff request: handoff '${handoffId}' already exists with different parameters`);
+    }
+
+    let xTaskFingerprint = null;
+    if (step.xTask) {
+      let taskRoot = step.xTask.workspace?.root || goal.workspace;
+      try {
+        taskRoot = fsSync.realpathSync(taskRoot);
+      } catch {}
+      xTaskFingerprint = computeXTaskFingerprint(step.xTask, taskRoot);
+    }
+
+    const record = validateSpecialistHandoff({
+      version: 'specialist-handoff-request-v1',
+      id: handoffId,
+      goalId: goal.id,
+      stepId: step.id,
+      target,
+      source: {
+        worker: 'x',
+        taskId: step.xTask?.task_id || null,
+        requestId: sourceRequestId,
+        executionGeneration: step.executionGeneration ?? null,
+        runId: activeReviewItem.runId || step.evidence?.runId || null,
+        resultId: activeReviewItem.resultId || step.evidence?.resultId || null,
+        terminalStatus: activeReviewItem.status,
+        xTaskFingerprint,
+      },
+      reviewItemId: activeReviewItem.id,
+      reason,
+      requestedAction,
+      lifecycle: 'requested',
+      createdAt: new Date().toISOString(),
+      createdBy: actor,
+    });
+
+    goal.specialistHandoffs = [...existingHandoffs, record];
+    goal.updatedAt = new Date().toISOString();
+    this.storage.saveGoal(goal);
+
+    return { handoff: record, goal };
+  }
+
+  async requestSpecialistHandoff(goalIdOrParams, stepId, options) {
+    if (goalIdOrParams && typeof goalIdOrParams === 'object') {
+      return this.request_specialist_handoff(goalIdOrParams.goalId, goalIdOrParams.stepId, goalIdOrParams);
+    }
+    return this.request_specialist_handoff(goalIdOrParams, stepId, options);
+  }
+
+  /**
+   * Slice 5: Read-only builder for specialist-handoff-v1 continuation package.
+   * STRICT: ZERO state writes, ZERO execution dispatches, ZERO review lifecycle mutations.
+   *
+   * @param {string} goalId
+   * @param {string} handoffId
+   * @returns {Promise<object>} specialist-handoff-v1 package
+   */
+  async build_specialist_handoff(goalId, handoffId) {
+    if (!goalId || typeof goalId !== 'string') throw new Error('goalId is required');
+    if (!handoffId || typeof handoffId !== 'string') throw new Error('handoffId is required');
+
+    const goal = this.storage.getGoal(goalId);
+    if (!goal) throw new Error(`Goal '${goalId}' not found`);
+
+    const handoff = (goal.specialistHandoffs || []).find((h) => h.id === handoffId);
+    if (!handoff) throw new Error(`Specialist handoff '${handoffId}' not found in Goal '${goalId}'`);
+
+    const step = goal.steps.find((s) => s.id === handoff.stepId) || null;
+
+    let stale = false;
+    if (!step) {
+      stale = true;
+    } else {
+      const currentRequestId = getXRequestId(goal, step);
+      if (handoff.source.requestId !== currentRequestId) stale = true;
+      if (handoff.source.executionGeneration !== (step.executionGeneration ?? null)) stale = true;
+
+      if (step.route === 'x' && step.xTask && handoff.source.xTaskFingerprint) {
+        try {
+          let taskRoot = step.xTask.workspace?.root || goal.workspace;
+          try {
+            taskRoot = fsSync.realpathSync(taskRoot);
+          } catch {}
+          const currentFingerprint = computeXTaskFingerprint(step.xTask, taskRoot);
+          if (currentFingerprint !== handoff.source.xTaskFingerprint) stale = true;
+        } catch {
+          stale = true;
+        }
+      }
+
+      if (handoff.reviewItemId) {
+        const reviewItem = (goal.reviewQueue || []).find((item) => item.id === handoff.reviewItemId);
+        if (!reviewItem || !['open', 'acknowledged'].includes(reviewItem.lifecycle)) {
+          stale = true;
+        }
+      }
+    }
+
+    const context = await this.get_goal_context(goalId);
+    const now = new Date().toISOString();
+
+    return {
+      version: 'specialist-handoff-v1',
+      generated_at: now,
+      stale,
+      handoff: {
+        id: handoff.id,
+        target: handoff.target,
+        lifecycle: handoff.lifecycle,
+        reason: handoff.reason,
+        requested_action: handoff.requestedAction,
+        created_at: handoff.createdAt,
+        created_by: handoff.createdBy,
+      },
+      goal: {
+        id: goal.id,
+        title: goal.title,
+        objective: goal.objective,
+        status: goal.status,
+        workspace: goal.workspace,
+      },
+      source: {
+        worker: handoff.source.worker,
+        step_id: handoff.stepId,
+        task_id: handoff.source.taskId,
+        request_id: handoff.source.requestId,
+        execution_generation: handoff.source.executionGeneration,
+        run_id: handoff.source.runId,
+        result_id: handoff.source.resultId,
+        terminal_status: handoff.source.terminalStatus,
+      },
+      authored_x_task: step?.xTask || null,
+      context,
+      evidence: {
+        review_item_id: handoff.reviewItemId,
+        review_reason: handoff.reason,
+        result_id: handoff.source.resultId,
+        run_id: handoff.source.runId,
+      },
+      boundaries: {
+        workspace: step?.xTask?.workspace?.root || goal.workspace,
+        allowed_paths: step?.xTask?.scope?.allowed_paths || [],
+        forbidden_paths: step?.xTask?.scope?.forbidden_paths || [],
+        constraints: step?.xTask?.constraints || goal.constraints || [],
+        acceptance_criteria: step?.xTask?.acceptance_criteria || [],
+        commit_policy: step?.xTask?.commit_policy || { mode: 'never' },
+      },
+    };
+  }
+
+  async buildSpecialistHandoff(goalIdOrParams, handoffId) {
+    if (goalIdOrParams && typeof goalIdOrParams === 'object') {
+      return this.build_specialist_handoff(goalIdOrParams.goalId, goalIdOrParams.handoffId);
+    }
+    return this.build_specialist_handoff(goalIdOrParams, handoffId);
+  }
+
+  async get_specialist_handoff(goalId, handoffId) {
+    return this.build_specialist_handoff(goalId, handoffId);
+  }
+
+  async getSpecialistHandoff(goalIdOrParams, handoffId) {
+    if (goalIdOrParams && typeof goalIdOrParams === 'object') {
+      return this.get_specialist_handoff(goalIdOrParams.goalId, goalIdOrParams.handoffId);
+    }
+    return this.get_specialist_handoff(goalIdOrParams, handoffId);
+  }
+
+  async list_specialist_handoffs(goalId) {
+    if (!goalId || typeof goalId !== 'string') throw new Error('goalId is required');
+    const goal = this.storage.getGoal(goalId);
+    if (!goal) throw new Error(`Goal '${goalId}' not found`);
+    return goal.specialistHandoffs || [];
+  }
+
+  async listSpecialistHandoffs(goalIdOrParams) {
+    if (goalIdOrParams && typeof goalIdOrParams === 'object') {
+      return this.list_specialist_handoffs(goalIdOrParams.goalId);
+    }
+    return this.list_specialist_handoffs(goalIdOrParams);
   }
 }
