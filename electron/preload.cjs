@@ -67,6 +67,8 @@ contextBridge.exposeInMainWorld('controlApp', {
   goalsPause: (goalId) => ipcRenderer.invoke('goals:pause', goalId),
   goalsResume: (goalId) => ipcRenderer.invoke('goals:resume', goalId),
   goalsSignoffStep: (options) => ipcRenderer.invoke('goals:signoff-step', options),
+  goalsReviewAcknowledge: (options) => ipcRenderer.invoke('goals:review-acknowledge', options),
+  goalsReviewResolve: (options) => ipcRenderer.invoke('goals:review-resolve', options),
   goalsIsActive: () => ipcRenderer.invoke('goals:is-active'),
   onServerEvent: (callback) => {
     const listener = (_event, payload) => callback(payload);

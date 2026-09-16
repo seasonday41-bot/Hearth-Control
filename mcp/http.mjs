@@ -83,6 +83,10 @@ const reviewQueueTransportFor = (response) => {
   const roundTrip = createRoundTripTransport(response);
   return {
     list: ({ goalId } = {}) => roundTrip('review_queue_list_request', { goalId: goalId || null }),
+    acknowledge: ({ goalId, reviewItemId, actor, note } = {}) =>
+      roundTrip('review_queue_acknowledge_request', { goalId, reviewItemId, actor: actor || null, note: note || null }),
+    resolve: ({ goalId, reviewItemId, action, note } = {}) =>
+      roundTrip('review_queue_resolve_request', { goalId, reviewItemId, action: action || 'accept', note: note || null }),
   };
 };
 
@@ -145,6 +149,9 @@ process.on('message', (message) => {
   }
   if (message?.type === 'review_queue_list_ack') {
     queueReplies.get(message.transportId)?.finish(null, message.ok ? { items: message.items } : { items: [], reason: message.error });
+  }
+  if (message?.type === 'review_queue_acknowledge_ack' || message?.type === 'review_queue_resolve_ack') {
+    queueReplies.get(message.transportId)?.finish(null, message.ok ? message.result : { ok: false, reason: message.error });
   }
 });
 process.on('disconnect', () => {

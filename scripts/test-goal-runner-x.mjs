@@ -279,8 +279,10 @@ await test('8/9. requestId is stable per goal+step, and duplicate resume does no
   assert.equal(xExecutor.dispatchLog.length, 1);
   const requestId1 = xExecutor.dispatchLog[0].requestId;
 
-  const second = await runner.resume_goal(goal.id);
-  assert.equal(second.status, 'waiting');
+  await assert.rejects(
+    () => runner.resume_goal(goal.id),
+    /blocked by unresolved review item/
+  );
   assert.equal(xExecutor.dispatchLog.length, 1, 'a duplicate resume must not create a second X execution');
   assert.equal(requestId1, expectedRequestId);
   assert.equal(requestId1, `goal:${goal.id}:step:s1`);
@@ -444,10 +446,10 @@ await test('15. pause/resume unchanged with a route:x step present', async () =>
   });
 
   const requestId = `goal:${goal.id}:step:s1`;
-  // needs_review leaves the goal in 'waiting', one of pause_goal's two
+  // interrupted leaves the goal in 'waiting', one of pause_goal's two
   // allowed source statuses (the other is 'running') -- exercising the
   // existing pause/resume gate exactly as any other route already does.
-  xExecutor.statuses.set(requestId, { found: true, queue_status: 'terminal', terminal_status: 'needs_review', error: 'review needed' });
+  xExecutor.statuses.set(requestId, { found: true, queue_status: 'terminal', terminal_status: 'interrupted' });
   const waiting = await runner.run_goal(goal.id);
   assert.equal(waiting.status, 'waiting');
   assert.equal(xExecutor.dispatchLog.length, 1);

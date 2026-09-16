@@ -199,6 +199,20 @@ export class GoalRunner {
         continue;
       }
 
+      if (Array.isArray(goal.reviewQueue)) {
+        const unresolvedItem = goal.reviewQueue.find(
+          (it) => it.stepId === step.id && ['open', 'acknowledged'].includes(it.lifecycle)
+        );
+        if (unresolvedItem) {
+          goal.status = 'waiting';
+          this.activeGoalId = null;
+          this.storage.saveGoal(goal);
+          throw new Error(
+            `Cannot run goal '${goalId}' on step '${step.title}': blocked by unresolved review item '${unresolvedItem.id}' (${unresolvedItem.status}/${unresolvedItem.lifecycle}). Human decision is required.`
+          );
+        }
+      }
+
       step.status = 'running';
       step.startedAt = new Date().toISOString();
       goal.updatedAt = new Date().toISOString();
@@ -666,7 +680,7 @@ export class GoalRunner {
     const goal = this.storage.getGoal(goalId);
     if (!goal) throw new Error(`Goal '${goalId}' not found`);
 
-    if (!['paused', 'waiting'].includes(goal.status)) {
+    if (!['paused', 'waiting', 'ready'].includes(goal.status)) {
       throw new Error(`Cannot resume goal in status '${goal.status}'`);
     }
 
@@ -677,10 +691,24 @@ export class GoalRunner {
       );
     }
 
-    this.pausedGoals.delete(goalId);
-
     // Read latest checkpoint if available
     const latestCheckpoint = goal.checkpoints[goal.checkpoints.length - 1];
+    const resumeStepId = latestCheckpoint?.nextStep || goal.currentStepId || goal.steps[0]?.id;
+    const resumeStep = goal.steps.find((s) => s.id === resumeStepId);
+
+    if (resumeStep && Array.isArray(goal.reviewQueue)) {
+      const unresolvedItem = goal.reviewQueue.find(
+        (it) => it.stepId === resumeStep.id && ['open', 'acknowledged'].includes(it.lifecycle)
+      );
+      if (unresolvedItem) {
+        throw new Error(
+          `Cannot resume goal '${goalId}' on step '${resumeStep.title}': blocked by unresolved review item '${unresolvedItem.id}' (${unresolvedItem.status}/${unresolvedItem.lifecycle}). Human decision is required.`
+        );
+      }
+    }
+
+    this.pausedGoals.delete(goalId);
+
     if (latestCheckpoint?.nextStep) {
       goal.currentStepId = latestCheckpoint.nextStep;
     }
@@ -965,6 +993,133 @@ export class GoalRunner {
   }
 
   /**
+   * Operation 11: acknowledge_review
+   * Acknowledges a Review Queue item without mutating step status, goal status,
+   * without dispatching X, and without unblocking execution.
+   */
+  async acknowledge_review(goalId, reviewItemId, options = {}) {
+    if (!goalId || typeof goalId !== 'string') throw new Error('goalId is required');
+    if (!reviewItemId || typeof reviewItemId !== 'string') throw new Error('reviewItemId is required');
+
+    const goal = this.storage.getGoal(goalId);
+    if (!goal) throw new Error(`Goal '${goalId}' not found`);
+
+    const item = (goal.reviewQueue || []).find((it) => it.id === reviewItemId || it.idempotencyKey === reviewItemId);
+    if (!item) throw new Error(`Review queue item '${reviewItemId}' not found in goal '${goalId}'`);
+
+    if (['acknowledged', 'resolved', 'superseded'].includes(item.lifecycle)) {
+      return { goal, item, alreadyAcknowledged: true };
+    }
+
+    const now = new Date().toISOString();
+    item.lifecycle = 'acknowledged';
+    item.acknowledgedAt = now;
+    if (options.actor) item.acknowledgedBy = redactSecrets(options.actor).slice(0, 200);
+    if (options.note) item.note = redactSecrets(options.note).slice(0, 2000);
+    item.updatedAt = now;
+
+    goal.updatedAt = now;
+    this.storage.saveGoal(goal);
+
+    if (this.onReviewItemPersisted) {
+      try { this.onReviewItemPersisted(item, goal); } catch {}
+    }
+
+    return { goal, item };
+  }
+
+  /**
+   * Operation 12: resolve_review
+   * Resolves a Review Queue item for a step whose terminal X outcome was NEEDS_REVIEW.
+   * In Slice 1, only action: 'accept' on status: 'needs_review' is supported.
+   * Accepting a NEEDS_REVIEW item marks the step completed, creates a checkpoint,
+   * and makes subsequent authored steps eligible.
+   */
+  async resolve_review(goalId, reviewItemId, options = {}) {
+    if (!goalId || typeof goalId !== 'string') throw new Error('goalId is required');
+    if (!reviewItemId || typeof reviewItemId !== 'string') throw new Error('reviewItemId is required');
+
+    const action = options.action || 'accept';
+    if (action !== 'accept') {
+      throw new Error(`Cannot resolve review with action '${action}'. Slice 1 only supports action: 'accept' for needs_review items.`);
+    }
+
+    const goal = this.storage.getGoal(goalId);
+    if (!goal) throw new Error(`Goal '${goalId}' not found`);
+
+    const item = (goal.reviewQueue || []).find((it) => it.id === reviewItemId || it.idempotencyKey === reviewItemId);
+    if (!item) throw new Error(`Review queue item '${reviewItemId}' not found in goal '${goalId}'`);
+
+    // Double resolve idempotency
+    if (item.lifecycle === 'resolved') {
+      if (item.resolution === 'accepted') {
+        return { goal, item, alreadyResolved: true };
+      }
+      throw new Error(`Review item '${reviewItemId}' is already resolved with conflicting resolution '${item.resolution}'`);
+    }
+
+    if (item.status !== 'needs_review') {
+      throw new Error(`Cannot accept review item with status '${item.status}'. Slice 1 only supports resolving 'needs_review' items.`);
+    }
+
+    if (!['open', 'acknowledged'].includes(item.lifecycle)) {
+      throw new Error(`Cannot resolve review item in lifecycle '${item.lifecycle}'. Must be 'open' or 'acknowledged'.`);
+    }
+
+    const stepIndex = goal.steps.findIndex((s) => s.id === item.stepId);
+    if (stepIndex === -1) {
+      throw new Error(`Step '${item.stepId}' associated with review item '${item.id}' not found in goal '${goal.id}'`);
+    }
+    const step = goal.steps[stepIndex];
+
+    const now = new Date().toISOString();
+    item.lifecycle = 'resolved';
+    item.resolution = 'accepted';
+    item.resolvedAt = now;
+    if (options.note) item.note = redactSecrets(options.note).slice(0, 2000);
+    item.updatedAt = now;
+
+    step.status = 'completed';
+    step.finishedAt = now;
+
+    const completedCount = goal.steps.filter((s) => s.status === 'completed').length;
+    const nextStepObj = goal.steps.slice(stepIndex + 1).find((s) => s.status === 'pending');
+
+    this.checkpoint_goal(goal.id, step.id, {
+      summary: `Review resolved: step '${step.title}' accepted by supervisor${options.note ? ': ' + redactSecrets(options.note) : ''}`,
+      completedSteps: completedCount,
+      evidence: step.evidence,
+      nextStep: nextStepObj ? nextStepObj.id : null,
+      route: step.route,
+    }, goal);
+
+    if (nextStepObj) {
+      goal.currentStepId = nextStepObj.id;
+      goal.status = 'ready';
+    } else {
+      const requiredIncomplete = goal.steps.filter((s) => s.required && s.status !== 'completed');
+      if (requiredIncomplete.length === 0) {
+        goal.status = 'completed';
+        goal.finishedAt = now;
+        goal.currentStepId = null;
+      }
+    }
+
+    goal.updatedAt = now;
+    this.storage.saveGoal(goal);
+
+    if (this.onReviewItemPersisted) {
+      try { this.onReviewItemPersisted(item, goal); } catch {}
+    }
+
+    if (options.autoRun && nextStepObj) {
+      return this.run_goal(goal.id, options);
+    }
+
+    return { goal, item };
+  }
+
+  /**
    * Alias for resume_goal
    */
   async resumeGoal(goalId, options) {
@@ -979,6 +1134,26 @@ export class GoalRunner {
       return this.signoff_step(goalIdOrParams.goalId, goalIdOrParams.stepId, goalIdOrParams);
     }
     return this.signoff_step(goalIdOrParams, stepId, options);
+  }
+
+  /**
+   * Alias for acknowledge_review supporting both parameter styles
+   */
+  async acknowledgeReview(goalIdOrParams, reviewItemId, options) {
+    if (goalIdOrParams && typeof goalIdOrParams === 'object') {
+      return this.acknowledge_review(goalIdOrParams.goalId, goalIdOrParams.reviewItemId, goalIdOrParams);
+    }
+    return this.acknowledge_review(goalIdOrParams, reviewItemId, options);
+  }
+
+  /**
+   * Alias for resolve_review supporting both parameter styles
+   */
+  async resolveReview(goalIdOrParams, reviewItemId, options) {
+    if (goalIdOrParams && typeof goalIdOrParams === 'object') {
+      return this.resolve_review(goalIdOrParams.goalId, goalIdOrParams.reviewItemId, goalIdOrParams);
+    }
+    return this.resolve_review(goalIdOrParams, reviewItemId, options);
   }
 }
 

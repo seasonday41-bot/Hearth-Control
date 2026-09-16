@@ -189,6 +189,8 @@ interface Window { controlApp: {
   goalsPause: (goalId: string) => Promise<Goal>;
   goalsResume: (goalId: string) => Promise<Goal>;
   goalsSignoffStep: (options: { goalId: string; stepId: string; action?: 'complete' | 'fail'; note?: string; autoRun?: boolean }) => Promise<Goal>;
+  goalsReviewAcknowledge: (options: { goalId: string; reviewItemId: string; actor?: string; note?: string }) => Promise<{ goal: Goal; item: any; alreadyAcknowledged?: boolean }>;
+  goalsReviewResolve: (options: { goalId: string; reviewItemId: string; action?: 'accept'; note?: string }) => Promise<{ goal: Goal; item: any; alreadyResolved?: boolean }>;
   goalsIsActive: () => Promise<boolean>;
   onServerEvent: (callback: (event: ServerEvent) => void) => () => void;
 }; }

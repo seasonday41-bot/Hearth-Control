@@ -825,6 +825,54 @@ const startServer = async ({ workspace, port }) => {
         catch (sendError) { console.error('[Electron] Review Queue list ack failed:', sendError); }
       }
     }
+    if (message?.type === 'review_queue_acknowledge_request') {
+      if (typeof message.transportId !== 'string' || !/^[0-9a-f-]{36}$/i.test(message.transportId)) return;
+      let result = null;
+      let ok = true;
+      let error = null;
+      try {
+        if (!goalRunner) { ok = false; error = 'goal_runner_unavailable'; }
+        else {
+          result = await goalRunner.acknowledge_review(message.goalId, message.reviewItemId, {
+            actor: message.actor,
+            note: message.note,
+          });
+          ok = true;
+          sendEvent({ type: 'goals:updated', goal: result.goal });
+        }
+      } catch (err) {
+        ok = false;
+        error = err?.message || 'review_queue_acknowledge_failed';
+      }
+      if (serverProcess === child) {
+        try { child.send({ type: 'review_queue_acknowledge_ack', transportId: message.transportId, ok, result, error }); }
+        catch (sendError) { console.error('[Electron] Review Queue acknowledge ack failed:', sendError); }
+      }
+    }
+    if (message?.type === 'review_queue_resolve_request') {
+      if (typeof message.transportId !== 'string' || !/^[0-9a-f-]{36}$/i.test(message.transportId)) return;
+      let result = null;
+      let ok = true;
+      let error = null;
+      try {
+        if (!goalRunner) { ok = false; error = 'goal_runner_unavailable'; }
+        else {
+          result = await goalRunner.resolve_review(message.goalId, message.reviewItemId, {
+            action: message.action || 'accept',
+            note: message.note,
+          });
+          ok = true;
+          sendEvent({ type: 'goals:updated', goal: result.goal });
+        }
+      } catch (err) {
+        ok = false;
+        error = err?.message || 'review_queue_resolve_failed';
+      }
+      if (serverProcess === child) {
+        try { child.send({ type: 'review_queue_resolve_ack', transportId: message.transportId, ok, result, error }); }
+        catch (sendError) { console.error('[Electron] Review Queue resolve ack failed:', sendError); }
+      }
+    }
   });
   serverProcess.once('exit', (code, signal) => {
     cancelXQueueChild(child);
@@ -1391,6 +1439,18 @@ app.whenReady().then(async () => {
     });
     sendEvent({ type: 'goals:updated', goal });
     return goal;
+  });
+  ipcMain.handle('goals:review-acknowledge', async (_event, { goalId, reviewItemId, actor, note }) => {
+    if (!goalRunner) throw new Error('Goal runner not initialized');
+    const result = await goalRunner.acknowledge_review(goalId, reviewItemId, { actor, note });
+    sendEvent({ type: 'goals:updated', goal: result.goal });
+    return result;
+  });
+  ipcMain.handle('goals:review-resolve', async (_event, { goalId, reviewItemId, action, note }) => {
+    if (!goalRunner) throw new Error('Goal runner not initialized');
+    const result = await goalRunner.resolve_review(goalId, reviewItemId, { action, note });
+    sendEvent({ type: 'goals:updated', goal: result.goal });
+    return result;
   });
   ipcMain.handle('goals:is-active', async () => {
     return goalRunner ? goalRunner.is_goal_active() : false;

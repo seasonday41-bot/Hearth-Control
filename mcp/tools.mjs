@@ -32,6 +32,8 @@ export const toolNames = [
   'x_enqueue',
   'x_queue_status',
   'review_queue_list',
+  'review_queue_acknowledge',
+  'review_queue_resolve',
 ];
 
 const text = (value) => ({ content: [{ type: 'text', text: String(value) }] });
@@ -515,5 +517,43 @@ export const registerWorkspaceTools = (server, options) => {
     if (!options.reviewQueueTransport) return text(JSON.stringify({ items: [], reason: 'transport_unavailable' }));
     try { return text(JSON.stringify(await options.reviewQueueTransport.list({ goalId: goal_id }), null, 2)); }
     catch (error) { return text(JSON.stringify({ items: [], reason: error?.code || 'transport_unavailable' })); }
+  });
+
+  server.registerTool('review_queue_acknowledge', {
+    title: 'Acknowledge durable Goal Review Queue item',
+    description: 'Acknowledges a durable Review Queue item (lifecycle: open -> acknowledged) without muting or unblocking execution. Zero X dispatch, zero Goal continuation. Pass goal_id and review_item_id, plus optional actor and note.',
+    inputSchema: {
+      goal_id: z.string().min(1).max(200),
+      review_item_id: z.string().min(1).max(300),
+      actor: z.string().min(1).max(200).optional(),
+      note: z.string().min(1).max(2000).optional(),
+    },
+  }, async ({ goal_id, review_item_id, actor, note } = {}) => {
+    if (!options.reviewQueueTransport?.acknowledge) return text(JSON.stringify({ ok: false, reason: 'transport_unavailable' }));
+    try {
+      const result = await options.reviewQueueTransport.acknowledge({ goalId: goal_id, reviewItemId: review_item_id, actor, note });
+      return text(JSON.stringify(result, null, 2));
+    } catch (error) {
+      return text(JSON.stringify({ ok: false, reason: error?.message || 'acknowledge_failed' }));
+    }
+  });
+
+  server.registerTool('review_queue_resolve', {
+    title: 'Resolve durable Goal Review Queue item (Accept NEEDS_REVIEW)',
+    description: 'Resolves a durable Review Queue item with status needs_review by accepting the result (lifecycle: open/acknowledged -> resolved, resolution: accepted). Marks the blocked step completed, records a checkpoint, and makes subsequent authored steps eligible. Zero X dispatch directly. Rejects status=failed. Pass goal_id and review_item_id, plus optional note.',
+    inputSchema: {
+      goal_id: z.string().min(1).max(200),
+      review_item_id: z.string().min(1).max(300),
+      action: z.enum(['accept']).default('accept'),
+      note: z.string().min(1).max(2000).optional(),
+    },
+  }, async ({ goal_id, review_item_id, action = 'accept', note } = {}) => {
+    if (!options.reviewQueueTransport?.resolve) return text(JSON.stringify({ ok: false, reason: 'transport_unavailable' }));
+    try {
+      const result = await options.reviewQueueTransport.resolve({ goalId: goal_id, reviewItemId: review_item_id, action, note });
+      return text(JSON.stringify(result, null, 2));
+    } catch (error) {
+      return text(JSON.stringify({ ok: false, reason: error?.message || 'resolve_failed' }));
+    }
   });
 };

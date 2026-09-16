@@ -274,14 +274,16 @@ await test('7/8. restart/replay does not duplicate the Review Queue item or X ex
   });
   const restartedRunner = new GoalRunner({ storage: restartedStorage, xExecutor: restartedXExecutor });
 
-  // A duplicate resume (the same waiting step, same underlying run) must
-  // resolve idempotently: same single review item, same single X dispatch
-  // record (via ingestXTask's own requestId idempotency, mocked here by
-  // dispatchLog only growing on a genuinely NEW requestId).
-  const replayed = await restartedRunner.resume_goal(goal.id);
-  assert.equal(replayed.reviewQueue.length, 1, 'a replayed terminal event must not create a second review item');
-  assert.equal(replayed.reviewQueue[0].id, firstItemId, 'the SAME review item must be reused, not a new one');
-  assert.equal(restartedXExecutor.dispatchLog.length, 1, 'a replayed resume must not execute X a second time');
+  // A duplicate resume (the same waiting step with an unresolved review item)
+  // must fail closed per the Slice 1 resume guard, without duplicating X execution:
+  await assert.rejects(
+    () => restartedRunner.resume_goal(goal.id),
+    /blocked by unresolved review item/
+  );
+  const reloaded = restartedStorage.getGoal(goal.id);
+  assert.equal(reloaded.reviewQueue.length, 1, 'an unresolved review item must not be duplicated');
+  assert.equal(reloaded.reviewQueue[0].id, firstItemId, 'the SAME review item must be preserved');
+  assert.equal(restartedXExecutor.dispatchLog.length, 0, 'a replayed resume must not execute X');
 });
 
 // ── 11. Structured x-result-v1 remains preserved alongside a review item ───

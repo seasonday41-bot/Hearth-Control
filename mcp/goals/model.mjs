@@ -265,6 +265,8 @@ export const validateGoalCheckpoint = (cp) => {
 };
 
 export const REVIEW_ITEM_STATUSES = Object.freeze(['needs_review', 'failed']);
+export const REVIEW_ITEM_LIFECYCLES = Object.freeze(['open', 'acknowledged', 'resolved', 'superseded']);
+export const REVIEW_ITEM_RESOLUTIONS = Object.freeze(['accepted']);
 
 /**
  * Creates a sanitized Review Queue item: a durable record that a step's
@@ -286,6 +288,12 @@ export const createReviewQueueItem = ({
   runId = null,
   resultId = null,
   status,
+  lifecycle = 'open',
+  acknowledgedAt = null,
+  acknowledgedBy = null,
+  resolvedAt = null,
+  resolution = null,
+  note = null,
   reason,
   evidence = null,
 }) => {
@@ -295,6 +303,7 @@ export const createReviewQueueItem = ({
   if (!REVIEW_ITEM_STATUSES.includes(status)) {
     throw new Error(`Review queue item status must be one of ${REVIEW_ITEM_STATUSES.join(', ')}`);
   }
+  const cleanLifecycle = REVIEW_ITEM_LIFECYCLES.includes(lifecycle) ? lifecycle : 'open';
 
   const now = new Date().toISOString();
   return {
@@ -305,6 +314,12 @@ export const createReviewQueueItem = ({
     runId: runId ? String(runId).slice(0, 200) : null,
     resultId: resultId ? String(resultId).slice(0, 200) : null,
     status,
+    lifecycle: cleanLifecycle,
+    acknowledgedAt: typeof acknowledgedAt === 'string' ? acknowledgedAt : null,
+    acknowledgedBy: typeof acknowledgedBy === 'string' ? redactSecrets(acknowledgedBy).slice(0, 200) : null,
+    resolvedAt: typeof resolvedAt === 'string' ? resolvedAt : null,
+    resolution: typeof resolution === 'string' ? resolution : null,
+    note: typeof note === 'string' ? redactSecrets(note).slice(0, 2000) : null,
     reason: typeof reason === 'string' ? redactSecrets(reason).slice(0, 2000) : '',
     evidence: sanitizeEvidence(evidence),
     createdAt: now,
@@ -317,6 +332,8 @@ export const validateReviewQueueItem = (item) => {
   if (!item.idempotencyKey || typeof item.idempotencyKey !== 'string') return null;
   if (!REVIEW_ITEM_STATUSES.includes(item.status)) return null;
 
+  const lifecycle = REVIEW_ITEM_LIFECYCLES.includes(item.lifecycle) ? item.lifecycle : 'open';
+
   return {
     id: typeof item.id === 'string' && item.id.trim() ? item.id.trim() : crypto.randomUUID(),
     idempotencyKey: String(item.idempotencyKey).slice(0, 300),
@@ -325,6 +342,12 @@ export const validateReviewQueueItem = (item) => {
     runId: item.runId ? String(item.runId).slice(0, 200) : null,
     resultId: item.resultId ? String(item.resultId).slice(0, 200) : null,
     status: item.status,
+    lifecycle,
+    acknowledgedAt: typeof item.acknowledgedAt === 'string' ? item.acknowledgedAt : null,
+    acknowledgedBy: typeof item.acknowledgedBy === 'string' ? redactSecrets(item.acknowledgedBy).slice(0, 200) : null,
+    resolvedAt: typeof item.resolvedAt === 'string' ? item.resolvedAt : null,
+    resolution: typeof item.resolution === 'string' ? item.resolution : null,
+    note: typeof item.note === 'string' ? redactSecrets(item.note).slice(0, 2000) : null,
     reason: typeof item.reason === 'string' ? redactSecrets(item.reason).slice(0, 2000) : '',
     evidence: sanitizeEvidence(item.evidence),
     createdAt: item.createdAt || new Date().toISOString(),
