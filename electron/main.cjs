@@ -60,6 +60,11 @@ let bridgePairingSecret = null;
 // see publicTasksSupabaseUrl/publicTasksSupabaseAnonKey in `defaults`.
 let publicTasksClientInstance = null;
 let publicTasksSession = null;
+// Review Queue remote projection (visibility-only): shares Project X's SAME
+// session (publicTasksSession) since it's the same Supabase project/owner,
+// just a different, dedicated table (public.review_items, never
+// public.tasks -- see mcp/bridge/review-queue-sync.mjs's own docstring).
+let reviewItemsClientInstance = null;
 let bridgeState = {
   enabled: false,
   deviceId: '',
@@ -706,6 +711,9 @@ const applyPublicTasksSession = (data) => {
   };
   persistPublicTasksSession(session);
   publicTasksClientInstance?.setSession({ accessToken: session.accessToken, ownerId: session.ownerId });
+  // Same Supabase project/owner, a different table -- see
+  // reviewItemsClientInstance's own declaration comment.
+  reviewItemsClientInstance?.setSession({ accessToken: session.accessToken, ownerId: session.ownerId });
   return session;
 };
 
@@ -1618,6 +1626,7 @@ app.whenReady().then(async () => {
     const { getOrCreateDeviceId, generatePairingSecret } = await importFromHere('../mcp/bridge/identity.mjs');
     const { HearthBridgeClient } = await importFromHere('../mcp/bridge/client.mjs');
     const { PublicTasksClient } = await importFromHere('../mcp/bridge/public-tasks-client.mjs');
+    const { ReviewItemsClient, resyncPendingReviewItems, syncReviewItemToRemote } = await importFromHere('../mcp/bridge/review-queue-sync.mjs');
     const settings = readSettings();
     loadBridgeSecrets();
     loadPublicTasksSecrets();
@@ -1657,12 +1666,61 @@ app.whenReady().then(async () => {
     const publicTasksReady = () => Boolean(
       publicTasksClientInstance.supabaseUrl && publicTasksClientInstance.accessToken && publicTasksClientInstance.ownerId,
     );
+    // Same best-effort refresh syncPublicXTasks already does before its own
+    // Project X calls (a stored access token can simply have aged past its
+    // ~1hr expiry between a sign-in and a later sync attempt) -- reuses the
+    // existing ensurePublicTasksSession() unchanged; a refresh success
+    // already mirrors onto reviewItemsClientInstance via
+    // applyPublicTasksSession. Never throws: a failed refresh just leaves
+    // the (possibly still-stale) token in place, and the sync call that
+    // follows fails and retries later exactly as it already does today.
+    const refreshPublicTasksSessionBestEffort = async () => {
+      if (publicTasksSession?.refreshToken) { try { await ensurePublicTasksSession(); } catch {} }
+    };
+
+    // Shares Project X's SAME session -- same Supabase project, same
+    // authenticated owner, a different table. Never itself authenticates;
+    // applyPublicTasksSession/sign-out above keep it mirrored to
+    // publicTasksSession wherever that session changes (sign-in/sign-out);
+    // this constructor call only covers the initial value at startup.
+    reviewItemsClientInstance = new ReviewItemsClient({
+      supabaseUrl: settings.publicTasksSupabaseUrl || '',
+      supabaseAnonKey: settings.publicTasksSupabaseAnonKey || '',
+    });
+    reviewItemsClientInstance.setSession({
+      accessToken: publicTasksSession?.accessToken || null,
+      ownerId: publicTasksSession?.ownerId || null,
+    });
+    // The ONLY wiring between GoalRunner and any remote/network concern --
+    // GoalRunner itself only ever calls this as an opaque, fire-and-forget
+    // notification (see onReviewItemPersisted's own doc comment in
+    // mcp/goals/runner.mjs); it is never awaited, its return value is never
+    // inspected, and nothing it does can affect Goal/Review Queue state,
+    // X dispatch, or continuation.
+    if (goalRunner) {
+      goalRunner.onReviewItemPersisted = (item, goal) => {
+        void (async () => {
+          await refreshPublicTasksSessionBestEffort();
+          await syncReviewItemToRemote({ client: reviewItemsClientInstance, item, goalId: goal.id, goalTitle: goal.title });
+        })();
+      };
+    }
+
     // A restored session at startup is itself a reconnect (the whole point
     // of persisting it via safeStorage is to avoid a fresh sign-in) -- retry
     // syncing any already-terminal local X truth now, exactly as sign-in
     // already does. Read-only/PATCH-by-id and idempotent; never reruns X,
     // never creates a queue entry, never mutates X queue/run state.
-    if (publicTasksReady()) void resyncTerminalPublicXTasks();
+    if (publicTasksReady()) {
+      void resyncTerminalPublicXTasks();
+      // Same reconnect trigger, same idempotent-upsert safety, for the
+      // Review Queue remote projection -- a pure read of local state
+      // (goalRunner.list_review_queue()) followed by best-effort writes;
+      // never mutates Goal/Review Queue local state, never throws. A
+      // restored session can be stale (see refreshPublicTasksSessionBestEffort),
+      // so refresh first.
+      void refreshPublicTasksSessionBestEffort().then(() => resyncPendingReviewItems({ client: reviewItemsClientInstance, goalRunner }));
+    }
 
     const registerBridgeDevice = async () => {
       const session = await ensureBridgeSession();
@@ -1841,6 +1899,7 @@ app.whenReady().then(async () => {
         applyPublicTasksSession(data);
         sendPublicTasksState();
         void resyncTerminalPublicXTasks();
+        void resyncPendingReviewItems({ client: reviewItemsClientInstance, goalRunner });
         return { signedIn: true, needsEmailVerification: false };
       }
       return { signedIn: false, needsEmailVerification: true };
@@ -1856,11 +1915,15 @@ app.whenReady().then(async () => {
       // X, creates another queue entry, or mutates X terminal truth (it is
       // a pure PATCH-by-id retry over already-durable receipts).
       void resyncTerminalPublicXTasks();
+      // Same reconnect trigger for the Review Queue remote projection --
+      // read-only against local state, best-effort idempotent writes.
+      void resyncPendingReviewItems({ client: reviewItemsClientInstance, goalRunner });
       return getPublicTasksState();
     });
 
     ipcMain.handle('publicTasks:sign-out', async () => {
       publicTasksClientInstance?.setSession({ accessToken: null, ownerId: null });
+      reviewItemsClientInstance?.setSession({ accessToken: null, ownerId: null });
       clearPublicTasksSession();
       sendPublicTasksState();
       return getPublicTasksState();

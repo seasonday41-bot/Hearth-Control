@@ -38,6 +38,11 @@ function buildAuthHarness({ settings = {}, fetchImpl } = {}) {
   const encryptLocalSecret = (value) => (value ? JSON.stringify(value) : null);
   const decryptLocalSecret = (encoded) => { try { return encoded ? JSON.parse(encoded) : null; } catch { return null; } };
   let publicTasksClientInstance = { accessToken: null, ownerId: null, supabaseAnonKey: '', setSession(s) { this.accessToken = s.accessToken; this.ownerId = s.ownerId; } };
+  // Same Supabase project/owner, a different table (see main.cjs's own
+  // declaration comment) -- injected the same way publicTasksClientInstance
+  // is, so applyPublicTasksSession's real source (which now also mirrors
+  // the session onto this) does not hit a ReferenceError in this sandbox.
+  let reviewItemsClientInstance = { accessToken: null, ownerId: null, setSession(s) { this.accessToken = s.accessToken; this.ownerId = s.ownerId; } };
   const factorySource = `
     let bridgeSession = null;
     let publicTasksSession = null;
@@ -49,10 +54,10 @@ function buildAuthHarness({ settings = {}, fetchImpl } = {}) {
       getSession: () => publicTasksSession,
     };
   `;
-  const factory = new Function('decryptLocalSecret', 'readSettings', 'saveSettings', 'encryptLocalSecret', 'sendEvent', 'publicTasksClientInstance', 'fetch', factorySource);
-  const api = factory(decryptLocalSecret, readSettings, saveSettings, encryptLocalSecret, () => {}, publicTasksClientInstance,
+  const factory = new Function('decryptLocalSecret', 'readSettings', 'saveSettings', 'encryptLocalSecret', 'sendEvent', 'publicTasksClientInstance', 'reviewItemsClientInstance', 'fetch', factorySource);
+  const api = factory(decryptLocalSecret, readSettings, saveSettings, encryptLocalSecret, () => {}, publicTasksClientInstance, reviewItemsClientInstance,
     fetchImpl || (async () => { throw new Error('fetch must not be called in this test'); }));
-  return { ...api, settingsState, savedSettings, publicTasksClientInstance };
+  return { ...api, settingsState, savedSettings, publicTasksClientInstance, reviewItemsClientInstance };
 }
 
 // ── namespace isolation ─────────────────────────────────────────────────
@@ -121,6 +126,10 @@ test('applyPublicTasksSession persists the session, updates publicTasksClientIns
   assert.equal(h.publicTasksClientInstance.accessToken, 'tok');
   assert.equal(h.publicTasksClientInstance.ownerId, 'owner-1');
   assert.equal(h.getSession().ownerId, 'owner-1');
+  // The Review Queue remote projection shares this SAME session (same
+  // Supabase project/owner, a different table).
+  assert.equal(h.reviewItemsClientInstance.accessToken, 'tok');
+  assert.equal(h.reviewItemsClientInstance.ownerId, 'owner-1');
 });
 
 // ── ensurePublicTasksSession ─────────────────────────────────────────────
@@ -186,10 +195,19 @@ test('no publicTasks:* handler or Project X code path ever references a service_
   assert.doesNotMatch(mainSource, /service_role/i);
 });
 
-test('a session restored at startup also triggers resyncTerminalPublicXTasks (a restart is a reconnect)', () => {
+test('a session restored at startup also triggers resyncTerminalPublicXTasks and resyncPendingReviewItems (a restart is a reconnect)', () => {
   const readyIdx = mainSource.indexOf('const publicTasksReady = () => Boolean(');
   const nextIdx = mainSource.indexOf('const registerBridgeDevice = async () => {', readyIdx);
   assert.ok(readyIdx !== -1 && nextIdx !== -1);
   const block = mainSource.slice(readyIdx, nextIdx);
-  assert.match(block, /if \(publicTasksReady\(\)\) void resyncTerminalPublicXTasks\(\)/);
+  const guardIdx = block.indexOf('if (publicTasksReady())');
+  assert.ok(guardIdx !== -1, 'a publicTasksReady() guard must exist in this block');
+  const guarded = block.slice(guardIdx);
+  assert.match(guarded, /void resyncTerminalPublicXTasks\(\);/);
+  // A restored session can have genuinely expired since it was persisted
+  // (a stored JWT aging past ~1hr) -- resyncPendingReviewItems must be
+  // preceded by a best-effort refresh, not called with whatever
+  // (possibly stale) token happened to be restored. This is the exact fix
+  // for a live-smoke-found defect (401 "JWT expired" reaching Project X).
+  assert.match(guarded, /refreshPublicTasksSessionBestEffort\(\)\.then\(\(\) => resyncPendingReviewItems\(\{ client: reviewItemsClientInstance, goalRunner \}\)\)/);
 });

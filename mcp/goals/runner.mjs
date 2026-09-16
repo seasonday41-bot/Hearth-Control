@@ -21,6 +21,7 @@ export class GoalRunner {
    *     getXTaskStatus: Function,
    *   },
    *   jobManager?: import('../runtime/job-manager.mjs').JobManager,
+   *   onReviewItemPersisted?: (item: object, goal: object) => void,
    * }} options
    */
   constructor(options) {
@@ -31,6 +32,15 @@ export class GoalRunner {
     this.xExecutor = options?.xExecutor || null;
     this.jobManager = options?.jobManager || null;
     this.claimStore = options?.claimStore || null;
+    // Optional, notification-only (void, fire-and-forget) hook: called
+    // AFTER a Review Queue item has been durably saved (never before --
+    // never mid-transition), so it can never influence continuation, never
+    // dispatch X, and a throwing/slow callback can never break Goal
+    // execution (always wrapped in try/catch at each call site). This is
+    // the ONLY seam a remote projection (e.g. mcp/bridge/
+    // review-queue-sync.mjs) is wired through -- GoalRunner itself knows
+    // nothing about Supabase/remote sync.
+    this.onReviewItemPersisted = options?.onReviewItemPersisted || null;
     /** @type {string | null} */
     this.activeGoalId = null;
     /** @type {Set<string>} */
@@ -253,8 +263,9 @@ export class GoalRunner {
           // branch, the only current source of reviewNeeded): create/
           // update the durable Review Queue item BEFORE checkpointing/
           // saving, so both land in the SAME save below.
+          let waitingReviewItem = null;
           if (stepResult.reviewNeeded) {
-            this.recordReviewItem(goal, {
+            waitingReviewItem = this.recordReviewItem(goal, {
               stepId: step.id,
               taskId: step.xTask?.task_id || null,
               runId: stepResult.evidence?.runId || null,
@@ -274,6 +285,12 @@ export class GoalRunner {
           }, goal);
 
           this.storage.saveGoal(goal);
+          // Fired only AFTER the item is durably saved -- see the
+          // onReviewItemPersisted doc comment in the constructor.
+          if (waitingReviewItem && this.onReviewItemPersisted) {
+            try { this.onReviewItemPersisted(waitingReviewItem, goal); }
+            catch (err) { console.error('[GoalRunner] onReviewItemPersisted callback failed:', err); }
+          }
           this.activeGoalId = null;
           if (options.onProgress) options.onProgress(goal);
           return goal;
@@ -286,8 +303,9 @@ export class GoalRunner {
             // FAILED: record the Review Queue item and a checkpoint BEFORE
             // the save below, so fail_goal's own subsequent fetch (it
             // re-reads from storage by id) sees both already persisted.
+            let errorReviewItem = null;
             if (stepResult.reviewNeeded) {
-              this.recordReviewItem(goal, {
+              errorReviewItem = this.recordReviewItem(goal, {
                 stepId: step.id,
                 taskId: step.xTask?.task_id || null,
                 runId: stepResult.evidence?.runId || null,
@@ -305,6 +323,10 @@ export class GoalRunner {
               route: step.route,
             }, goal);
             this.storage.saveGoal(goal);
+            if (errorReviewItem && this.onReviewItemPersisted) {
+              try { this.onReviewItemPersisted(errorReviewItem, goal); }
+              catch (err) { console.error('[GoalRunner] onReviewItemPersisted callback failed:', err); }
+            }
             return this.fail_goal(goal.id, `Required step '${step.title}' failed: ${step.result}`);
           }
           // Optional step failed, create checkpoint and proceed
@@ -321,7 +343,7 @@ export class GoalRunner {
           // network failure before X ever admitted the task) is still a
           // FAILED outcome from Hearth's perspective -- it still needs a
           // Review Queue item, even though no X runId/evidence exists yet.
-          this.recordReviewItem(goal, {
+          const catchReviewItem = this.recordReviewItem(goal, {
             stepId: step.id,
             taskId: step.xTask?.task_id || null,
             status: 'failed',
@@ -334,6 +356,10 @@ export class GoalRunner {
             route: step.route,
           }, goal);
           this.storage.saveGoal(goal);
+          if (catchReviewItem && this.onReviewItemPersisted) {
+            try { this.onReviewItemPersisted(catchReviewItem, goal); }
+            catch (callbackErr) { console.error('[GoalRunner] onReviewItemPersisted callback failed:', callbackErr); }
+          }
           return this.fail_goal(goal.id, `Required step '${step.title}' threw error: ${err.message}`);
         }
         this.storage.saveGoal(goal);
