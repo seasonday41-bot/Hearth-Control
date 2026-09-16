@@ -218,6 +218,18 @@ const canonicalJson = (value) => JSON.stringify(value, (_key, item) => {
   if (!item || Array.isArray(item) || typeof item !== 'object') return item;
   return Object.fromEntries(Object.keys(item).sort().map((key) => [key, item[key]]));
 });
+/**
+ * The REAL, single canonicalization + fingerprint formula for an x-task-v1
+ * payload -- used by ingestXTask's own idempotency/conflict detection AND
+ * by Goal-level X approval (resolveGoalXApproval below) to verify an
+ * approved Goal snapshot's per-step fingerprints against the CURRENT xTask
+ * content. Never duplicated: both callers share this exact function so the
+ * two can never silently drift into disagreeing about what "unchanged"
+ * means.
+ */
+const canonicalizeXTask = (task, taskRoot) => ({ ...task, workspace: { ...task.workspace, root: taskRoot } });
+const computeXTaskFingerprint = (task, taskRoot) =>
+  crypto.createHash('sha256').update(canonicalJson(canonicalizeXTask(task, taskRoot))).digest('hex');
 const hasLiveXQueueEntries = () => Boolean(xQueueStore &&
   (xQueueStore.listPending().length || xQueueStore.listDispatching().length || xQueueStore.listDispatched().length));
 const xQueueWorkspaceMatches = (workspace) => {
@@ -347,6 +359,94 @@ const requestXApproval = (record, child, action, options = {}) => new Promise((r
   }
 });
 /**
+ * Goal-level X approval (Phase 2 slice): lets a user approve an entire
+ * already-authored Goal's route:'x' steps in ONE prompt instead of once per
+ * step. The approval is recorded as `goal.xApproval` (see mcp/goals/
+ * model.mjs's validateXApproval) directly on the SAME live Goal object
+ * GoalRunner's run_goal loop itself holds and repeatedly saves for the rest
+ * of this run -- never via a separate storage fetch-mutate-save round trip.
+ * That distinction is load-bearing: GoalStorage.saveGoal() always returns a
+ * brand-new re-validated object rather than mutating its input in place, and
+ * run_goal's own `goal` variable is captured once at the top of the run and
+ * never refreshed from that return value -- so a write that instead re-
+ * fetched the goal from storage would land on a DIFFERENT object than
+ * run_goal's, and get silently clobbered the next time run_goal calls
+ * `this.storage.saveGoal(goal)` with its own stale reference (this was the
+ * exact cause of a live-smoke regression: the approval was granted and
+ * briefly persisted, then immediately overwritten back to nothing the
+ * moment step 1 finished, so step 2 saw no approval and re-prompted).
+ * Mutating the passed-in `goal` object directly sidesteps that race
+ * entirely: run_goal's own subsequent saveGoal(goal) calls naturally carry
+ * `xApproval` forward, exactly like every other in-place field it sets.
+ *
+ * Local to Hearth only, never a remote or standing bypass mechanism, and
+ * never a generic "allow all X": it authorizes only the EXACT already-
+ * authored step ids of THIS one goal, at THIS exact resolved workspace
+ * root, each pinned to its own xTask's exact fingerprint via the SAME
+ * canonicalizeXTask/computeXTaskFingerprint formula ingestXTask itself uses
+ * for its own idempotency. Any step added, removed, or whose xTask content
+ * changes breaks that step's fingerprint match (reordering alone does not,
+ * since a step's own id+fingerprint pair is unaffected by its position --
+ * only content and set-membership are what "unchanged" means here) and
+ * falls back to the normal per-step Ask prompt for that step -- this
+ * function never auto-fails a goal on a stale/missing match. Callers only
+ * invoke this when the GLOBAL X permission is already exactly 'Ask' (see
+ * the goalRunner.xExecutor wiring below); it never runs, and so never
+ * matters, under Blocked or Allow. Scoped to exactly one goal object:
+ * every other X caller (local x_enqueue, Project X remote approval, or a
+ * DIFFERENT Goal's steps) can never match this goal's approval record.
+ *
+ * @returns {Promise<boolean>} true only if THIS step is covered by a
+ *   verified-matching (already-existing or freshly-approved-just-now) Goal
+ *   approval snapshot.
+ */
+const resolveGoalXApproval = async ({ goal, step, task, action }) => {
+  if (!goal || !step) return false;
+
+  let taskRoot;
+  try { taskRoot = await fs.promises.realpath(task.workspace.root); } catch { return false; }
+  const currentFingerprint = computeXTaskFingerprint(task, taskRoot);
+
+  const existing = goal.xApproval;
+  if (existing && existing.workspaceRoot === taskRoot) {
+    const match = existing.steps.find((s) => s.stepId === step.id && s.xTaskFingerprint === currentFingerprint);
+    if (match) return true;
+  }
+
+  // No existing match: offer ONE bulk approval covering every route:'x'
+  // step in the Goal's CURRENT snapshot that shares this SAME resolved
+  // workspace root (a step whose own xTask points elsewhere is excluded
+  // from this snapshot -- it falls back to its own normal per-step Ask
+  // when it later dispatches). Only AUTHORING content (each step's own
+  // xTask) feeds the fingerprint -- never mutable runtime fields like
+  // status/result/evidence/startedAt/finishedAt, which live on the step
+  // object itself, not inside xTask, and so can never affect this snapshot.
+  const stepFingerprints = [];
+  for (const s of goal.steps) {
+    if (s.route !== 'x' || !s.xTask) continue;
+    let root;
+    try { root = await fs.promises.realpath(s.xTask.workspace.root); } catch { continue; }
+    if (root !== taskRoot) continue;
+    stepFingerprints.push({ stepId: s.id, title: s.title, xTaskFingerprint: computeXTaskFingerprint(s.xTask, root) });
+  }
+  if (!stepFingerprints.some((s) => s.stepId === step.id)) return false;
+
+  const promptAction = [
+    `Approve Goal "${goal.title}" (${stepFingerprints.length} X step${stepFingerprints.length === 1 ? '' : 's'}) in workspace ${taskRoot}:`,
+    ...stepFingerprints.map((s, i) => `${i + 1}. ${s.title}`),
+  ].join('\n');
+  const approvalRecord = { abort: new AbortController() };
+  const allowed = await requestXApproval(approvalRecord, null, promptAction, { isLive: () => true });
+  if (!allowed) return false;
+
+  goal.xApproval = {
+    approvedAt: new Date().toISOString(),
+    workspaceRoot: taskRoot,
+    steps: stepFingerprints.map(({ stepId, xTaskFingerprint }) => ({ stepId, xTaskFingerprint })),
+  };
+  return true;
+};
+/**
  * The Electron-owned X ingress core shared by BOTH the local HTTP transport
  * (x_enqueue) and the remote-approved public.tasks path: task-workspace-
  * vs-CURRENT-settings-workspace validation, canonical fingerprint, requestId
@@ -369,7 +469,7 @@ const requestXApproval = (record, child, action, options = {}) => new Promise((r
  * an in-flight record with another still-connected waiter never aborts the
  * other's approved request (see the concurrent-waiter regression test).
  */
-const ingestXTask = async ({ requestId, task, settingsRoot: preResolvedSettingsRoot, waiterId, waiterActive, child, action, isLive, onInflightRecord }) => {
+const ingestXTask = async ({ requestId, task, settingsRoot: preResolvedSettingsRoot, waiterId, waiterActive, child, action, isLive, onInflightRecord, skipStepApproval = false }) => {
   if (!xQueueStore) throw xQueueError('queue_unavailable');
   if (typeof requestId !== 'string' || !requestId.trim() || requestId.length > 256) throw xQueueError('invalid_request_id');
   let settingsRoot, taskRoot;
@@ -377,8 +477,8 @@ const ingestXTask = async ({ requestId, task, settingsRoot: preResolvedSettingsR
     settingsRoot = preResolvedSettingsRoot || await fs.promises.realpath(readSettings().workspace);
     taskRoot = await fs.promises.realpath(task.workspace.root);
   } catch { throw xQueueError('workspace_mismatch'); }
-  const canonicalTask = { ...task, workspace: { ...task.workspace, root: taskRoot } };
-  const fingerprint = crypto.createHash('sha256').update(canonicalJson(canonicalTask)).digest('hex');
+  const canonicalTask = canonicalizeXTask(task, taskRoot);
+  const fingerprint = computeXTaskFingerprint(task, taskRoot);
   if (xQueueStore.recoveryRequired) throw xQueueError('queue_recovery_required');
   const prior = xQueueStore.getReceipt(requestId);
   if (prior) {
@@ -402,7 +502,13 @@ const ingestXTask = async ({ requestId, task, settingsRoot: preResolvedSettingsR
     const permission = readSettings().permissions.X ?? 'Ask';
     if (permission === 'Blocked') throw xQueueError('permission_blocked');
     if (permission !== 'Allow' && permission !== 'Ask') throw xQueueError('permission_blocked');
-    if (permission === 'Ask' && !(await requestXApproval(record, child, action, { isLive }))) throw xQueueError('permission_denied');
+    // skipStepApproval is set ONLY by the goalRunner.xExecutor wiring below,
+    // and only after resolveGoalXApproval has verified an exact match
+    // against a durably-persisted, per-step-fingerprinted Goal approval
+    // snapshot -- every other caller (local x_enqueue, Project X remote
+    // approval) never passes it, so their behavior here is byte-for-byte
+    // unchanged. 'Blocked' above and 'Allow' below are both untouched by it.
+    if (permission === 'Ask' && !skipStepApproval && !(await requestXApproval(record, child, action, { isLive }))) throw xQueueError('permission_denied');
     if (record.abort.signal.aborted || xShuttingDown || !isLive() || record.waiters.size === 0) throw xQueueError('transport_unavailable');
     let currentRoot;
     try { currentRoot = await fs.promises.realpath(readSettings().workspace); } catch { throw xQueueError('workspace_mismatch'); }
@@ -899,6 +1005,41 @@ app.whenReady().then(async () => {
     armXWakeup();
   } catch (err) {
     console.error('Failed to initialize XQueueCoordinator:', err);
+  }
+
+  // Goal Runner -> X wiring (Phase 2 slice): reuses the SAME Electron-owned
+  // X ingress (ingestXTask) and receipt-status helper (xQueueReceiptStatus)
+  // the local x_enqueue transport and the Project X remote-approval path
+  // already use -- no parseXTask/workspace-guard/fingerprint/admission/
+  // queue-receipt logic is duplicated here. child:null + an always-true
+  // waiter mirror approveRemotePublicXTask's own non-HTTP-transport call
+  // shape (see above); the X permission Ask/Allow/Blocked gate inside
+  // ingestXTask still applies unchanged, including a fresh user approval
+  // prompt when permission is 'Ask'.
+  if (goalRunner) {
+    goalRunner.xExecutor = {
+      dispatchXTask: async ({ requestId, task, action, goal, step }) => {
+        // Goal-level bulk approval only ever applies -- and only ever needs
+        // to be checked -- while the GLOBAL X permission is exactly 'Ask';
+        // under 'Blocked' ingestXTask rejects unconditionally below, and
+        // under 'Allow' it never asks in the first place, so skipping the
+        // check entirely in both cases changes nothing observable while
+        // avoiding a pointless goal/xTask lookup on every dispatch. `goal`
+        // and `step` are GoalRunner's own LIVE, in-flight objects (not just
+        // their ids) -- see resolveGoalXApproval's own doc comment for why
+        // that distinction is what makes the approval actually stick.
+        const permission = readSettings().permissions.X ?? 'Ask';
+        const skipStepApproval = permission === 'Ask'
+          ? await resolveGoalXApproval({ goal, step, task, action })
+          : false;
+        return ingestXTask({
+          requestId, task, child: null,
+          waiterId: requestId, waiterActive: () => true, isLive: () => true,
+          action, skipStepApproval,
+        });
+      },
+      getXTaskStatus: (requestId) => xQueueReceiptStatus(xQueueStore?.getReceipt(requestId)),
+    };
   }
 
   ipcMain.handle('settings:get', () => {

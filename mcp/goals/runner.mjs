@@ -15,6 +15,10 @@ export class GoalRunner {
    *     startAntigravityTask: Function,
    *     getAntigravityTask: Function,
    *   },
+   *   xExecutor?: {
+   *     dispatchXTask: Function,
+   *     getXTaskStatus: Function,
+   *   },
    *   jobManager?: import('../runtime/job-manager.mjs').JobManager,
    * }} options
    */
@@ -23,6 +27,7 @@ export class GoalRunner {
     if (!storage) throw new Error('storage is required for GoalRunner');
     this.storage = storage;
     this.antigravityExecutor = options?.antigravityExecutor;
+    this.xExecutor = options?.xExecutor || null;
     this.jobManager = options?.jobManager || null;
     this.claimStore = options?.claimStore || null;
     /** @type {string | null} */
@@ -386,6 +391,86 @@ export class GoalRunner {
           durableJobEvidence: finalTask.durableJobEvidence || null,
         },
       };
+    }
+
+    if (step.route === 'x') {
+      // route:'x' steps carry an already-authored, already-validated
+      // x-task-v1 (see model.mjs's validateStep) -- Goal Runner never
+      // constructs, repairs, or infers one; a missing/invalid xTask fails
+      // closed here rather than falling through to any other route.
+      if (!step.xTask) {
+        throw new Error(`Step '${step.title}' has route "x" but no validated xTask; cannot execute`);
+      }
+      if (!this.xExecutor?.dispatchXTask || !this.xExecutor?.getXTaskStatus) {
+        throw new Error('X executor is not configured');
+      }
+
+      // Deterministic per goal+step requestId: a duplicate resume/
+      // continuation calls dispatchXTask again with the SAME requestId and
+      // the SAME task content, which the shared X ingress (ingestXTask)
+      // resolves to the SAME durable receipt instead of executing X again.
+      const requestId = `goal:${goal.id}:step:${step.id}`;
+      const action = `Goal step: ${goal.title} / ${step.title}`;
+
+      // Passes the LIVE goal/step objects (not just their ids) so any
+      // Goal-level X approval granted during this call can be recorded
+      // directly on THIS run's own `goal` reference -- the same object
+      // this loop mutates and saves throughout -- rather than via a
+      // separate storage fetch-mutate-save that would race with (and be
+      // silently overwritten by) this loop's own subsequent
+      // this.storage.saveGoal(goal) calls.
+      await this.xExecutor.dispatchXTask({ requestId, task: step.xTask, action, goal, step });
+
+      // Poll the same durable queue receipt used by Phase 1's remote path
+      // until it reaches terminal, bounded by the task's own declared
+      // hard_timeout_minutes (never an invented budget). A poll-window
+      // timeout with the underlying run still genuinely in flight is
+      // reported as 'waiting', not an error -- resuming the goal re-enters
+      // this same idempotent dispatch/poll, never a second X execution.
+      const hardTimeoutMinutes = step.xTask.timing?.hard_timeout_minutes || 10;
+      const maxAttempts = Math.max(1, Math.ceil((hardTimeoutMinutes * 60000) / 1000));
+      let xStatus = null;
+      for (let i = 0; i < maxAttempts; i++) {
+        xStatus = await this.xExecutor.getXTaskStatus(requestId);
+        if (xStatus?.queue_status === 'terminal') break;
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+
+      const evidence = {
+        requestId,
+        queueId: xStatus?.queue_id || null,
+        runId: xStatus?.run_id || null,
+        gateStatus: xStatus?.gate_status || null,
+        hearthOutcome: xStatus?.hearth_outcome || null,
+      };
+
+      if (xStatus?.queue_status !== 'terminal') {
+        return {
+          status: 'waiting',
+          result: 'X step is still in progress after the poll window elapsed. Resume the goal to check again.',
+          evidence,
+        };
+      }
+
+      // xStatus.result is XRunStore's persisted x-result-v1 -- a structured
+      // object, never a string (unlike Antigravity's chat-style lastAnswer).
+      // step.result is contractually a string (model.mjs's validateStep
+      // nulls out anything else), and run_goal's own redactSecrets() call
+      // is string-only and silently returns '' for a non-string input -- so
+      // this must already be a string by the time it leaves here.
+      const xResultText = (value) => (value == null ? null : typeof value === 'string' ? value : JSON.stringify(value));
+
+      if (xStatus.terminal_status === 'completed') {
+        return { status: 'completed', result: xResultText(xStatus.result) || 'X step completed successfully', evidence };
+      }
+      if (xStatus.terminal_status === 'needs_review') {
+        return { status: 'waiting', result: xStatus.error || xResultText(xStatus.result) || 'X step needs review', evidence };
+      }
+      if (xStatus.terminal_status === 'interrupted') {
+        return { status: 'waiting', result: 'X step was interrupted and is recoverable; resume the goal to check again.', evidence };
+      }
+      // 'failed' (or any unrecognized terminal status): fail closed.
+      return { status: 'error', error: xStatus.error || 'X step failed', evidence };
     }
 
     if (step.route === 'durable_job' || step.durableJob) {

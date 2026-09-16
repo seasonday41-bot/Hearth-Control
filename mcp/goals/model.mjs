@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { redactSecrets } from '../executors/antigravity.mjs';
+import { parseXTask } from '../x/task-contract.mjs';
 
 export const GOAL_STATUSES = Object.freeze([
   'draft',
@@ -26,6 +27,7 @@ export const STEP_ROUTES = Object.freeze([
   'mcp',
   'antigravity',
   'manual',
+  'x',
 ]);
 
 /**
@@ -51,6 +53,23 @@ export const validateStep = (step) => {
   const status = STEP_STATUSES.includes(step.status) ? step.status : 'pending';
   const required = step.required !== false; // defaults to true
 
+  // A route:'x' step must carry a COMPLETE, already-authored x-task-v1
+  // payload -- Hearth never synthesizes one from title/description. The
+  // real, unmodified parseXTask() is the sole authority on validity; its
+  // canonical return value (not the raw input) is what's stored, so the
+  // same object round-trips unchanged through every future save/load.
+  let xTask = null;
+  if (route === 'x') {
+    if (!step.xTask || typeof step.xTask !== 'object') {
+      throw new Error(`Step '${title}' has route "x" but no xTask; a complete x-task-v1 payload is required`);
+    }
+    try {
+      xTask = parseXTask(step.xTask);
+    } catch (err) {
+      throw new Error(`Step '${title}' has route "x" but an invalid xTask: ${err.message}`);
+    }
+  }
+
   return {
     id,
     title,
@@ -60,6 +79,7 @@ export const validateStep = (step) => {
     resolvedRoute,
     routeReason,
     required,
+    xTask,
     result: typeof step.result === 'string' ? redactSecrets(step.result) : null,
     evidence: step.evidence ? sanitizeEvidence(step.evidence) : null,
     startedAt: step.startedAt || null,
@@ -92,6 +112,38 @@ export const sanitizeEvidence = (evidence) => {
     return clean;
   }
   return evidence;
+};
+
+/**
+ * Validates a durable Goal-level X approval snapshot (Phase 2 slice):
+ * `{ approvedAt, workspaceRoot, steps: [{ stepId, xTaskFingerprint }] }`.
+ * Purely a shape/sanitization check -- the fingerprint VALUE itself is
+ * computed and verified only by Electron's resolveGoalXApproval (the real
+ * canonicalizeXTask/computeXTaskFingerprint formula ingestXTask itself
+ * uses), never re-derived here; this module has no filesystem/workspace-
+ * realpath access and must not pretend to. Any malformed/incomplete input
+ * (including a bare `{}` or a steps entry missing either field) normalizes
+ * to `null` -- a missing approval, never a half-valid one -- so a stale or
+ * corrupted record fails closed to the normal per-step Ask flow rather
+ * than granting a partial bypass.
+ * @param {any} approval
+ * @returns {{approvedAt: string, workspaceRoot: string, steps: {stepId: string, xTaskFingerprint: string}[]} | null}
+ */
+export const validateXApproval = (approval) => {
+  if (!approval || typeof approval !== 'object') return null;
+  if (typeof approval.workspaceRoot !== 'string' || !approval.workspaceRoot.trim()) return null;
+  if (!Array.isArray(approval.steps)) return null;
+
+  const steps = approval.steps
+    .filter((s) => s && typeof s.stepId === 'string' && s.stepId.trim() && typeof s.xTaskFingerprint === 'string' && s.xTaskFingerprint.trim())
+    .map((s) => ({ stepId: s.stepId.trim(), xTaskFingerprint: s.xTaskFingerprint.trim() }));
+  if (steps.length === 0) return null;
+
+  return {
+    approvedAt: typeof approval.approvedAt === 'string' && approval.approvedAt ? approval.approvedAt : new Date().toISOString(),
+    workspaceRoot: approval.workspaceRoot.trim(),
+    steps,
+  };
 };
 
 /**
@@ -136,6 +188,7 @@ export const validateGoal = (goal) => {
   const currentStepId = typeof goal.currentStepId === 'string' && goal.currentStepId ? goal.currentStepId : (steps[0]?.id || null);
 
   const checkpoints = Array.isArray(goal.checkpoints) ? goal.checkpoints.map(validateGoalCheckpoint) : [];
+  const xApproval = validateXApproval(goal.xApproval);
 
   const now = new Date().toISOString();
 
@@ -149,6 +202,7 @@ export const validateGoal = (goal) => {
     steps,
     currentStepId,
     checkpoints,
+    xApproval,
     createdAt: goal.createdAt || now,
     startedAt: goal.startedAt || null,
     updatedAt: goal.updatedAt || now,
