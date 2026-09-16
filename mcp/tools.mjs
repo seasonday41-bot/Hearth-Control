@@ -733,4 +733,60 @@ export const registerWorkspaceTools = (server, options) => {
       return text(JSON.stringify({ error: error?.message || 'get_specialist_result_failed' }));
     }
   });
+
+  server.registerTool('goal_accept_specialist_result', {
+    title: 'Accept specialist result',
+    description: 'Explicitly ACCEPTS a completed specialist result. Supersedes original X review item, marks Goal step completed, and records durable decision. Pass goal_id, result_id, and optional note.',
+    inputSchema: {
+      goal_id: z.string().min(1).max(200),
+      result_id: z.string().min(1).max(300),
+      note: z.string().optional(),
+    },
+  }, async ({ goal_id, result_id, note } = {}) => {
+    const transport = options.goalTransport || options.reviewQueueTransport;
+    if (!transport?.acceptSpecialistResult) return text(JSON.stringify({ ok: false, reason: 'transport_unavailable' }));
+    try {
+      const result = await transport.acceptSpecialistResult({ goalId: goal_id, resultId: result_id, note });
+      return text(JSON.stringify(result, null, 2));
+    } catch (error) {
+      return text(JSON.stringify({ ok: false, reason: error?.message || 'accept_specialist_result_failed' }));
+    }
+  });
+
+  server.registerTool('goal_reject_specialist_result', {
+    title: 'Reject specialist result',
+    description: 'Explicitly REJECTS a specialist result. Original X review item remains active blocker. Pass goal_id, result_id, and optional note.',
+    inputSchema: {
+      goal_id: z.string().min(1).max(200),
+      result_id: z.string().min(1).max(300),
+      note: z.string().optional(),
+    },
+  }, async ({ goal_id, result_id, note } = {}) => {
+    const transport = options.goalTransport || options.reviewQueueTransport;
+    if (!transport?.rejectSpecialistResult) return text(JSON.stringify({ ok: false, reason: 'transport_unavailable' }));
+    try {
+      const result = await transport.rejectSpecialistResult({ goalId: goal_id, resultId: result_id, note });
+      return text(JSON.stringify(result, null, 2));
+    } catch (error) {
+      return text(JSON.stringify({ ok: false, reason: error?.message || 'reject_specialist_result_failed' }));
+    }
+  });
+
+  server.registerTool('goal_get_specialist_result_decision', {
+    title: 'Get specialist result decision record',
+    description: 'Read-only: gets a durable specialist result decision record. Pass goal_id and result_id.',
+    inputSchema: {
+      goal_id: z.string().min(1).max(200),
+      result_id: z.string().min(1).max(300),
+    },
+  }, async ({ goal_id, result_id } = {}) => {
+    const transport = options.goalTransport || options.reviewQueueTransport;
+    if (!transport?.getSpecialistResultDecision) return text(JSON.stringify({ error: 'transport_unavailable' }));
+    try {
+      const result = await transport.getSpecialistResultDecision({ goalId: goal_id, resultId: result_id });
+      return text(JSON.stringify(result, null, 2));
+    } catch (error) {
+      return text(JSON.stringify({ error: error?.message || 'get_specialist_result_decision_failed' }));
+    }
+  });
 };

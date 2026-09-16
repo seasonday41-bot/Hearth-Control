@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { redactSecrets } from '../executors/antigravity.mjs';
 import { parseXTask } from '../x/task-contract.mjs';
-import { validateSpecialistExecution, validateSpecialistResult } from '../specialist/contract.mjs';
+import { validateSpecialistExecution, validateSpecialistResult, validateSpecialistResultDecision } from '../specialist/contract.mjs';
 
 export const GOAL_STATUSES = Object.freeze([
   'draft',
@@ -213,6 +213,9 @@ export const validateGoal = (goal) => {
   const specialistResults = Array.isArray(goal.specialistResults)
     ? goal.specialistResults.map(validateSpecialistResult).filter(Boolean)
     : [];
+  const specialistResultDecisions = Array.isArray(goal.specialistResultDecisions)
+    ? goal.specialistResultDecisions.map(validateSpecialistResultDecision).filter(Boolean)
+    : [];
 
   const now = new Date().toISOString();
 
@@ -231,6 +234,7 @@ export const validateGoal = (goal) => {
     specialistHandoffs,
     specialistExecutions,
     specialistResults,
+    specialistResultDecisions,
     createdAt: goal.createdAt || now,
     startedAt: goal.startedAt || null,
     updatedAt: goal.updatedAt || now,
@@ -428,8 +432,9 @@ export const validateReviewQueueItem = (item) => {
  * Helper to construct a new Goal instance.
  * Sets status to 'ready' if valid steps are present, otherwise 'draft'.
  */
-export const createGoal = ({ title, objective, workspace, steps = [], constraints = [] }) => {
+export const createGoal = ({ id, title, objective, workspace, steps = [], constraints = [] }) => {
   const goal = validateGoal({
+    id,
     title,
     objective,
     workspace,

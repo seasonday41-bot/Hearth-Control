@@ -136,3 +136,37 @@ export function validateSpecialistResult(item) {
     error: item.error ? redactSecrets(String(item.error)).slice(0, 2000) : null,
   };
 }
+
+export const SPECIALIST_DECISION_STATES = Object.freeze(['accepted', 'rejected']);
+
+/**
+ * Validates a durable specialist result decision record.
+ * @param {any} item
+ * @returns {object|null}
+ */
+export function validateSpecialistResultDecision(item) {
+  if (!item || typeof item !== 'object') return null;
+  if (typeof item.id !== 'string' || !item.id.trim()) return null;
+  if (typeof item.resultId !== 'string' || !item.resultId.trim()) return null;
+  if (typeof item.executionId !== 'string' || !item.executionId.trim()) return null;
+  if (typeof item.handoffId !== 'string' || !item.handoffId.trim()) return null;
+  if (typeof item.goalId !== 'string' || !item.goalId.trim()) return null;
+  if (typeof item.stepId !== 'string' || !item.stepId.trim()) return null;
+  if (!SPECIALIST_DECISION_STATES.includes(item.decision)) return null;
+
+  const now = new Date().toISOString();
+
+  return {
+    version: 'specialist-result-decision-v1',
+    id: item.id.trim().slice(0, 300),
+    resultId: item.resultId.trim().slice(0, 300),
+    executionId: item.executionId.trim().slice(0, 300),
+    handoffId: item.handoffId.trim().slice(0, 300),
+    goalId: item.goalId.trim().slice(0, 200),
+    stepId: item.stepId.trim().slice(0, 200),
+    decision: item.decision,
+    decidedAt: typeof item.decidedAt === 'string' ? item.decidedAt : now,
+    decidedBy: typeof item.decidedBy === 'string' ? redactSecrets(item.decidedBy).slice(0, 200) : 'MainBrain',
+    note: item.note ? redactSecrets(String(item.note)).slice(0, 2000) : null,
+  };
+}

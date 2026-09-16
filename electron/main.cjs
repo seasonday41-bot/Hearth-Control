@@ -1059,6 +1059,66 @@ const startServer = async ({ workspace, port }) => {
         catch (sendError) { console.error('[Electron] Get specialist result ack failed:', sendError); }
       }
     }
+    if (message?.type === 'goal_accept_specialist_result_request') {
+      if (typeof message.transportId !== 'string' || !/^[0-9a-f-]{36}$/i.test(message.transportId)) return;
+      let resData = null;
+      let ok = true;
+      let error = null;
+      try {
+        if (!goalRunner) { ok = false; error = 'goal_runner_unavailable'; }
+        else {
+          resData = await goalRunner.accept_specialist_result(message.goalId, message.resultId, { decidedBy: message.decidedBy, note: message.note });
+          ok = true;
+        }
+      } catch (err) {
+        ok = false;
+        error = err?.message || 'accept_specialist_result_failed';
+      }
+      if (serverProcess === child) {
+        try { child.send({ type: 'goal_accept_specialist_result_ack', transportId: message.transportId, ok, result: resData, error }); }
+        catch (sendError) { console.error('[Electron] Accept specialist result ack failed:', sendError); }
+      }
+    }
+    if (message?.type === 'goal_reject_specialist_result_request') {
+      if (typeof message.transportId !== 'string' || !/^[0-9a-f-]{36}$/i.test(message.transportId)) return;
+      let resData = null;
+      let ok = true;
+      let error = null;
+      try {
+        if (!goalRunner) { ok = false; error = 'goal_runner_unavailable'; }
+        else {
+          resData = await goalRunner.reject_specialist_result(message.goalId, message.resultId, { decidedBy: message.decidedBy, note: message.note });
+          ok = true;
+        }
+      } catch (err) {
+        ok = false;
+        error = err?.message || 'reject_specialist_result_failed';
+      }
+      if (serverProcess === child) {
+        try { child.send({ type: 'goal_reject_specialist_result_ack', transportId: message.transportId, ok, result: resData, error }); }
+        catch (sendError) { console.error('[Electron] Reject specialist result ack failed:', sendError); }
+      }
+    }
+    if (message?.type === 'goal_get_specialist_result_decision_request') {
+      if (typeof message.transportId !== 'string' || !/^[0-9a-f-]{36}$/i.test(message.transportId)) return;
+      let decRecord = null;
+      let ok = true;
+      let error = null;
+      try {
+        if (!goalRunner) { ok = false; error = 'goal_runner_unavailable'; }
+        else {
+          decRecord = await goalRunner.get_specialist_result_decision(message.goalId, message.resultId);
+          ok = true;
+        }
+      } catch (err) {
+        ok = false;
+        error = err?.message || 'get_specialist_result_decision_failed';
+      }
+      if (serverProcess === child) {
+        try { child.send({ type: 'goal_get_specialist_result_decision_ack', transportId: message.transportId, ok, result: decRecord, error }); }
+        catch (sendError) { console.error('[Electron] Get specialist result decision ack failed:', sendError); }
+      }
+    }
   });
   serverProcess.once('exit', (code, signal) => {
     cancelXQueueChild(child);

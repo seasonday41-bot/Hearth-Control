@@ -12,12 +12,14 @@ import {
   createReviewQueueItem,
   validateGoal,
   validateSpecialistHandoff,
+  sanitizeEvidence,
   HANDOFF_TARGETS,
 } from './model.mjs';
 
 import {
   validateSpecialistExecution,
   validateSpecialistResult,
+  validateSpecialistResultDecision,
   deriveSpecialistExecutionId,
 } from '../specialist/contract.mjs';
 
@@ -1594,7 +1596,7 @@ export class GoalRunner {
           if (h.lifecycle !== 'requested') return false;
           const reqId = getXRequestId(goal, currentStep);
           if (h.source.requestId !== reqId) return false;
-          if (h.source.executionGeneration !== (currentStep.executionGeneration ?? null)) return false;
+          if ((h.source.executionGeneration ?? 1) !== (currentStep.executionGeneration ?? 1)) return false;
           if (h.source.xTaskFingerprint && currentStep.xTask) {
             try {
               let taskRoot = currentStep.xTask.workspace?.root || goal.workspace;
@@ -1712,11 +1714,13 @@ export class GoalRunner {
     // 2b. Active non-stale Specialist Handoff request / execution / result
     const specialistExecs = goal.specialistExecutions || [];
     const specialistResults = goal.specialistResults || [];
+    const specialistDecisions = goal.specialistResultDecisions || [];
     const activeExec = activeHandoff ? specialistExecs.find((e) => e.handoffId === activeHandoff.id && ['authorized', 'dispatching', 'running'].includes(e.status)) : null;
     const interruptedExec = activeHandoff ? specialistExecs.find((e) => e.handoffId === activeHandoff.id && e.status === 'interrupted') : null;
     const latestResult = activeHandoff ? specialistResults.find((r) => r.handoffId === activeHandoff.id) : null;
+    const latestDecision = latestResult ? specialistDecisions.find((d) => d.resultId === latestResult.id) : null;
 
-    if (!nextLegalAction && latestResult) {
+    if (!nextLegalAction && latestResult && !latestDecision) {
       nextLegalAction = {
         type: 'WAIT_FOR_SPECIALIST_RESULT_DECISION',
         step_id: currentStep.id,
@@ -1751,7 +1755,7 @@ export class GoalRunner {
         execution_id: interruptedExec.id,
         handoff_id: interruptedExec.handoffId,
       };
-    } else if (!nextLegalAction && activeHandoff) {
+    } else if (!nextLegalAction && activeHandoff && !latestDecision) {
       nextLegalAction = {
         type: 'SPECIALIST_HANDOFF_REQUESTED',
         step_id: currentStep.id,
@@ -2558,5 +2562,226 @@ export class GoalRunner {
       return this.list_specialist_results(goalIdOrParams.goalId);
     }
     return this.list_specialist_results(goalIdOrParams);
+  }
+
+  /**
+   * Slice 6B: Explicitly ACCEPTS a valid completed specialist result.
+   */
+  async accept_specialist_result(goalId, resultId, options = {}) {
+    if (!goalId || typeof goalId !== 'string') throw new Error('goalId is required');
+    if (!resultId || typeof resultId !== 'string') throw new Error('resultId is required');
+
+    const goal = this.storage.getGoal(goalId);
+    if (!goal) throw new Error(`Goal '${goalId}' not found`);
+
+    const result = (goal.specialistResults || []).find((r) => r.id === resultId);
+    if (!result) throw new Error(`Specialist result '${resultId}' not found in Goal '${goalId}'`);
+
+    const execution = (goal.specialistExecutions || []).find((e) => e.id === result.executionId);
+    if (!execution) throw new Error(`Specialist execution '${result.executionId}' not found for result '${resultId}'`);
+
+    const handoff = (goal.specialistHandoffs || []).find((h) => h.id === result.handoffId);
+    if (!handoff) throw new Error(`Specialist handoff '${result.handoffId}' not found for result '${resultId}'`);
+
+    const step = goal.steps.find((s) => s.id === result.stepId);
+    if (!step) throw new Error(`Step '${result.stepId}' not found in Goal '${goalId}'`);
+
+    const existingDecision = (goal.specialistResultDecisions || []).find((d) => d.resultId === resultId);
+    if (existingDecision) {
+      if (existingDecision.decision === 'accepted') {
+        return { decision: existingDecision, goal, accepted: true, idempotent: true };
+      }
+      throw new Error(`Cannot accept specialist result '${resultId}': result was previously rejected`);
+    }
+
+    if (result.status !== 'completed') {
+      throw new Error(`Cannot accept specialist result '${resultId}': status is '${result.status}', only 'completed' results may be accepted`);
+    }
+
+    if (step.status === 'completed') {
+      throw new Error(`Cannot accept specialist result '${resultId}': step '${step.id}' is already completed`);
+    }
+
+    const currentGen = step.executionGeneration ?? 1;
+    const handoffGen = handoff.source?.executionGeneration ?? 1;
+    if (currentGen !== handoffGen) {
+      throw new Error(`Specialist result '${resultId}' is stale; step execution generation is ${currentGen} but handoff generation was ${handoffGen}`);
+    }
+
+    if (step.route === 'x' && step.xTask) {
+      try {
+        let taskRoot = step.xTask.workspace?.root || goal.workspace;
+        try { taskRoot = fsSync.realpathSync(taskRoot); } catch {}
+        const currentFingerprint = computeXTaskFingerprint(step.xTask, taskRoot);
+        if (handoff.source?.xTaskFingerprint && handoff.source.xTaskFingerprint !== currentFingerprint) {
+          throw new Error(`Specialist result '${resultId}' is stale; step xTask content has changed`);
+        }
+      } catch (err) {
+        if (err.message.includes('is stale')) throw err;
+      }
+    }
+
+    const reviewItem = (goal.reviewQueue || []).find(
+      (it) => (handoff.reviewItemId && it.id === handoff.reviewItemId) || (it.stepId === step.id && it.runId === handoff.source?.runId)
+    ) || (goal.reviewQueue || []).find((it) => it.stepId === step.id && ['open', 'acknowledged'].includes(it.lifecycle));
+
+    if (!reviewItem || !['open', 'acknowledged'].includes(reviewItem.lifecycle)) {
+      throw new Error(`Specialist result '${resultId}' is stale; original linked review item is no longer open or acknowledged`);
+    }
+
+    const newerExec = (goal.specialistExecutions || []).find(
+      (e) => e.stepId === step.id && e.id !== execution.id && new Date(e.authorizedAt || 0) > new Date(execution.authorizedAt || 0)
+    );
+    if (newerExec) {
+      throw new Error(`Specialist result '${resultId}' is stale; a newer specialist execution exists for step '${step.id}'`);
+    }
+
+    const decisionRecord = validateSpecialistResultDecision({
+      version: 'specialist-result-decision-v1',
+      id: `specialist-decision:${result.id}`,
+      resultId: result.id,
+      executionId: result.executionId,
+      handoffId: result.handoffId,
+      goalId: goal.id,
+      stepId: step.id,
+      decision: 'accepted',
+      decidedAt: new Date().toISOString(),
+      decidedBy: options.decidedBy || 'MainBrain',
+      note: options.note || null,
+    });
+
+    goal.specialistResultDecisions = [...(goal.specialistResultDecisions || []), decisionRecord];
+
+    reviewItem.lifecycle = 'superseded';
+    reviewItem.supersededAt = new Date().toISOString();
+    reviewItem.note = redactSecrets(`Superseded by accepted specialist result ${result.id}` + (options.note ? `: ${options.note}` : ''));
+    reviewItem.updatedAt = new Date().toISOString();
+
+    step.status = 'completed';
+    step.result = redactSecrets(result.summary || 'Specialist result accepted.');
+    step.specialistResultId = result.id;
+    step.specialistExecutionId = result.executionId;
+    step.specialistHandoffId = result.handoffId;
+    step.evidence = sanitizeEvidence({
+      ...(step.evidence || {}),
+      specialistResultId: result.id,
+      specialistExecutionId: result.executionId,
+      specialistHandoffId: result.handoffId,
+      codexSessionId: result.codex?.sessionId || null,
+      gitPostHead: result.git?.postHead || null,
+      postChangedPaths: result.git?.postChangedPaths || [],
+    });
+    step.finishedAt = new Date().toISOString();
+
+    const stepIndex = goal.steps.findIndex((s) => s.id === step.id);
+    const completedCount = goal.steps.filter((s) => s.status === 'completed').length;
+    const nextStepObj = goal.steps.slice(stepIndex + 1).find((s) => !['completed', 'skipped'].includes(s.status));
+
+    if (nextStepObj) {
+      goal.status = 'ready';
+      goal.currentStepId = nextStepObj.id;
+      this.checkpoint_goal(goal.id, step.id, {
+        summary: `Step ${stepIndex + 1} (${step.title}) completed via accepted specialist result ${result.id}: ${step.result}`,
+        completedSteps: completedCount,
+        evidence: step.evidence,
+        nextStep: nextStepObj.id,
+        route: step.route,
+      }, goal);
+      const savedGoal = this.storage.saveGoal(goal);
+      return { decision: decisionRecord, goal: savedGoal, accepted: true };
+    } else {
+      this.checkpoint_goal(goal.id, step.id, {
+        summary: `Step ${stepIndex + 1} (${step.title}) completed via accepted specialist result ${result.id}: ${step.result}`,
+        completedSteps: completedCount,
+        evidence: step.evidence,
+        nextStep: null,
+        route: step.route,
+      }, goal);
+      const savedGoal = this.complete_goal(goal.id);
+      return { decision: decisionRecord, goal: savedGoal, accepted: true };
+    }
+  }
+
+  async acceptSpecialistResult(goalIdOrParams, resultId, options) {
+    if (goalIdOrParams && typeof goalIdOrParams === 'object') {
+      return this.accept_specialist_result(goalIdOrParams.goalId, goalIdOrParams.resultId, goalIdOrParams);
+    }
+    return this.accept_specialist_result(goalIdOrParams, resultId, options);
+  }
+
+  /**
+   * Slice 6B: Explicitly REJECTS a specialist result.
+   */
+  async reject_specialist_result(goalId, resultId, options = {}) {
+    if (!goalId || typeof goalId !== 'string') throw new Error('goalId is required');
+    if (!resultId || typeof resultId !== 'string') throw new Error('resultId is required');
+
+    const goal = this.storage.getGoal(goalId);
+    if (!goal) throw new Error(`Goal '${goalId}' not found`);
+
+    const result = (goal.specialistResults || []).find((r) => r.id === resultId);
+    if (!result) throw new Error(`Specialist result '${resultId}' not found in Goal '${goalId}'`);
+
+    const existingDecision = (goal.specialistResultDecisions || []).find((d) => d.resultId === resultId);
+    if (existingDecision) {
+      if (existingDecision.decision === 'rejected') {
+        return { decision: existingDecision, goal, rejected: true, idempotent: true };
+      }
+      throw new Error(`Cannot reject specialist result '${resultId}': result was previously accepted`);
+    }
+
+    if (!['completed', 'needs_review'].includes(result.status)) {
+      throw new Error(`Cannot reject specialist result '${resultId}': status is '${result.status}'`);
+    }
+
+    const decisionRecord = validateSpecialistResultDecision({
+      version: 'specialist-result-decision-v1',
+      id: `specialist-decision:${result.id}`,
+      resultId: result.id,
+      executionId: result.executionId,
+      handoffId: result.handoffId,
+      goalId: goal.id,
+      stepId: result.stepId,
+      decision: 'rejected',
+      decidedAt: new Date().toISOString(),
+      decidedBy: options.decidedBy || 'MainBrain',
+      note: options.note || null,
+    });
+
+    goal.specialistResultDecisions = [...(goal.specialistResultDecisions || []), decisionRecord];
+
+    const completedCount = goal.steps.filter((s) => s.status === 'completed').length;
+    this.checkpoint_goal(goal.id, result.stepId, {
+      summary: `Specialist result ${result.id} rejected: ${options.note || 'Main Brain rejected specialist result'}`,
+      completedSteps: completedCount,
+      nextStep: result.stepId,
+      route: 'x',
+    }, goal);
+
+    const savedGoal = this.storage.saveGoal(goal);
+    return { decision: decisionRecord, goal: savedGoal, rejected: true };
+  }
+
+  async rejectSpecialistResult(goalIdOrParams, resultId, options) {
+    if (goalIdOrParams && typeof goalIdOrParams === 'object') {
+      return this.reject_specialist_result(goalIdOrParams.goalId, goalIdOrParams.resultId, goalIdOrParams);
+    }
+    return this.reject_specialist_result(goalIdOrParams, resultId, options);
+  }
+
+  async get_specialist_result_decision(goalId, resultId) {
+    if (!goalId || typeof goalId !== 'string') throw new Error('goalId is required');
+    if (!resultId || typeof resultId !== 'string') throw new Error('resultId is required');
+    const goal = this.storage.getGoal(goalId);
+    if (!goal) throw new Error(`Goal '${goalId}' not found`);
+    const decision = (goal.specialistResultDecisions || []).find((d) => d.resultId === resultId);
+    return decision || null;
+  }
+
+  async getSpecialistResultDecision(goalIdOrParams, resultId) {
+    if (goalIdOrParams && typeof goalIdOrParams === 'object') {
+      return this.get_specialist_result_decision(goalIdOrParams.goalId, goalIdOrParams.resultId);
+    }
+    return this.get_specialist_result_decision(goalIdOrParams, resultId);
   }
 }
