@@ -4,6 +4,7 @@ import { getJobManager } from '../runtime/job-manager.mjs';
 import {
   createGoal,
   createGoalCheckpoint,
+  createReviewQueueItem,
   validateGoal,
 } from './model.mjs';
 
@@ -214,7 +215,7 @@ export class GoalRunner {
             checks: stepResult.checks || {},
             nextStep: nextStepObj ? nextStepObj.id : null,
             route: step.route,
-          });
+          }, goal);
 
           this.storage.saveGoal(goal);
           if (options.onProgress) options.onProgress(goal);
@@ -248,13 +249,29 @@ export class GoalRunner {
           goal.status = 'waiting';
           goal.updatedAt = new Date().toISOString();
 
+          // NEEDS_REVIEW (never INTERRUPTED -- see executeStep's route:'x'
+          // branch, the only current source of reviewNeeded): create/
+          // update the durable Review Queue item BEFORE checkpointing/
+          // saving, so both land in the SAME save below.
+          if (stepResult.reviewNeeded) {
+            this.recordReviewItem(goal, {
+              stepId: step.id,
+              taskId: step.xTask?.task_id || null,
+              runId: stepResult.evidence?.runId || null,
+              resultId: stepResult.evidence?.resultId || null,
+              status: stepResult.reviewStatus || 'needs_review',
+              reason: stepResult.reviewReason || step.result,
+              evidence: stepResult.evidence || null,
+            });
+          }
+
           this.checkpoint_goal(goal.id, step.id, {
             summary: `Step ${stepIndex + 1} (${step.title}) waiting: ${step.result}`,
             completedSteps: goal.steps.filter((s) => s.status === 'completed').length,
             evidence: stepResult.evidence,
             nextStep: step.id,
             route: step.route,
-          });
+          }, goal);
 
           this.storage.saveGoal(goal);
           this.activeGoalId = null;
@@ -264,23 +281,62 @@ export class GoalRunner {
           step.status = 'error';
           step.result = stepResult.error ? redactSecrets(stepResult.error) : 'Step execution error';
           step.finishedAt = new Date().toISOString();
-          this.storage.saveGoal(goal);
 
           if (step.required) {
+            // FAILED: record the Review Queue item and a checkpoint BEFORE
+            // the save below, so fail_goal's own subsequent fetch (it
+            // re-reads from storage by id) sees both already persisted.
+            if (stepResult.reviewNeeded) {
+              this.recordReviewItem(goal, {
+                stepId: step.id,
+                taskId: step.xTask?.task_id || null,
+                runId: stepResult.evidence?.runId || null,
+                resultId: stepResult.evidence?.resultId || null,
+                status: stepResult.reviewStatus || 'failed',
+                reason: stepResult.reviewReason || step.result,
+                evidence: stepResult.evidence || null,
+              });
+            }
+            this.checkpoint_goal(goal.id, step.id, {
+              summary: `Step ${stepIndex + 1} (${step.title}) failed: ${step.result}`,
+              completedSteps: goal.steps.filter((s) => s.status === 'completed').length,
+              evidence: stepResult.evidence,
+              nextStep: null,
+              route: step.route,
+            }, goal);
+            this.storage.saveGoal(goal);
             return this.fail_goal(goal.id, `Required step '${step.title}' failed: ${step.result}`);
           }
           // Optional step failed, create checkpoint and proceed
+          this.storage.saveGoal(goal);
           stepIndex++;
         }
       } catch (err) {
         step.status = 'error';
         step.result = redactSecrets(err.message);
         step.finishedAt = new Date().toISOString();
-        this.storage.saveGoal(goal);
 
         if (step.required) {
+          // A thrown exception (e.g. "X executor is not configured", a
+          // network failure before X ever admitted the task) is still a
+          // FAILED outcome from Hearth's perspective -- it still needs a
+          // Review Queue item, even though no X runId/evidence exists yet.
+          this.recordReviewItem(goal, {
+            stepId: step.id,
+            taskId: step.xTask?.task_id || null,
+            status: 'failed',
+            reason: err.message,
+          });
+          this.checkpoint_goal(goal.id, step.id, {
+            summary: `Step ${stepIndex + 1} (${step.title}) failed: ${step.result}`,
+            completedSteps: goal.steps.filter((s) => s.status === 'completed').length,
+            nextStep: null,
+            route: step.route,
+          }, goal);
+          this.storage.saveGoal(goal);
           return this.fail_goal(goal.id, `Required step '${step.title}' threw error: ${err.message}`);
         }
+        this.storage.saveGoal(goal);
         stepIndex++;
       }
     }
@@ -436,10 +492,17 @@ export class GoalRunner {
         await new Promise((r) => setTimeout(r, 1000));
       }
 
+      // resultId correlates a review-queue item back to XRunStore's own
+      // durable x-result-v1 record (xStatus.result is that FULL object when
+      // present) -- reference-only, never the transcript itself.
+      const resultId = (xStatus?.result && typeof xStatus.result === 'object' && typeof xStatus.result.result_id === 'string')
+        ? xStatus.result.result_id
+        : null;
       const evidence = {
         requestId,
         queueId: xStatus?.queue_id || null,
         runId: xStatus?.run_id || null,
+        resultId,
         gateStatus: xStatus?.gate_status || null,
         hearthOutcome: xStatus?.hearth_outcome || null,
       };
@@ -464,13 +527,37 @@ export class GoalRunner {
         return { status: 'completed', result: xResultText(xStatus.result) || 'X step completed successfully', evidence };
       }
       if (xStatus.terminal_status === 'needs_review') {
-        return { status: 'waiting', result: xStatus.error || xResultText(xStatus.result) || 'X step needs review', evidence };
+        // x-result-v1 always carries reason_code, and waiting_reason
+        // specifically when hearth_outcome is 'waiting' (needs_review's own
+        // outcome) -- a concise, structured "why", preferred over dumping
+        // the full result JSON as the review reason.
+        const reviewReason = xStatus.error || xStatus.result?.waiting_reason || xStatus.result?.reason_code || 'X step needs review';
+        return {
+          status: 'waiting',
+          result: xStatus.error || xResultText(xStatus.result) || 'X step needs review',
+          evidence,
+          reviewNeeded: true,
+          reviewStatus: 'needs_review',
+          reviewReason,
+        };
       }
       if (xStatus.terminal_status === 'interrupted') {
+        // Recoverable/waiting -- deliberately NEVER a Review Queue item
+        // (no reviewNeeded here): an interrupted run has no ambiguous
+        // outcome for a human to weigh in on, only an in-flight one to
+        // safely resume, exactly like a poll-window timeout above.
         return { status: 'waiting', result: 'X step was interrupted and is recoverable; resume the goal to check again.', evidence };
       }
       // 'failed' (or any unrecognized terminal status): fail closed.
-      return { status: 'error', error: xStatus.error || 'X step failed', evidence };
+      const failureReason = xStatus.error || xStatus.result?.reason_code || 'X step failed';
+      return {
+        status: 'error',
+        error: xStatus.error || 'X step failed',
+        evidence,
+        reviewNeeded: true,
+        reviewStatus: 'failed',
+        reviewReason: failureReason,
+      };
     }
 
     if (step.route === 'durable_job' || step.durableJob) {
@@ -577,11 +664,22 @@ export class GoalRunner {
 
   /**
    * Operation 7: checkpoint_goal
+   *
+   * `liveGoal`, when passed, is used INSTEAD of a fresh storage fetch: this
+   * is required for any caller (run_goal's own loop) that already holds
+   * the live, in-flight goal object it will itself save again afterward --
+   * GoalStorage.saveGoal() always returns a brand-new re-validated object
+   * rather than mutating its input, so a separate fetch-mutate-save here
+   * would land on a DIFFERENT object than the caller's, and get silently
+   * clobbered by the caller's own next saveGoal(goal) call (the exact bug
+   * class already found and fixed for Goal-level X approval). External
+   * callers (no liveGoal) are unaffected: this still fetches, mutates, and
+   * saves entirely on its own, exactly as before.
    */
-  checkpoint_goal(goalId, stepId, data = {}) {
+  checkpoint_goal(goalId, stepId, data = {}, liveGoal = null) {
     if (!goalId || typeof goalId !== 'string') throw new Error('goalId is required');
 
-    const goal = this.storage.getGoal(goalId);
+    const goal = liveGoal || this.storage.getGoal(goalId);
     if (!goal) throw new Error(`Goal '${goalId}' not found`);
 
     const checkpoint = createGoalCheckpoint({
@@ -601,6 +699,66 @@ export class GoalRunner {
     this.storage.saveGoal(goal);
 
     return checkpoint;
+  }
+
+  /**
+   * Records (or, idempotently, no-ops on) a Review Queue item for a step
+   * whose terminal outcome was NEEDS_REVIEW or FAILED -- never INTERRUPTED,
+   * which is recoverable/waiting on its own and never reaches this method
+   * (see executeStep's route:'x' branch, the only current source of
+   * `reviewNeeded`). Always operates on the LIVE `goal` object passed in
+   * (never a separate storage fetch) for the same reason checkpoint_goal's
+   * `liveGoal` parameter exists -- see that method's own doc comment.
+   * Idempotent by `idempotencyKey` (the underlying X runId when available,
+   * so a restart/reconciliation replay of the SAME terminal run never
+   * creates a duplicate item -- falls back to a stable `goalId:stepId`
+   * scoped key when no runId exists, e.g. a thrown exception before X ever
+   * admitted the task).
+   *
+   * Never persists by itself: the caller (run_goal) owns saving the SAME
+   * live `goal` object afterward, exactly like Goal-level X approval.
+   *
+   * @returns {object} the created or already-existing review queue item
+   */
+  recordReviewItem(goal, { stepId, taskId = null, runId = null, resultId = null, status, reason, evidence = null }) {
+    if (!goal || typeof goal !== 'object') throw new Error('goal is required to record a review item');
+    if (!Array.isArray(goal.reviewQueue)) goal.reviewQueue = [];
+
+    const idempotencyKey = runId || `${goal.id}:${stepId}:${status}`;
+    const existing = goal.reviewQueue.find((item) => item.idempotencyKey === idempotencyKey);
+    if (existing) {
+      existing.updatedAt = new Date().toISOString();
+      return existing;
+    }
+
+    const item = createReviewQueueItem({ idempotencyKey, stepId, taskId, runId, resultId, status, reason, evidence });
+    goal.reviewQueue.push(item);
+    return item;
+  }
+
+  /**
+   * Flattens every Goal's reviewQueue into a single list (newest first),
+   * each item annotated with its own goalId/goalTitle -- the "smallest
+   * durable Review Queue layer" this phase needs: reviews live durably on
+   * their own Goal (reusing GoalStorage's existing save/load round-trip,
+   * no new store), and this is purely a read-side aggregation over
+   * `list_goals()` for a caller (e.g. a future Chat-facing summary) that
+   * wants a cross-goal view of what needs attention.
+   * @param {{ goalId?: string }} [filter] optional: only one goal's items
+   * @returns {object[]}
+   */
+  list_review_queue(filter = {}) {
+    const goals = filter.goalId
+      ? [this.storage.getGoal(filter.goalId)].filter(Boolean)
+      : this.storage.listGoals();
+
+    const items = [];
+    for (const goal of goals) {
+      for (const item of goal.reviewQueue || []) {
+        items.push({ ...item, goalId: goal.id, goalTitle: goal.title });
+      }
+    }
+    return items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }
 
   /**

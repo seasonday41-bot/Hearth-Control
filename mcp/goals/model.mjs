@@ -189,6 +189,9 @@ export const validateGoal = (goal) => {
 
   const checkpoints = Array.isArray(goal.checkpoints) ? goal.checkpoints.map(validateGoalCheckpoint) : [];
   const xApproval = validateXApproval(goal.xApproval);
+  const reviewQueue = Array.isArray(goal.reviewQueue)
+    ? goal.reviewQueue.map(validateReviewQueueItem).filter(Boolean)
+    : [];
 
   const now = new Date().toISOString();
 
@@ -203,6 +206,7 @@ export const validateGoal = (goal) => {
     currentStepId,
     checkpoints,
     xApproval,
+    reviewQueue,
     createdAt: goal.createdAt || now,
     startedAt: goal.startedAt || null,
     updatedAt: goal.updatedAt || now,
@@ -258,6 +262,74 @@ export const createGoalCheckpoint = ({
 export const validateGoalCheckpoint = (cp) => {
   if (!cp || typeof cp !== 'object') throw new Error('Checkpoint must be an object');
   return createGoalCheckpoint(cp);
+};
+
+export const REVIEW_ITEM_STATUSES = Object.freeze(['needs_review', 'failed']);
+
+/**
+ * Creates a sanitized Review Queue item: a durable record that a step's
+ * terminal outcome needs the user's/Chat's attention (X's own NEEDS_REVIEW
+ * or FAILED terminal truth -- never INTERRUPTED, which is recoverable/
+ * waiting on its own and never enters this queue). Reference-only by
+ * design: only ids and structured, already-sanitized evidence are stored,
+ * never a raw transcript or chain-of-thought.
+ * STRICT: reason/evidence both pass through the SAME redaction/sanitization
+ * as everything else in this module.
+ *
+ * @param {object} params
+ * @returns {object} review queue item
+ */
+export const createReviewQueueItem = ({
+  idempotencyKey,
+  stepId = null,
+  taskId = null,
+  runId = null,
+  resultId = null,
+  status,
+  reason,
+  evidence = null,
+}) => {
+  if (!idempotencyKey || typeof idempotencyKey !== 'string') {
+    throw new Error('idempotencyKey is required for a review queue item');
+  }
+  if (!REVIEW_ITEM_STATUSES.includes(status)) {
+    throw new Error(`Review queue item status must be one of ${REVIEW_ITEM_STATUSES.join(', ')}`);
+  }
+
+  const now = new Date().toISOString();
+  return {
+    id: crypto.randomUUID(),
+    idempotencyKey: String(idempotencyKey).slice(0, 300),
+    stepId: stepId ? String(stepId).slice(0, 200) : null,
+    taskId: taskId ? String(taskId).slice(0, 200) : null,
+    runId: runId ? String(runId).slice(0, 200) : null,
+    resultId: resultId ? String(resultId).slice(0, 200) : null,
+    status,
+    reason: typeof reason === 'string' ? redactSecrets(reason).slice(0, 2000) : '',
+    evidence: sanitizeEvidence(evidence),
+    createdAt: now,
+    updatedAt: now,
+  };
+};
+
+export const validateReviewQueueItem = (item) => {
+  if (!item || typeof item !== 'object') return null;
+  if (!item.idempotencyKey || typeof item.idempotencyKey !== 'string') return null;
+  if (!REVIEW_ITEM_STATUSES.includes(item.status)) return null;
+
+  return {
+    id: typeof item.id === 'string' && item.id.trim() ? item.id.trim() : crypto.randomUUID(),
+    idempotencyKey: String(item.idempotencyKey).slice(0, 300),
+    stepId: item.stepId ? String(item.stepId).slice(0, 200) : null,
+    taskId: item.taskId ? String(item.taskId).slice(0, 200) : null,
+    runId: item.runId ? String(item.runId).slice(0, 200) : null,
+    resultId: item.resultId ? String(item.resultId).slice(0, 200) : null,
+    status: item.status,
+    reason: typeof item.reason === 'string' ? redactSecrets(item.reason).slice(0, 2000) : '',
+    evidence: sanitizeEvidence(item.evidence),
+    createdAt: item.createdAt || new Date().toISOString(),
+    updatedAt: item.updatedAt || item.createdAt || new Date().toISOString(),
+  };
 };
 
 /**
