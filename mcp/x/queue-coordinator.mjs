@@ -89,7 +89,7 @@ export class XQueueCoordinator {
    *   onCapacityBlocked?: () => void,
    * }} deps
    */
-  constructor({ queueStore, claimStore, runStore, modelAdapter, ownerId, leaseDurationMs, onAdmissionAccepted, onCapacityBlocked } = {}) {
+  constructor({ queueStore, claimStore, runStore, modelAdapter, ownerId, leaseDurationMs, onAdmissionAccepted, onCapacityBlocked, jobManager, goalStorage } = {}) {
     if (!queueStore) throw new TypeError('queueStore is required for XQueueCoordinator.');
     if (!claimStore) throw new TypeError('claimStore is required for XQueueCoordinator.');
     if (!runStore) throw new TypeError('runStore is required for XQueueCoordinator.');
@@ -101,6 +101,8 @@ export class XQueueCoordinator {
     this.modelAdapter = modelAdapter;
     this.ownerId = ownerId;
     this.leaseDurationMs = leaseDurationMs;
+    this.jobManager = jobManager || null;
+    this.goalStorage = goalStorage || null;
     /** Optional, notification-only (void, no payload): fired exactly once per durably-accepted admission, after admitted.runId is validated and before queueStore.markDispatched() -- see dispatchNext(). Never required, never inspected for a return value. */
     this.onAdmissionAccepted = onAdmissionAccepted;
     this.onCapacityBlocked = onCapacityBlocked;
@@ -186,6 +188,7 @@ export class XQueueCoordinator {
         admitted = await runXTask(entry.task, this.modelAdapter, {
           claimStore: this.claimStore, runStore: this.runStore, ownerId: this.ownerId,
           leaseDurationMs: this.leaseDurationMs, runId,
+          jobManager: this.jobManager, goalStorage: this.goalStorage,
         });
       } catch (error) {
         // Ambiguous: runXTask may have claimed/persisted something before

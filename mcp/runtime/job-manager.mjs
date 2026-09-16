@@ -328,6 +328,7 @@ export class JobManager extends EventEmitter {
       shell = false,
       timeoutMs = null,
       metadata = {},
+      stdinPayload = null,
       onHeartbeat = null,
       onCompleted = null,
     } = options;
@@ -412,6 +413,15 @@ export class JobManager extends EventEmitter {
     job.pid = child.pid;
     job.child = child;
     this.children.set(jobId, child);
+
+    if (stdinPayload !== null && stdinPayload !== undefined && child.stdin) {
+      try {
+        child.stdin.write(String(stdinPayload));
+        child.stdin.end();
+      } catch (err) {
+        console.error(`[JobManager] Failed writing stdin to job '${jobId}':`, err.message);
+      }
+    }
 
     child.stdout?.on('data', (chunk) => {
       const text = chunk.toString();

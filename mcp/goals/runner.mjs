@@ -1,5 +1,7 @@
 import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import crypto from 'node:crypto';
 import { redactSecrets } from '../executors/antigravity.mjs';
 import { getJobManager } from '../runtime/job-manager.mjs';
@@ -12,6 +14,29 @@ import {
   validateSpecialistHandoff,
   HANDOFF_TARGETS,
 } from './model.mjs';
+
+import {
+  validateSpecialistExecution,
+  validateSpecialistResult,
+  deriveSpecialistExecutionId,
+} from '../specialist/contract.mjs';
+
+import {
+  resolveCodexBinary,
+  createOutputSchemaFile,
+  formatSpecialistPrompt,
+  parseCodexJsonlOutput,
+  buildCodexArgs,
+} from '../specialist/codex-adapter.mjs';
+
+import {
+  captureGitPreCheck,
+  verifyGitPostCheck,
+} from '../specialist/git-verifier.mjs';
+
+import {
+  isWorkspaceLocked,
+} from '../specialist/workspace-lock.mjs';
 
 import {
   canonicalJson,
@@ -91,6 +116,7 @@ export class GoalRunner {
     const goals = this.storage.listGoals();
     const reconciled = [];
     for (const goal of goals) {
+      let goalChanged = false;
       if (goal.status === 'running') {
         goal.status = 'paused';
         goal.updatedAt = new Date().toISOString();
@@ -99,6 +125,44 @@ export class GoalRunner {
           step.status = 'paused';
           step.result = 'Step execution interrupted by application restart. Resume required.';
         }
+        goalChanged = true;
+      }
+
+      const execs = goal.specialistExecutions || [];
+      for (const exec of execs) {
+        if (['dispatching', 'running'].includes(exec.status)) {
+          exec.status = 'interrupted';
+          exec.finishedAt = new Date().toISOString();
+          exec.error = 'Specialist execution interrupted by application restart.';
+          goalChanged = true;
+
+          const existingResult = (goal.specialistResults || []).find((r) => r.executionId === exec.id);
+          if (!existingResult) {
+            const resId = `specialist-res:${exec.id}:${Date.now()}`;
+            const resultRecord = validateSpecialistResult({
+              version: 'specialist-result-v1',
+              id: resId,
+              executionId: exec.id,
+              handoffId: exec.handoffId,
+              goalId: goal.id,
+              stepId: exec.stepId,
+              target: exec.target,
+              status: 'interrupted',
+              summary: 'Specialist execution was interrupted by an application restart.',
+              codex: { sessionId: exec.codexSessionId, exitCode: null, signal: 'SIGTERM' },
+              git: { preHead: null, postHead: null, preDirtyPaths: [], postChangedPaths: [], commitsCreated: false },
+              boundary: { allowedPathsValid: true, forbiddenPathsValid: true, violations: [] },
+              startedAt: exec.startedAt || exec.authorizedAt,
+              finishedAt: exec.finishedAt,
+              error: exec.error,
+            });
+            exec.resultId = resId;
+            goal.specialistResults = [...(goal.specialistResults || []), resultRecord];
+          }
+        }
+      }
+
+      if (goalChanged) {
         this.storage.saveGoal(goal);
         reconciled.push(goal);
       }
@@ -1645,12 +1709,53 @@ export class GoalRunner {
       };
     }
 
-    // 2b. Active non-stale Specialist Handoff request
-    if (!nextLegalAction && activeHandoff) {
+    // 2b. Active non-stale Specialist Handoff request / execution / result
+    const specialistExecs = goal.specialistExecutions || [];
+    const specialistResults = goal.specialistResults || [];
+    const activeExec = activeHandoff ? specialistExecs.find((e) => e.handoffId === activeHandoff.id && ['authorized', 'dispatching', 'running'].includes(e.status)) : null;
+    const interruptedExec = activeHandoff ? specialistExecs.find((e) => e.handoffId === activeHandoff.id && e.status === 'interrupted') : null;
+    const latestResult = activeHandoff ? specialistResults.find((r) => r.handoffId === activeHandoff.id) : null;
+
+    if (!nextLegalAction && latestResult) {
+      nextLegalAction = {
+        type: 'WAIT_FOR_SPECIALIST_RESULT_DECISION',
+        step_id: currentStep.id,
+        reason: `Specialist result (${latestResult.status}) is available for handoff '${latestResult.handoffId}'; awaiting Main Brain decision.`,
+        result_id: latestResult.id,
+        execution_id: latestResult.executionId,
+        handoff_id: latestResult.handoffId,
+      };
+    } else if (!nextLegalAction && activeExec) {
+      if (activeExec.status === 'authorized') {
+        nextLegalAction = {
+          type: 'SPECIALIST_EXECUTION_AUTHORIZED',
+          step_id: currentStep.id,
+          reason: `Specialist execution '${activeExec.id}' is authorized; ready for dispatch.`,
+          execution_id: activeExec.id,
+          handoff_id: activeExec.handoffId,
+        };
+      } else if (['dispatching', 'running'].includes(activeExec.status)) {
+        nextLegalAction = {
+          type: 'WAIT_FOR_SPECIALIST',
+          step_id: currentStep.id,
+          reason: `Specialist execution '${activeExec.id}' is running under JobManager.`,
+          execution_id: activeExec.id,
+          handoff_id: activeExec.handoffId,
+        };
+      }
+    } else if (!nextLegalAction && interruptedExec) {
+      nextLegalAction = {
+        type: 'SPECIALIST_RECOVERY_REQUIRED',
+        step_id: currentStep.id,
+        reason: `Specialist execution '${interruptedExec.id}' was interrupted. Recovery required.`,
+        execution_id: interruptedExec.id,
+        handoff_id: interruptedExec.handoffId,
+      };
+    } else if (!nextLegalAction && activeHandoff) {
       nextLegalAction = {
         type: 'SPECIALIST_HANDOFF_REQUESTED',
         step_id: currentStep.id,
-        reason: `Specialist handoff (${activeHandoff.target}) requested for step '${currentStep.title}'; awaiting execution by future specialist adapter.`,
+        reason: `Specialist handoff (${activeHandoff.target}) requested for step '${currentStep.title}'; awaiting execution authorization.`,
         handoff_id: activeHandoff.id,
         target: activeHandoff.target,
       };
@@ -2109,5 +2214,349 @@ export class GoalRunner {
       return this.list_specialist_handoffs(goalIdOrParams.goalId);
     }
     return this.list_specialist_handoffs(goalIdOrParams);
+  }
+
+  /**
+   * Slice 6A: Explicitly authorizes specialist execution for a durable handoff.
+   * STRICT: Requires existing non-stale requested handoff + active unresolved X review item.
+   */
+  async authorize_specialist_execution(goalId, handoffId, options = {}) {
+    if (!goalId || typeof goalId !== 'string') throw new Error('goalId is required');
+    if (!handoffId || typeof handoffId !== 'string') throw new Error('handoffId is required');
+
+    const actor = options.actor || 'MainBrain';
+
+    const goal = this.storage.getGoal(goalId);
+    if (!goal) throw new Error(`Goal '${goalId}' not found`);
+
+    const handoffPackage = await this.build_specialist_handoff(goalId, handoffId);
+    if (!handoffPackage || handoffPackage.stale) {
+      throw new Error(`Specialist handoff '${handoffId}' is stale or invalid and cannot be authorized`);
+    }
+
+    if (handoffPackage.handoff.target !== 'codex') {
+      throw new Error(`Unsupported specialist target '${handoffPackage.handoff.target}': only 'codex' is supported`);
+    }
+
+    if (handoffPackage.handoff.lifecycle !== 'requested') {
+      throw new Error(`Specialist handoff '${handoffId}' is in state '${handoffPackage.handoff.lifecycle}', expected 'requested'`);
+    }
+
+    const reviewQueue = goal.reviewQueue || [];
+    const activeReviewItem = reviewQueue.find(
+      (item) => item.id === handoffPackage.evidence.review_item_id && ['open', 'acknowledged'].includes(item.lifecycle)
+    );
+    if (!activeReviewItem) {
+      throw new Error(`Linked X review item is missing or resolved; specialist execution cannot be authorized`);
+    }
+
+    const execId = deriveSpecialistExecutionId(handoffId);
+    const existingExecs = goal.specialistExecutions || [];
+    const existing = existingExecs.find((e) => e.id === execId || e.handoffId === handoffId);
+    if (existing) {
+      if (['authorized', 'dispatching', 'running', 'completed'].includes(existing.status)) {
+        return { execution: existing, goal };
+      }
+    }
+
+    const lockCheck = isWorkspaceLocked(goal.workspace, {
+      jobManager: this.jobManager,
+      claimStore: this.claimStore,
+      goalStorage: this.storage,
+    });
+    if (lockCheck.locked) {
+      throw new Error(`Cannot authorize specialist execution: ${lockCheck.reason}`);
+    }
+
+    let xTaskFingerprint = null;
+    if (handoffPackage.authored_x_task) {
+      try {
+        let taskRoot = handoffPackage.authored_x_task.workspace?.root || goal.workspace;
+        try { taskRoot = fsSync.realpathSync(taskRoot); } catch {}
+        xTaskFingerprint = computeXTaskFingerprint(handoffPackage.authored_x_task, taskRoot);
+      } catch {}
+    }
+
+    const executionRecord = validateSpecialistExecution({
+      version: 'specialist-execution-v1',
+      id: execId,
+      handoffId: handoffPackage.handoff.id,
+      target: handoffPackage.handoff.target,
+      goalId: goal.id,
+      stepId: handoffPackage.source.step_id,
+      generation: 1,
+      status: 'authorized',
+      workspace: goal.workspace,
+      source: {
+        worker: 'x',
+        requestId: handoffPackage.source.request_id,
+        runId: handoffPackage.source.run_id,
+        resultId: handoffPackage.source.result_id,
+        taskId: handoffPackage.source.task_id,
+        xTaskFingerprint,
+      },
+      authorizedAt: new Date().toISOString(),
+      authorizedBy: actor,
+    });
+
+    goal.specialistExecutions = [...existingExecs, executionRecord];
+    goal.updatedAt = new Date().toISOString();
+    this.storage.saveGoal(goal);
+
+    return { execution: executionRecord, goal };
+  }
+
+  async authorizeSpecialistExecution(goalIdOrParams, handoffId, options) {
+    if (goalIdOrParams && typeof goalIdOrParams === 'object') {
+      return this.authorize_specialist_execution(goalIdOrParams.goalId, goalIdOrParams.handoffId, goalIdOrParams);
+    }
+    return this.authorize_specialist_execution(goalIdOrParams, handoffId, options);
+  }
+
+  /**
+   * Slice 6A: Dispatches an authorized specialist execution under JobManager via CodexAdapter.
+   */
+  async dispatch_specialist_execution(goalId, executionId, options = {}) {
+    if (!goalId || typeof goalId !== 'string') throw new Error('goalId is required');
+    if (!executionId || typeof executionId !== 'string') throw new Error('executionId is required');
+
+    const goal = this.storage.getGoal(goalId);
+    if (!goal) throw new Error(`Goal '${goalId}' not found`);
+
+    const execution = (goal.specialistExecutions || []).find((e) => e.id === executionId);
+    if (!execution) throw new Error(`Specialist execution '${executionId}' not found in Goal '${goalId}'`);
+
+    if (execution.status !== 'authorized') {
+      throw new Error(`Specialist execution '${executionId}' is in status '${execution.status}', expected 'authorized'`);
+    }
+
+    const handoffPackage = await this.build_specialist_handoff(goal.id, execution.handoffId);
+    if (handoffPackage.stale) {
+      throw new Error(`Specialist handoff is stale; cannot dispatch execution '${executionId}'`);
+    }
+
+    const lockCheck = isWorkspaceLocked(goal.workspace, {
+      jobManager: this.jobManager,
+      claimStore: this.claimStore,
+      goalStorage: this.storage,
+      ignoreExecutionId: executionId,
+    });
+    if (lockCheck.locked) {
+      throw new Error(`Cannot dispatch specialist execution: ${lockCheck.reason}`);
+    }
+
+    const gitPreCheck = await captureGitPreCheck(goal.workspace);
+
+    execution.status = 'dispatching';
+    execution.startedAt = new Date().toISOString();
+    goal.updatedAt = new Date().toISOString();
+    this.storage.saveGoal(goal);
+
+    const codexBin = await resolveCodexBinary(options.codexBin);
+
+    const osTmpDir = os.tmpdir();
+    const tempDir = await fs.mkdtemp(path.join(osTmpDir, 'hearth-codex-specialist-'));
+    const schemaPath = await createOutputSchemaFile(tempDir);
+    const outputPath = path.join(tempDir, 'codex-final-output.json');
+
+    const promptText = formatSpecialistPrompt(handoffPackage);
+    const args = buildCodexArgs({
+      workspace: goal.workspace,
+      schemaPath,
+      outputPath,
+    });
+
+    const jobMgr = this.jobManager || getJobManager();
+    const jobId = `job_specialist_${execution.id}_${Date.now()}`;
+
+    const onCompleted = async (jobResult) => {
+      try {
+        await this._handleSpecialistJobCompleted(goal.id, execution.id, jobResult, gitPreCheck, handoffPackage, outputPath, tempDir);
+      } catch (err) {
+        console.error(`[GoalRunner] Error in specialist completion handler:`, err);
+      }
+    };
+
+    const job = jobMgr.startJob({
+      jobId,
+      command: codexBin,
+      args,
+      cwd: goal.workspace,
+      stdinPayload: promptText,
+      metadata: {
+        type: 'specialist_execution',
+        goalId: goal.id,
+        executionId: execution.id,
+        handoffId: execution.handoffId,
+        workspace: goal.workspace,
+        gitPreCheck,
+      },
+      onCompleted,
+    });
+
+    execution.status = 'running';
+    execution.jobId = job.id;
+    goal.updatedAt = new Date().toISOString();
+    this.storage.saveGoal(goal);
+
+    return { execution, job, goal };
+  }
+
+  async dispatchSpecialistExecution(goalIdOrParams, executionId, options) {
+    if (goalIdOrParams && typeof goalIdOrParams === 'object') {
+      return this.dispatch_specialist_execution(goalIdOrParams.goalId, goalIdOrParams.executionId, goalIdOrParams);
+    }
+    return this.dispatch_specialist_execution(goalIdOrParams, executionId, options);
+  }
+
+  /**
+   * Internal completion handler when JobManager completes a specialist process.
+   */
+  async _handleSpecialistJobCompleted(goalId, executionId, jobResult, gitPreCheck, handoffPackage, outputPath, tempDir) {
+    const goal = this.storage.getGoal(goalId);
+    if (!goal) return;
+
+    const execution = (goal.specialistExecutions || []).find((e) => e.id === executionId);
+    if (!execution) return;
+
+    const { sessionId } = parseCodexJsonlOutput(jobResult.stdout);
+    let finalResponse = null;
+    try {
+      if (fsSync.existsSync(outputPath)) {
+        const raw = await fs.readFile(outputPath, 'utf8');
+        finalResponse = JSON.parse(raw);
+      }
+    } catch {}
+
+    const gitPostCheck = await verifyGitPostCheck(goal.workspace, gitPreCheck, handoffPackage.boundaries);
+
+    let status = finalResponse?.status && ['completed', 'needs_review', 'failed'].includes(finalResponse.status)
+      ? finalResponse.status
+      : 'completed';
+
+    if (jobResult.status === 'cancelled' || jobResult.signal) {
+      status = 'interrupted';
+    } else if (jobResult.exitCode !== 0 || jobResult.status === 'error') {
+      status = 'failed';
+    } else if (!gitPostCheck.allowedPathsValid || !gitPostCheck.forbiddenPathsValid || gitPostCheck.violations.length > 0) {
+      status = 'needs_review';
+    }
+
+    const resId = `specialist-res:${execution.id}:${Date.now()}`;
+    const resultRecord = validateSpecialistResult({
+      version: 'specialist-result-v1',
+      id: resId,
+      executionId: execution.id,
+      handoffId: execution.handoffId,
+      goalId: goal.id,
+      stepId: execution.stepId,
+      target: execution.target,
+      status,
+      summary: finalResponse?.summary || jobResult.error || `Codex specialist execution finished with status '${status}'.`,
+      codex: {
+        sessionId: sessionId || execution.codexSessionId,
+        exitCode: jobResult.exitCode,
+        signal: jobResult.signal,
+      },
+      git: {
+        preHead: gitPreCheck.head,
+        postHead: gitPostCheck.postHead,
+        preDirtyPaths: gitPreCheck.dirtyPaths,
+        postChangedPaths: gitPostCheck.postChangedPaths,
+        commitsCreated: gitPostCheck.commitsCreated,
+      },
+      boundary: {
+        allowedPathsValid: gitPostCheck.allowedPathsValid,
+        forbiddenPathsValid: gitPostCheck.forbiddenPathsValid,
+        violations: gitPostCheck.violations,
+      },
+      validation: {
+        claimed: finalResponse?.validation_claims || null,
+        observed: {
+          postChangedPaths: gitPostCheck.postChangedPaths,
+          commitsCreated: gitPostCheck.commitsCreated,
+        },
+      },
+      startedAt: execution.startedAt || execution.authorizedAt,
+      finishedAt: new Date().toISOString(),
+      error: jobResult.error || (gitPostCheck.violations.length ? gitPostCheck.violations.join('; ') : null),
+    });
+
+    execution.status = (status === 'needs_review' || status === 'completed') ? 'completed' : status;
+    execution.finishedAt = new Date().toISOString();
+    execution.resultId = resId;
+    if (sessionId) execution.codexSessionId = sessionId;
+
+    goal.specialistResults = [...(goal.specialistResults || []), resultRecord];
+    goal.updatedAt = new Date().toISOString();
+    this.storage.saveGoal(goal);
+
+    try {
+      if (tempDir && fsSync.existsSync(tempDir)) {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    } catch {}
+  }
+
+  async get_specialist_execution(goalId, executionId) {
+    if (!goalId || typeof goalId !== 'string') throw new Error('goalId is required');
+    if (!executionId || typeof executionId !== 'string') throw new Error('executionId is required');
+    const goal = this.storage.getGoal(goalId);
+    if (!goal) throw new Error(`Goal '${goalId}' not found`);
+    const exec = (goal.specialistExecutions || []).find((e) => e.id === executionId);
+    if (!exec) throw new Error(`Specialist execution '${executionId}' not found in Goal '${goalId}'`);
+    return exec;
+  }
+
+  async getSpecialistExecution(goalIdOrParams, executionId) {
+    if (goalIdOrParams && typeof goalIdOrParams === 'object') {
+      return this.get_specialist_execution(goalIdOrParams.goalId, goalIdOrParams.executionId);
+    }
+    return this.get_specialist_execution(goalIdOrParams, executionId);
+  }
+
+  async get_specialist_result(goalId, resultId) {
+    if (!goalId || typeof goalId !== 'string') throw new Error('goalId is required');
+    if (!resultId || typeof resultId !== 'string') throw new Error('resultId is required');
+    const goal = this.storage.getGoal(goalId);
+    if (!goal) throw new Error(`Goal '${goalId}' not found`);
+    const res = (goal.specialistResults || []).find((r) => r.id === resultId);
+    if (!res) throw new Error(`Specialist result '${resultId}' not found in Goal '${goalId}'`);
+    return res;
+  }
+
+  async getSpecialistResult(goalIdOrParams, resultId) {
+    if (goalIdOrParams && typeof goalIdOrParams === 'object') {
+      return this.get_specialist_result(goalIdOrParams.goalId, goalIdOrParams.resultId);
+    }
+    return this.get_specialist_result(goalIdOrParams, resultId);
+  }
+
+  async list_specialist_executions(goalId) {
+    if (!goalId || typeof goalId !== 'string') throw new Error('goalId is required');
+    const goal = this.storage.getGoal(goalId);
+    if (!goal) throw new Error(`Goal '${goalId}' not found`);
+    return goal.specialistExecutions || [];
+  }
+
+  async listSpecialistExecutions(goalIdOrParams) {
+    if (goalIdOrParams && typeof goalIdOrParams === 'object') {
+      return this.list_specialist_executions(goalIdOrParams.goalId);
+    }
+    return this.list_specialist_executions(goalIdOrParams);
+  }
+
+  async list_specialist_results(goalId) {
+    if (!goalId || typeof goalId !== 'string') throw new Error('goalId is required');
+    const goal = this.storage.getGoal(goalId);
+    if (!goal) throw new Error(`Goal '${goalId}' not found`);
+    return goal.specialistResults || [];
+  }
+
+  async listSpecialistResults(goalIdOrParams) {
+    if (goalIdOrParams && typeof goalIdOrParams === 'object') {
+      return this.list_specialist_results(goalIdOrParams.goalId);
+    }
+    return this.list_specialist_results(goalIdOrParams);
   }
 }

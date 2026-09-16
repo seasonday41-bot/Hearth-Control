@@ -4,6 +4,8 @@ import { XLeaseKeeper } from './lease-keeper.mjs';
 import { XExecutionAbortedError } from './cancellation.mjs';
 import { executeXTask } from './execute-x-task.mjs';
 
+import { isWorkspaceLocked } from '../specialist/workspace-lock.mjs';
+
 const describeError = (error) => ({
   code: typeof error?.code === 'string' ? error.code : 'ORCHESTRATION_ERROR',
   message: error?.message || String(error),
@@ -36,9 +38,10 @@ async function releaseOriginalClaim(keeper, claimStore, claim) {
  * model execution. Only the original claim identity may complete or release
  * this run. `done` always resolves to an orchestration outcome, never rejects.
  */
-export async function runXTask(task, modelAdapter, {
-  claimStore, runStore, ownerId, leaseDurationMs, executionOptions = {}, runId,
-} = {}) {
+export async function runXTask(task, modelAdapter, options = {}) {
+  const {
+    claimStore, runStore, ownerId, leaseDurationMs, executionOptions = {}, runId, jobManager, goalStorage,
+  } = options;
   const validatedTask = parseXTask(task);
   if (typeof ownerId !== 'string' || !ownerId.trim()) throw new TypeError('ownerId is required.');
   if (!claimStore || typeof claimStore.claim !== 'function' || typeof claimStore.release !== 'function') {
@@ -52,6 +55,19 @@ export async function runXTask(task, modelAdapter, {
     throw new TypeError('XClaimStore and XRunStore must use the same runtime SQLite path.');
   }
   if (runId !== undefined && (typeof runId !== 'string' || !runId.trim())) throw new TypeError('runId must be a non-empty string.');
+
+  const wsPath = validatedTask.workspace?.root || validatedTask.workspace_root || validatedTask.workspace;
+  if (wsPath) {
+    const lockCheck = isWorkspaceLocked(wsPath, {
+      jobManager,
+      claimStore,
+      runStore,
+      goalStorage,
+    });
+    if (lockCheck.locked) {
+      return { accepted: false, reason: 'workspace_locked', runId: null, error: describeError(new Error(lockCheck.reason)) };
+    }
+  }
 
   const taskId = validatedTask.task_id;
   let claim;

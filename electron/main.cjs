@@ -973,8 +973,90 @@ const startServer = async ({ workspace, port }) => {
         error = err?.message || 'list_specialist_handoffs_failed';
       }
       if (serverProcess === child) {
-        try { child.send({ type: 'goal_list_specialist_handoffs_ack', transportId: message.transportId, ok, handoffs, error }); }
+        try { child.send({ type: 'goal_list_specialist_handoffs_ack', transportId: message.transportId, ok, result: handoffs, error }); }
         catch (sendError) { console.error('[Electron] List specialist handoffs ack failed:', sendError); }
+      }
+    }
+    if (message?.type === 'goal_authorize_specialist_execution_request') {
+      if (typeof message.transportId !== 'string' || !/^[0-9a-f-]{36}$/i.test(message.transportId)) return;
+      let result = null;
+      let ok = true;
+      let error = null;
+      try {
+        if (!goalRunner) { ok = false; error = 'goal_runner_unavailable'; }
+        else {
+          result = await goalRunner.authorize_specialist_execution(message.goalId, message.handoffId, { actor: message.actor });
+          ok = true;
+          sendEvent({ type: 'goals:updated', goal: result.goal });
+        }
+      } catch (err) {
+        ok = false;
+        error = err?.message || 'authorize_specialist_execution_failed';
+      }
+      if (serverProcess === child) {
+        try { child.send({ type: 'goal_authorize_specialist_execution_ack', transportId: message.transportId, ok, result, error }); }
+        catch (sendError) { console.error('[Electron] Authorize specialist execution ack failed:', sendError); }
+      }
+    }
+    if (message?.type === 'goal_dispatch_specialist_execution_request') {
+      if (typeof message.transportId !== 'string' || !/^[0-9a-f-]{36}$/i.test(message.transportId)) return;
+      let result = null;
+      let ok = true;
+      let error = null;
+      try {
+        if (!goalRunner) { ok = false; error = 'goal_runner_unavailable'; }
+        else {
+          result = await goalRunner.dispatch_specialist_execution(message.goalId, message.executionId, { codexBin: message.codexBin });
+          ok = true;
+          sendEvent({ type: 'goals:updated', goal: result.goal });
+        }
+      } catch (err) {
+        ok = false;
+        error = err?.message || 'dispatch_specialist_execution_failed';
+      }
+      if (serverProcess === child) {
+        try { child.send({ type: 'goal_dispatch_specialist_execution_ack', transportId: message.transportId, ok, result, error }); }
+        catch (sendError) { console.error('[Electron] Dispatch specialist execution ack failed:', sendError); }
+      }
+    }
+    if (message?.type === 'goal_get_specialist_execution_request') {
+      if (typeof message.transportId !== 'string' || !/^[0-9a-f-]{36}$/i.test(message.transportId)) return;
+      let execution = null;
+      let ok = true;
+      let error = null;
+      try {
+        if (!goalRunner) { ok = false; error = 'goal_runner_unavailable'; }
+        else {
+          execution = await goalRunner.get_specialist_execution(message.goalId, message.executionId);
+          ok = true;
+        }
+      } catch (err) {
+        ok = false;
+        error = err?.message || 'get_specialist_execution_failed';
+      }
+      if (serverProcess === child) {
+        try { child.send({ type: 'goal_get_specialist_execution_ack', transportId: message.transportId, ok, result: execution, error }); }
+        catch (sendError) { console.error('[Electron] Get specialist execution ack failed:', sendError); }
+      }
+    }
+    if (message?.type === 'goal_get_specialist_result_request') {
+      if (typeof message.transportId !== 'string' || !/^[0-9a-f-]{36}$/i.test(message.transportId)) return;
+      let resRecord = null;
+      let ok = true;
+      let error = null;
+      try {
+        if (!goalRunner) { ok = false; error = 'goal_runner_unavailable'; }
+        else {
+          resRecord = await goalRunner.get_specialist_result(message.goalId, message.resultId);
+          ok = true;
+        }
+      } catch (err) {
+        ok = false;
+        error = err?.message || 'get_specialist_result_failed';
+      }
+      if (serverProcess === child) {
+        try { child.send({ type: 'goal_get_specialist_result_ack', transportId: message.transportId, ok, result: resRecord, error }); }
+        catch (sendError) { console.error('[Electron] Get specialist result ack failed:', sendError); }
       }
     }
   });

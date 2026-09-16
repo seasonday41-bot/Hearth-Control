@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { redactSecrets } from '../executors/antigravity.mjs';
 import { parseXTask } from '../x/task-contract.mjs';
+import { validateSpecialistExecution, validateSpecialistResult } from '../specialist/contract.mjs';
 
 export const GOAL_STATUSES = Object.freeze([
   'draft',
@@ -206,6 +207,12 @@ export const validateGoal = (goal) => {
   const specialistHandoffs = Array.isArray(goal.specialistHandoffs)
     ? goal.specialistHandoffs.map(validateSpecialistHandoff).filter(Boolean)
     : [];
+  const specialistExecutions = Array.isArray(goal.specialistExecutions)
+    ? goal.specialistExecutions.map(validateSpecialistExecution).filter(Boolean)
+    : [];
+  const specialistResults = Array.isArray(goal.specialistResults)
+    ? goal.specialistResults.map(validateSpecialistResult).filter(Boolean)
+    : [];
 
   const now = new Date().toISOString();
 
@@ -222,6 +229,8 @@ export const validateGoal = (goal) => {
     xApproval,
     reviewQueue,
     specialistHandoffs,
+    specialistExecutions,
+    specialistResults,
     createdAt: goal.createdAt || now,
     startedAt: goal.startedAt || null,
     updatedAt: goal.updatedAt || now,

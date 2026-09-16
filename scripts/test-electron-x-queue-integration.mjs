@@ -75,7 +75,7 @@ test('ingress main independently validates, fingerprints, authorizes, and gates 
   assert.match(mainSource, /fs\.promises\.realpath\(message\.workspace\)/);
   assert.match(mainSource, /fs\.promises\.realpath\(readSettings\(\)\.workspace\)/);
   assert.match(mainSource, /fs\.promises\.realpath\(task\.workspace\.root\)/);
-  assert.match(mainSource, /crypto\.createHash\('sha256'\)/);
+  assert.match(mainSource, /computeXTaskFingerprint/);
   assert.match(mainSource, /readSettings\(\)\.permissions\.X \?\? 'Ask'/);
   assert.match(mainSource, /xQueueDispatchEnabled = !xQueueStore\.recoveryRequired && xQueueWorkspaceMatches/);
   assert.match(mainSource, /if \(xQueueDispatchEnabled\) \{\s*for \(const entry of xQueueStore\.listDispatched\(\)\)/);

@@ -659,4 +659,78 @@ export const registerWorkspaceTools = (server, options) => {
       return text(JSON.stringify({ error: error?.message || 'list_specialist_handoffs_failed' }));
     }
   });
+
+  server.registerTool('goal_authorize_specialist_execution', {
+    title: 'Authorize durable specialist execution',
+    description: 'Explicitly authorizes execution for a durable specialist handoff request. Pass goal_id and handoff_id.',
+    inputSchema: {
+      goal_id: z.string().min(1).max(200),
+      handoff_id: z.string().min(1).max(300),
+      actor: z.string().min(1).max(200).optional(),
+    },
+  }, async ({ goal_id, handoff_id, actor } = {}) => {
+    const transport = options.goalTransport || options.reviewQueueTransport;
+    if (!transport?.authorizeSpecialistExecution) return text(JSON.stringify({ ok: false, reason: 'transport_unavailable' }));
+    try {
+      const result = await transport.authorizeSpecialistExecution({ goalId: goal_id, handoffId: handoff_id, actor });
+      return text(JSON.stringify(result, null, 2));
+    } catch (error) {
+      return text(JSON.stringify({ ok: false, reason: error?.message || 'authorize_specialist_execution_failed' }));
+    }
+  });
+
+  server.registerTool('goal_dispatch_specialist_execution', {
+    title: 'Dispatch authorized specialist execution',
+    description: 'Dispatches an authorized specialist execution to the Codex CLI under JobManager process ownership. Pass goal_id and execution_id.',
+    inputSchema: {
+      goal_id: z.string().min(1).max(200),
+      execution_id: z.string().min(1).max(300),
+      codex_bin: z.string().optional(),
+    },
+  }, async ({ goal_id, execution_id, codex_bin } = {}) => {
+    const transport = options.goalTransport || options.reviewQueueTransport;
+    if (!transport?.dispatchSpecialistExecution) return text(JSON.stringify({ ok: false, reason: 'transport_unavailable' }));
+    try {
+      const result = await transport.dispatchSpecialistExecution({ goalId: goal_id, executionId: execution_id, codexBin: codex_bin });
+      return text(JSON.stringify(result, null, 2));
+    } catch (error) {
+      return text(JSON.stringify({ ok: false, reason: error?.message || 'dispatch_specialist_execution_failed' }));
+    }
+  });
+
+  server.registerTool('goal_get_specialist_execution', {
+    title: 'Get specialist execution record',
+    description: 'Read-only: gets a durable specialist execution record. Pass goal_id and execution_id.',
+    inputSchema: {
+      goal_id: z.string().min(1).max(200),
+      execution_id: z.string().min(1).max(300),
+    },
+  }, async ({ goal_id, execution_id } = {}) => {
+    const transport = options.goalTransport || options.reviewQueueTransport;
+    if (!transport?.getSpecialistExecution) return text(JSON.stringify({ error: 'transport_unavailable' }));
+    try {
+      const result = await transport.getSpecialistExecution({ goalId: goal_id, executionId: execution_id });
+      return text(JSON.stringify(result, null, 2));
+    } catch (error) {
+      return text(JSON.stringify({ error: error?.message || 'get_specialist_execution_failed' }));
+    }
+  });
+
+  server.registerTool('goal_get_specialist_result', {
+    title: 'Get specialist result record',
+    description: 'Read-only: gets a durable specialist result record. Pass goal_id and result_id.',
+    inputSchema: {
+      goal_id: z.string().min(1).max(200),
+      result_id: z.string().min(1).max(300),
+    },
+  }, async ({ goal_id, result_id } = {}) => {
+    const transport = options.goalTransport || options.reviewQueueTransport;
+    if (!transport?.getSpecialistResult) return text(JSON.stringify({ error: 'transport_unavailable' }));
+    try {
+      const result = await transport.getSpecialistResult({ goalId: goal_id, resultId: result_id });
+      return text(JSON.stringify(result, null, 2));
+    } catch (error) {
+      return text(JSON.stringify({ error: error?.message || 'get_specialist_result_failed' }));
+    }
+  });
 };
