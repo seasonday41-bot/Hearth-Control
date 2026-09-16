@@ -34,6 +34,7 @@ export const toolNames = [
   'review_queue_list',
   'review_queue_acknowledge',
   'review_queue_resolve',
+  'review_queue_retry',
 ];
 
 const text = (value) => ({ content: [{ type: 'text', text: String(value) }] });
@@ -554,6 +555,26 @@ export const registerWorkspaceTools = (server, options) => {
       return text(JSON.stringify(result, null, 2));
     } catch (error) {
       return text(JSON.stringify({ ok: false, reason: error?.message || 'resolve_failed' }));
+    }
+  });
+
+  server.registerTool('review_queue_retry', {
+    title: 'Retry durable Goal Review Queue item (dispatch new X execution)',
+    description: 'Prepares a NEW X execution for a step whose terminal outcome was NEEDS_REVIEW or FAILED. DISTINCT from review_queue_resolve (which accepts a result without new execution): RETRY means "run X again." The caller MUST supply a COMPLETE, already-authored x-task-v1 in x_task. Hearth validates it and enforces lineage rules (task_id must match, revision/attempt must follow same-spec or revised-spec rules, based_on_result_id must match review item resultId when present). Does NOT dispatch X itself -- the next resume_goal / run_goal performs dispatch. Idempotent: a second call on an already-superseded item returns alreadySuperseded without re-incrementing generation.',
+    inputSchema: {
+      goal_id: z.string().min(1).max(200),
+      review_item_id: z.string().min(1).max(300),
+      x_task: z.object({}).passthrough(),
+      note: z.string().min(1).max(2000).optional(),
+      actor: z.string().min(1).max(200).optional(),
+    },
+  }, async ({ goal_id, review_item_id, x_task, note, actor } = {}) => {
+    if (!options.reviewQueueTransport?.retry) return text(JSON.stringify({ ok: false, reason: 'transport_unavailable' }));
+    try {
+      const result = await options.reviewQueueTransport.retry({ goalId: goal_id, reviewItemId: review_item_id, xTask: x_task, note, actor });
+      return text(JSON.stringify(result, null, 2));
+    } catch (error) {
+      return text(JSON.stringify({ ok: false, reason: error?.message || 'retry_failed' }));
     }
   });
 };

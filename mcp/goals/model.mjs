@@ -70,6 +70,16 @@ export const validateStep = (step) => {
     }
   }
 
+  // executionGeneration: Hearth-managed counter incremented on each new X
+  // execution lineage for this step (retry, interrupted recovery). null means
+  // first execution (generation 1, uses legacy requestId format). Integers >= 2
+  // use the goal:id:step:id:exec:N requestId. Backward-compatible: stored Goals
+  // without this field load as null and behave identically to Slice 1.
+  const executionGeneration =
+    Number.isInteger(step.executionGeneration) && step.executionGeneration >= 2
+      ? step.executionGeneration
+      : null;
+
   return {
     id,
     title,
@@ -80,6 +90,7 @@ export const validateStep = (step) => {
     routeReason,
     required,
     xTask,
+    executionGeneration,
     result: typeof step.result === 'string' ? redactSecrets(step.result) : null,
     evidence: step.evidence ? sanitizeEvidence(step.evidence) : null,
     startedAt: step.startedAt || null,
@@ -347,6 +358,8 @@ export const validateReviewQueueItem = (item) => {
     acknowledgedBy: typeof item.acknowledgedBy === 'string' ? redactSecrets(item.acknowledgedBy).slice(0, 200) : null,
     resolvedAt: typeof item.resolvedAt === 'string' ? item.resolvedAt : null,
     resolution: typeof item.resolution === 'string' ? item.resolution : null,
+    // supersededAt: set when lifecycle transitions to 'superseded' (human retry preparation).
+    supersededAt: typeof item.supersededAt === 'string' ? item.supersededAt : null,
     note: typeof item.note === 'string' ? redactSecrets(item.note).slice(0, 2000) : null,
     reason: typeof item.reason === 'string' ? redactSecrets(item.reason).slice(0, 2000) : '',
     evidence: sanitizeEvidence(item.evidence),

@@ -873,6 +873,31 @@ const startServer = async ({ workspace, port }) => {
         catch (sendError) { console.error('[Electron] Review Queue resolve ack failed:', sendError); }
       }
     }
+    if (message?.type === 'review_queue_retry_request') {
+      if (typeof message.transportId !== 'string' || !/^[0-9a-f-]{36}$/i.test(message.transportId)) return;
+      let result = null;
+      let ok = true;
+      let error = null;
+      try {
+        if (!goalRunner) { ok = false; error = 'goal_runner_unavailable'; }
+        else {
+          result = await goalRunner.retry_review(message.goalId, message.reviewItemId, {
+            xTask: message.xTask,
+            note: message.note,
+            actor: message.actor,
+          });
+          ok = true;
+          sendEvent({ type: 'goals:updated', goal: result.goal });
+        }
+      } catch (err) {
+        ok = false;
+        error = err?.message || 'review_queue_retry_failed';
+      }
+      if (serverProcess === child) {
+        try { child.send({ type: 'review_queue_retry_ack', transportId: message.transportId, ok, result, error }); }
+        catch (sendError) { console.error('[Electron] Review Queue retry ack failed:', sendError); }
+      }
+    }
   });
   serverProcess.once('exit', (code, signal) => {
     cancelXQueueChild(child);

@@ -230,13 +230,14 @@ await test('6. INTERRUPTED becomes waiting/recoverable and creates zero review i
   assert.equal(finished.steps[0].status, 'waiting');
   assert.equal(finished.reviewQueue.length, 0, 'INTERRUPTED must never create a review item');
 
-  // Recovery: the underlying run later completes; resuming picks it up,
-  // still with zero review items and zero duplicate X execution.
-  xExecutor.statuses.set(requestId, { found: true, queue_status: 'terminal', terminal_status: 'completed', result: 'recovered' });
+  // Recovery: generation 2 is allocated on interrupt. Setting status for gen2 requestId
+  // allows resume_goal to complete step s1 on generation 2.
+  const gen2RequestId = `goal:${goal.id}:step:s1:exec:2`;
+  xExecutor.statuses.set(gen2RequestId, { found: true, queue_status: 'terminal', terminal_status: 'completed', result: 'recovered' });
   const resumed = await runner.resume_goal(goal.id);
   assert.equal(resumed.status, 'completed');
   assert.equal(resumed.reviewQueue.length, 0);
-  assert.equal(xExecutor.dispatchLog.length, 1, 'recovery must not have created a second X execution');
+  assert.equal(xExecutor.dispatchLog.length, 2, 'gen 2 dispatched for recovery after interrupt');
 });
 
 // ── 7 & 8. Restart/replay does not duplicate review item or X execution ────

@@ -37,7 +37,7 @@ const dispatchXTaskBodySource = mainSource.slice(dispatchBodyStart, dispatchEnd)
 const dirs = [];
 afterEach(() => { for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true }); });
 
-const xTaskFor = (root, taskId, objective = 'Report a fact') => ({
+const xTaskFor = (root, taskId, objective = 'Report a fact', overrides = {}) => ({
   version: X_TASK_VERSION,
   task_id: taskId,
   parent_task_id: null,
@@ -64,6 +64,7 @@ const xTaskFor = (root, taskId, objective = 'Report a fact') => ({
   repair_budget: { initial_attempts: 1, max_repairs: 2, max_total_rounds: 3 },
   timing: { estimated_minutes: 1, first_check_after_minutes: 1, soft_deadline_minutes: 1, hard_timeout_minutes: 1 },
   commit_policy: { mode: 'never' },
+  ...overrides,
 });
 
 function threeStepGoal(root, { title = 'Approval Goal' } = {}) {
@@ -452,6 +453,104 @@ await t('14/15/16. Goal-level approval only gates the per-step X ASK prompt -- i
   // and test 7 (X step never calls Antigravity) -- re-run alongside this
   // suite as part of the full regression sweep.
   assert.ok(true);
+});
+
+// ── 17. Slice 2: INTERRUPTED recovery with unchanged xTask reuses existing approval ──
+await t('17. INTERRUPTED recovery with unchanged xTask reuses existing approval without re-prompting', async () => {
+  const h = realRunnerHarness({ permission: 'Ask' });
+  const workspace = path.join(h.root, 'ws17');
+  fs.mkdirSync(workspace, { recursive: true });
+
+  const goal = await h.runner.create_goal({
+    title: 'Interrupted Approval Goal',
+    objective: 'Test approval reuse across INTERRUPTED recovery',
+    workspace,
+    steps: [{ id: 's1', title: 'Step 1', description: '', route: 'x', xTask: xTaskFor(h.root, 'INT-APP-1') }],
+  });
+
+  // First run: prompt for approval, approve it
+  const runPromise = h.runner.run_goal(goal.id);
+  const approvals = await waitForEvents(h, 1);
+  assert.equal(approvals.length, 1, 'First run asks for Goal approval');
+  h.localApprovals.get(approvals[0].requestId)(true);
+
+  // Set step execution to INTERRUPTED receipt
+  const gen1Id = `goal:${goal.id}:step:s1`;
+  h.runner.xExecutor = {
+    dispatchXTask: h.api.dispatchXTask,
+    getXTaskStatus: async (reqId) => {
+      if (reqId === gen1Id) return { found: true, queue_status: 'terminal', terminal_status: 'interrupted' };
+      return { found: true, queue_status: 'terminal', terminal_status: 'completed', result: 'ok' };
+    },
+  };
+
+  const interruptedGoal = await runPromise;
+  assert.equal(interruptedGoal.steps[0].status, 'waiting');
+  assert.equal(interruptedGoal.steps[0].executionGeneration, 2);
+
+  // Recovery resume (gen 2, unchanged xTask): should NOT prompt for approval again
+  const eventsBeforeResume = h.events.filter((e) => e.type === 'approval').length;
+  const resumedGoal = await h.runner.resume_goal(goal.id);
+  const eventsAfterResume = h.events.filter((e) => e.type === 'approval').length;
+
+  assert.equal(eventsAfterResume, eventsBeforeResume, 'INTERRUPTED recovery with unchanged xTask must reuse existing approval without re-prompting');
+  assert.equal(resumedGoal.status, 'completed');
+});
+
+// ── 18. Slice 2: Human retry with changed xTask invalidates old approval ──────
+await t('18. Human retry with changed xTask fingerprint does NOT inherit old approval and requires new approval', async () => {
+  const h = realRunnerHarness({ permission: 'Ask' });
+  const workspace = path.join(h.root, 'ws18');
+  fs.mkdirSync(workspace, { recursive: true });
+
+  const goal = await h.runner.create_goal({
+    title: 'Retry Approval Goal',
+    objective: 'Test approval invalidation on revised retry',
+    workspace,
+    steps: [{ id: 's1', title: 'Step 1', description: '', route: 'x', xTask: xTaskFor(h.root, 'RETRY-APP-1') }],
+  });
+
+  // First run: prompt and approve
+  const runPromise = h.runner.run_goal(goal.id);
+  const approvals1 = await waitForEvents(h, 1);
+  assert.equal(approvals1.length, 1);
+  h.localApprovals.get(approvals1[0].requestId)(true);
+
+  // Set step execution to NEEDS_REVIEW receipt
+  const gen1Id = `goal:${goal.id}:step:s1`;
+  h.runner.xExecutor = {
+    dispatchXTask: h.api.dispatchXTask,
+    getXTaskStatus: async (reqId) => {
+      if (reqId === gen1Id) {
+        return {
+          found: true, queue_status: 'terminal', terminal_status: 'needs_review',
+          result: { version: 'x-result-v1', result_id: 'r-app-1', task_id: 'RETRY-APP-1', reason_code: 'waiting_review' },
+        };
+      }
+      return { found: true, queue_status: 'terminal', terminal_status: 'completed', result: 'ok' };
+    },
+  };
+
+  const waitingGoal = await runPromise;
+  const reviewItem = waitingGoal.reviewQueue[0];
+
+  // Prepare human retry with a REVISED xTask (different content/fingerprint)
+  const revisedTask = xTaskFor(h.root, 'RETRY-APP-1', 'REVISED objective requiring re-approval', {
+    revision: 2,
+    attempt: 1,
+    based_on_result_id: 'r-app-1',
+  });
+  await h.runner.retry_review(goal.id, reviewItem.id, { xTask: revisedTask });
+
+  // Resume goal execution for the retry: must trigger a NEW approval prompt
+  const resumePromise = h.runner.resume_goal(goal.id);
+  const approvals2 = await waitForEvents(h, 2);
+  assert.equal(approvals2.length, 2, 'Revised human retry MUST trigger a new approval prompt due to fingerprint mismatch');
+
+  // Approve the new prompt and complete
+  h.localApprovals.get(approvals2[1].requestId)(true);
+  const finished = await resumePromise;
+  assert.equal(finished.status, 'completed');
 });
 
 console.log(`\nResults: ${passed} passed, ${failed} failed out of ${passed + failed} tests\n`);

@@ -373,8 +373,8 @@ await test('12. FAILED stops dependent continuation', async () => {
   assert.equal(antigravityCalls.length, 0);
 });
 
-// ── 13. INTERRUPTED remains recoverable ─────────────────────────────────────
-await test('13. INTERRUPTED remains recoverable/waiting', async () => {
+// ── 13. INTERRUPTED remains recoverable (Slice 2: new generation + new requestId) ──
+await test('13. INTERRUPTED remains recoverable/waiting (Slice 2: allocates new generation, resumes with :exec:2)', async () => {
   const storage = new GoalStorage({ storagePath: freshStoragePath() });
   const xExecutor = makeMockXExecutor();
   const runner = new GoalRunner({ storage, xExecutor });
@@ -386,19 +386,28 @@ await test('13. INTERRUPTED remains recoverable/waiting', async () => {
     steps: [{ id: 's1', title: 'X step', description: '', route: 'x', xTask: validXTask() }],
   });
 
-  const requestId = `goal:${goal.id}:step:s1`;
-  xExecutor.statuses.set(requestId, { found: true, queue_status: 'terminal', terminal_status: 'interrupted' });
+  const gen1RequestId = `goal:${goal.id}:step:s1`;
+  const gen2RequestId = `goal:${goal.id}:step:s1:exec:2`;
+  xExecutor.statuses.set(gen1RequestId, { found: true, queue_status: 'terminal', terminal_status: 'interrupted' });
 
   const finished = await runner.run_goal(goal.id);
   assert.equal(finished.steps[0].status, 'waiting');
   assert.equal(finished.status, 'waiting');
+  // Slice 2: generation allocated exactly once on INTERRUPTED
+  assert.equal(finished.steps[0].executionGeneration, 2, 'executionGeneration must be 2 after INTERRUPTED');
+  assert.equal(xExecutor.dispatchLog.length, 1, 'gen1 dispatched once');
+  assert.equal(xExecutor.dispatchLog[0].requestId, gen1RequestId);
 
-  // Recovery: the underlying run later completes; resuming picks it up.
-  xExecutor.statuses.set(requestId, { found: true, queue_status: 'terminal', terminal_status: 'completed', result: 'recovered' });
+  // Recovery: resume dispatches a fresh execution under gen2 requestId, not the old terminal gen1.
+  // Set gen2 receipt to completed so resume can finish.
+  xExecutor.statuses.set(gen2RequestId, { found: true, queue_status: 'terminal', terminal_status: 'completed', result: 'recovered' });
   const resumed = await runner.resume_goal(goal.id);
   assert.equal(resumed.steps[0].status, 'completed');
   assert.equal(resumed.status, 'completed');
-  assert.equal(xExecutor.dispatchLog.length, 1, 'recovery must not have created a second X execution');
+  // gen2 must have been dispatched exactly once (not gen1 again, which would coalesce to interrupted)
+  const gen2Dispatches = xExecutor.dispatchLog.filter((d) => d.requestId === gen2RequestId);
+  assert.equal(gen2Dispatches.length, 1, 'gen2 requestId must be dispatched exactly once for recovery');
+  assert.equal(xExecutor.dispatchLog.length, 2, 'total: 1 gen1 + 1 gen2 dispatch');
 });
 
 // ── 14. Manual/checkpoint behavior unchanged ────────────────────────────────
@@ -433,7 +442,7 @@ await test('14. manual/checkpoint behavior unchanged alongside route:x', async (
 });
 
 // ── 15. Pause/resume unchanged with an x-route step present ────────────────
-await test('15. pause/resume unchanged with a route:x step present', async () => {
+await test('15. pause/resume unchanged with a route:x step present (Slice 2: recovery uses :exec:2)', async () => {
   const storage = new GoalStorage({ storagePath: freshStoragePath() });
   const xExecutor = makeMockXExecutor();
   const runner = new GoalRunner({ storage, xExecutor });
@@ -445,13 +454,16 @@ await test('15. pause/resume unchanged with a route:x step present', async () =>
     steps: [{ id: 's1', title: 'X step', description: '', route: 'x', xTask: validXTask() }],
   });
 
-  const requestId = `goal:${goal.id}:step:s1`;
+  const gen1RequestId = `goal:${goal.id}:step:s1`;
+  const gen2RequestId = `goal:${goal.id}:step:s1:exec:2`;
   // interrupted leaves the goal in 'waiting', one of pause_goal's two
   // allowed source statuses (the other is 'running') -- exercising the
   // existing pause/resume gate exactly as any other route already does.
-  xExecutor.statuses.set(requestId, { found: true, queue_status: 'terminal', terminal_status: 'interrupted' });
+  xExecutor.statuses.set(gen1RequestId, { found: true, queue_status: 'terminal', terminal_status: 'interrupted' });
   const waiting = await runner.run_goal(goal.id);
   assert.equal(waiting.status, 'waiting');
+  // Slice 2: generation allocated to 2 after INTERRUPTED
+  assert.equal(waiting.steps[0].executionGeneration, 2);
   assert.equal(xExecutor.dispatchLog.length, 1);
 
   await runner.pause_goal(goal.id);
@@ -459,10 +471,13 @@ await test('15. pause/resume unchanged with a route:x step present', async () =>
   assert.equal(paused.status, 'paused');
   assert.equal(xExecutor.dispatchLog.length, 1, 'pause_goal itself must never dispatch to X');
 
-  xExecutor.statuses.set(requestId, { found: true, queue_status: 'terminal', terminal_status: 'completed', result: 'ok' });
+  // Recovery: resume dispatches under gen2 requestId (new execution, not the old terminal gen1).
+  xExecutor.statuses.set(gen2RequestId, { found: true, queue_status: 'terminal', terminal_status: 'completed', result: 'ok' });
   const resumed = await runner.resume_goal(goal.id);
   assert.equal(resumed.status, 'completed');
-  assert.equal(xExecutor.dispatchLog.length, 1, 'resume must reuse the same durable requestId, never a second execution');
+  const gen2Dispatches = xExecutor.dispatchLog.filter((d) => d.requestId === gen2RequestId);
+  assert.equal(gen2Dispatches.length, 1, 'resume must dispatch exactly one gen2 execution for recovery');
+  assert.equal(xExecutor.dispatchLog.length, 2, 'total: 1 gen1 + 1 gen2 dispatch');
 });
 
 // ── 16. Startup reconciliation does not rerun an already-terminal X step ───

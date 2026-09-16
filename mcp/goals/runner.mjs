@@ -1,12 +1,35 @@
 import fs from 'node:fs/promises';
 import { redactSecrets } from '../executors/antigravity.mjs';
 import { getJobManager } from '../runtime/job-manager.mjs';
+import { parseXTask } from '../x/task-contract.mjs';
 import {
   createGoal,
   createGoalCheckpoint,
   createReviewQueueItem,
   validateGoal,
 } from './model.mjs';
+
+/**
+ * Derives the durable X requestId for a Goal step.
+ *
+ * generation null or 1 (first/only execution) → legacy format:
+ *   goal:<goalId>:step:<stepId>
+ *
+ * generation >= 2 (retry or interrupted recovery) → extended format:
+ *   goal:<goalId>:step:<stepId>:exec:<generation>
+ *
+ * Centralised so no call site duplicates this logic.
+ *
+ * @param {object} goal
+ * @param {object} step
+ * @returns {string}
+ */
+function getXRequestId(goal, step) {
+  const gen = step.executionGeneration ?? null;
+  return gen != null && gen >= 2
+    ? `goal:${goal.id}:step:${step.id}:exec:${gen}`
+    : `goal:${goal.id}:step:${step.id}`;
+}
 
 export class GoalRunner {
   /**
@@ -273,6 +296,30 @@ export class GoalRunner {
           goal.status = 'waiting';
           goal.updatedAt = new Date().toISOString();
 
+          // INTERRUPTED RECOVERY: allocate a new executionGeneration exactly
+          // once before saving. The new generation becomes durable here; the
+          // next resume_goal/run_goal will compute a new requestId via
+          // getXRequestId and dispatch a genuinely fresh X execution.
+          // Idempotent across Hearth restarts: if the process crashes after
+          // this save, the next restart sees the already-incremented value and
+          // does not increment again.
+          if (stepResult.interruptedRecovery) {
+            const prevGen = step.executionGeneration ?? 1;
+            step.executionGeneration = prevGen + 1;
+            // Append a durable checkpoint describing the recovery allocation.
+            this.checkpoint_goal(goal.id, step.id, {
+              summary: `Interrupted recovery: step '${step.title}' allocated new execution generation ${step.executionGeneration}. Resume the goal to dispatch a fresh X run.`,
+              completedSteps: goal.steps.filter((s) => s.status === 'completed').length,
+              evidence: {
+                interruptedRequestId: stepResult.evidence?.requestId || null,
+                interruptedRunId: stepResult.evidence?.runId || null,
+                newExecutionGeneration: step.executionGeneration,
+              },
+              nextStep: step.id,
+              route: step.route,
+            }, goal);
+          }
+
           // NEEDS_REVIEW (never INTERRUPTED -- see executeStep's route:'x'
           // branch, the only current source of reviewNeeded): create/
           // update the durable Review Queue item BEFORE checkpointing/
@@ -290,13 +337,15 @@ export class GoalRunner {
             });
           }
 
-          this.checkpoint_goal(goal.id, step.id, {
-            summary: `Step ${stepIndex + 1} (${step.title}) waiting: ${step.result}`,
-            completedSteps: goal.steps.filter((s) => s.status === 'completed').length,
-            evidence: stepResult.evidence,
-            nextStep: step.id,
-            route: step.route,
-          }, goal);
+          if (!stepResult.interruptedRecovery) {
+            this.checkpoint_goal(goal.id, step.id, {
+              summary: `Step ${stepIndex + 1} (${step.title}) waiting: ${step.result}`,
+              completedSteps: goal.steps.filter((s) => s.status === 'completed').length,
+              evidence: stepResult.evidence,
+              nextStep: step.id,
+              route: step.route,
+            }, goal);
+          }
 
           this.storage.saveGoal(goal);
           // Fired only AFTER the item is durably saved -- see the
@@ -501,11 +550,14 @@ export class GoalRunner {
         throw new Error('X executor is not configured');
       }
 
-      // Deterministic per goal+step requestId: a duplicate resume/
-      // continuation calls dispatchXTask again with the SAME requestId and
-      // the SAME task content, which the shared X ingress (ingestXTask)
-      // resolves to the SAME durable receipt instead of executing X again.
-      const requestId = `goal:${goal.id}:step:${step.id}`;
+      // Deterministic per goal+step+generation requestId. A duplicate resume/
+      // continuation (same generation) calls dispatchXTask again with the SAME
+      // requestId and SAME task content, which the shared X ingress resolves
+      // to the SAME durable receipt instead of executing X again. After a
+      // retry or interrupted-recovery allocation, executionGeneration is
+      // incremented before this point, producing a NEW requestId that routes
+      // to a genuinely new execution.
+      const requestId = getXRequestId(goal, step);
       const action = `Goal step: ${goal.title} / ${step.title}`;
 
       // Passes the LIVE goal/step objects (not just their ids) so any
@@ -582,11 +634,19 @@ export class GoalRunner {
         };
       }
       if (xStatus.terminal_status === 'interrupted') {
-        // Recoverable/waiting -- deliberately NEVER a Review Queue item
-        // (no reviewNeeded here): an interrupted run has no ambiguous
-        // outcome for a human to weigh in on, only an in-flight one to
-        // safely resume, exactly like a poll-window timeout above.
-        return { status: 'waiting', result: 'X step was interrupted and is recoverable; resume the goal to check again.', evidence };
+        // Recoverable — deliberately NEVER a Review Queue item (no reviewNeeded
+        // here): an interrupted run has no ambiguous outcome for a human to
+        // weigh in on. Signal the caller (run_goal) to allocate a new
+        // executionGeneration so the NEXT resume dispatches a genuinely fresh
+        // X execution under a new requestId, rather than coalescing to the
+        // existing terminal interrupted receipt forever (the loop-bug this
+        // flag was introduced to fix).
+        return {
+          status: 'waiting',
+          result: 'X step was interrupted and is recoverable. A new execution will be allocated on resume.',
+          evidence,
+          interruptedRecovery: true,
+        };
       }
       // 'failed' (or any unrecognized terminal status): fail closed.
       const failureReason = xStatus.error || xStatus.result?.reason_code || 'X step failed';
@@ -1155,5 +1215,199 @@ export class GoalRunner {
     }
     return this.resolve_review(goalIdOrParams, reviewItemId, options);
   }
-}
 
+  /**
+   * Operation 13: retry_review
+   *
+   * Prepares a NEW X execution for a step whose terminal X outcome was
+   * NEEDS_REVIEW or FAILED. Semantically distinct from resolve_review (which
+   * ACCEPTS a NEEDS_REVIEW result without any new execution): RETRY means
+   * "run X again."
+   *
+   * Caller (Main Brain / human) MUST supply a COMPLETE, already-authored
+   * x-task-v1 payload in options.xTask. Hearth validates it but never
+   * synthesizes, repairs, or extends it. Required fields authored by Main Brain:
+   *   - task_id (must match existing step.xTask.task_id -- same logical task)
+   *   - revision: same-spec retry => old.revision; revised => old.revision + 1
+   *   - attempt: same-spec retry => old.attempt + 1; revised => 1
+   *   - based_on_result_id: MUST equal reviewItem.resultId when resultId exists
+   *
+   * DOES NOT dispatch X. The next resume_goal / run_goal performs dispatch.
+   *
+   * Idempotent on double-call: if the review item is already superseded,
+   * returns { goal, item, alreadySuperseded: true } without re-incrementing
+   * executionGeneration or re-saving.
+   *
+   * @param {string} goalId
+   * @param {string} reviewItemId
+   * @param {{ xTask: object, note?: string, actor?: string }} options
+   */
+  async retry_review(goalId, reviewItemId, options = {}) {
+    if (!goalId || typeof goalId !== 'string') throw new Error('goalId is required');
+    if (!reviewItemId || typeof reviewItemId !== 'string') throw new Error('reviewItemId is required');
+
+    const goal = this.storage.getGoal(goalId);
+    if (!goal) throw new Error(`Goal '${goalId}' not found`);
+
+    const item = (goal.reviewQueue || []).find(
+      (it) => it.id === reviewItemId || it.idempotencyKey === reviewItemId
+    );
+    if (!item) throw new Error(`Review queue item '${reviewItemId}' not found in goal '${goalId}'`);
+
+    // ── Locate the step ───────────────────────────────────────────────────────
+    const stepIndex = goal.steps.findIndex((s) => s.id === item.stepId);
+    if (stepIndex === -1) {
+      throw new Error(`Step '${item.stepId}' for review item '${reviewItemId}' not found in goal '${goalId}'`);
+    }
+    const step = goal.steps[stepIndex];
+
+    // ── Validate the complete new xTask (required, no synthesis) ──────────────
+    if (!options.xTask || typeof options.xTask !== 'object') {
+      throw new Error('retry_review requires a complete x-task-v1 payload in options.xTask; Hearth never synthesizes one');
+    }
+    let newXTask;
+    try {
+      newXTask = parseXTask(options.xTask);
+    } catch (err) {
+      throw new Error(`retry_review: invalid xTask: ${err.message}`);
+    }
+
+    // ── Idempotency: already superseded by a previous retry call ─────────────
+    if (item.lifecycle === 'superseded') {
+      if (step.xTask && JSON.stringify(newXTask) === JSON.stringify(step.xTask)) {
+        return { goal, item, alreadySuperseded: true };
+      }
+      throw new Error(`Cannot retry review item '${reviewItemId}' because it is already superseded by a different retry request`);
+    }
+
+    // ── Guard: only open/acknowledged review items can be retried ─────────────
+    if (!['open', 'acknowledged'].includes(item.lifecycle)) {
+      throw new Error(
+        `Cannot retry review item '${reviewItemId}' in lifecycle '${item.lifecycle}'. Must be 'open' or 'acknowledged'.`
+      );
+    }
+    if (!['needs_review', 'failed'].includes(item.status)) {
+      throw new Error(
+        `Cannot retry review item '${reviewItemId}' with status '${item.status}'. Must be 'needs_review' or 'failed'.`
+      );
+    }
+
+    const oldXTask = step.xTask;
+    if (!oldXTask) {
+      throw new Error(`Step '${step.title}' has no existing xTask to retry against`);
+    }
+
+    // ── Lineage validation (fail closed) ─────────────────────────────────────
+    // task_id: must refer to the same logical task.
+    if (newXTask.task_id !== oldXTask.task_id) {
+      throw new Error(
+        `retry_review: newXTask.task_id '${newXTask.task_id}' does not match existing step task_id '${oldXTask.task_id}'. Retry must continue the same logical task.`
+      );
+    }
+
+    const isSameSpec = newXTask.revision === oldXTask.revision;
+    const isRevisedSpec = newXTask.revision === oldXTask.revision + 1;
+
+    if (!isSameSpec && !isRevisedSpec) {
+      throw new Error(
+        `retry_review: newXTask.revision ${newXTask.revision} is invalid. Same-spec retry requires revision ${oldXTask.revision}; revised retry requires revision ${oldXTask.revision + 1}.`
+      );
+    }
+
+    if (isSameSpec) {
+      // Same specification: attempt must increment by exactly 1.
+      const expectedAttempt = oldXTask.attempt + 1;
+      if (newXTask.attempt !== expectedAttempt) {
+        throw new Error(
+          `retry_review: same-spec retry requires newXTask.attempt ${expectedAttempt} (old.attempt ${oldXTask.attempt} + 1); got ${newXTask.attempt}.`
+        );
+      }
+    } else {
+      // Revised specification: attempt must reset to 1.
+      if (newXTask.attempt !== 1) {
+        throw new Error(
+          `retry_review: revised retry (revision ${newXTask.revision}) requires newXTask.attempt 1; got ${newXTask.attempt}.`
+        );
+      }
+    }
+
+    // based_on_result_id: must equal reviewItem.resultId when a resultId exists.
+    if (item.resultId) {
+      if (newXTask.based_on_result_id !== item.resultId) {
+        throw new Error(
+          `retry_review: newXTask.based_on_result_id '${newXTask.based_on_result_id}' must equal review item resultId '${item.resultId}'.`
+        );
+      }
+    }
+
+    // ── All validation passed. Apply changes atomically before saving. ────────
+    const now = new Date().toISOString();
+
+    // 1. Replace step xTask with the authorized new payload.
+    step.xTask = newXTask;
+
+    // 2. Allocate exactly one new executionGeneration.
+    const prevGen = step.executionGeneration ?? 1;
+    step.executionGeneration = prevGen + 1;
+
+    // 3. Reset step state for a fresh execution. Preserve evidence (history);
+    //    clear terminal fields that would block re-execution.
+    step.status = 'pending';
+    step.result = null;
+    step.finishedAt = null;
+    // startedAt is cleared so the new execution gets its own start timestamp.
+    step.startedAt = null;
+
+    // 4. Route goal back to ready (unblocks resume_goal; clears error terminal).
+    goal.currentStepId = step.id;
+    goal.status = 'ready';
+    goal.error = null;
+    goal.finishedAt = null;
+    goal.updatedAt = now;
+
+    // 5. Supersede the old review item (preserve all original evidence/history).
+    item.lifecycle = 'superseded';
+    item.supersededAt = now;
+    if (options.note) item.note = redactSecrets(String(options.note)).slice(0, 2000);
+    if (options.actor) item.acknowledgedBy = redactSecrets(String(options.actor)).slice(0, 200);
+    item.updatedAt = now;
+
+    // 6. Append a durable checkpoint BEFORE saving so it lands atomically.
+    const newRequestId = getXRequestId(goal, step);
+    this.checkpoint_goal(goal.id, step.id, {
+      summary: `Human retry prepared: step '${step.title}' will re-execute via X (generation ${step.executionGeneration}). Previous review item '${item.id}' superseded. Next requestId: ${newRequestId}. revision=${newXTask.revision}, attempt=${newXTask.attempt}${item.resultId ? `, based_on_result_id=${newXTask.based_on_result_id}` : ''}.`,
+      completedSteps: goal.steps.filter((s) => s.status === 'completed').length,
+      evidence: {
+        previousReviewItemId: item.id,
+        previousStatus: item.status,
+        previousResultId: item.resultId || null,
+        newExecutionGeneration: step.executionGeneration,
+        newRequestId,
+        revision: newXTask.revision,
+        attempt: newXTask.attempt,
+        based_on_result_id: newXTask.based_on_result_id || null,
+      },
+      nextStep: step.id,
+      route: step.route,
+    }, goal);
+
+    // 7. Single atomic save. All mutations above land together.
+    this.storage.saveGoal(goal);
+
+    if (this.onReviewItemPersisted) {
+      try { this.onReviewItemPersisted(item, goal); } catch {}
+    }
+
+    return { goal, item };
+  }
+
+  /**
+   * Alias for retry_review supporting both parameter styles
+   */
+  async retryReview(goalIdOrParams, reviewItemId, options) {
+    if (goalIdOrParams && typeof goalIdOrParams === 'object') {
+      return this.retry_review(goalIdOrParams.goalId, goalIdOrParams.reviewItemId, goalIdOrParams);
+    }
+    return this.retry_review(goalIdOrParams, reviewItemId, options);
+  }
+}

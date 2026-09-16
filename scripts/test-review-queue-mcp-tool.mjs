@@ -56,7 +56,11 @@ function harness({ xExecutorSpy, antigravitySpy } = {}) {
   registerWorkspaceTools(server, {
     workspace: root,
     permissions: {},
-    reviewQueueTransport: { list: async ({ goalId } = {}) => ({ items: runner.list_review_queue(goalId ? { goalId } : {}) }) },
+    reviewQueueTransport: {
+      list: async ({ goalId } = {}) => ({ items: runner.list_review_queue(goalId ? { goalId } : {}) }),
+      retry: async ({ goalId, reviewItemId, xTask, note, actor } = {}) =>
+        runner.retry_review(goalId, reviewItemId, { xTask, note, actor }),
+    },
   });
 
   return { root, goalsPath, storage, runner, server };
@@ -198,11 +202,29 @@ await t('additional: no injected reviewQueueTransport (e.g. stdio.mjs, no Electr
   assert.deepEqual(result, { items: [], reason: 'transport_unavailable' });
 });
 
-// ── 8. MCP tool registration does not alter existing tool behavior ─────────
-await t('8. tool registration includes review_queue_list without displacing any existing tool', async () => {
+// ── 9. review_queue_retry tool execution through transport ─────────────────
+await t('9. review_queue_retry MCP tool invokes retry_review through transport and returns updated goal', async () => {
   const h = harness();
-  assert.ok(toolNames.includes('review_queue_list'));
-  for (const name of toolNames) assert.equal(h.server.tools.has(name), true, `${name} must still be registered`);
+  const workspace = goalWithWorkspace(h.root);
+  const xTask = {
+    version: 'x-task-v1', task_id: 'MCP-RETRY-1', parent_task_id: null, revision: 1, attempt: 1, based_on_result_id: null,
+    objective: 'Fact', problem: 'No fact', expected_behavior: 'Fact reported', observed_behavior: 'None', why_this_matters: 'MCP test',
+    known_evidence: [], suspected_area: [], workspace: { repo: 'fixture', root: workspace }, scope: { allowed_paths: ['scripts'], preferred_files: [], forbidden_paths: [] },
+    constraints: { preserve: [], do_not: [] }, allowed_tools: ['repo_read'], acceptance_criteria: ['Fact'], validation: { required: ['test'], optional: [] },
+    verification: null, done_criteria: ['Fact'], teaching_notes: [], uncertainty_policy: { policy: 'bounded_autonomy', stop_conditions: [] },
+    repair_budget: { initial_attempts: 1, max_repairs: 2, max_total_rounds: 3 }, timing: { estimated_minutes: 1, first_check_after_minutes: 1, soft_deadline_minutes: 1, hard_timeout_minutes: 1 },
+    commit_policy: { mode: 'never' },
+  };
+  const goal = await h.runner.create_goal({ title: 'MCP Retry Goal', objective: 'x', workspace, steps: [{ id: 's1', title: 'S1', description: 'x', route: 'x', xTask }] });
+  const item = createReviewQueueItem({ idempotencyKey: 'run-mcp', stepId: 's1', taskId: 'MCP-RETRY-1', status: 'needs_review', reason: 'needs review' });
+  const g = h.storage.getGoal(goal.id); g.reviewQueue.push(item); h.storage.saveGoal(g);
+
+  const retryXTask = { ...xTask, revision: 1, attempt: 2, based_on_result_id: null };
+  const res = jsonOf(await h.server.tools.get('review_queue_retry').handler({ goal_id: goal.id, review_item_id: item.id, x_task: retryXTask }));
+  assert.ok(res.goal);
+  assert.equal(res.item.lifecycle, 'superseded');
+  assert.equal(res.goal.steps[0].executionGeneration, 2);
+  assert.equal(res.goal.status, 'ready');
 });
 
 console.log(`\nResults: ${passed} passed, ${failed} failed out of ${passed + failed} tests\n`);
