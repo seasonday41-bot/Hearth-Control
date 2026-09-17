@@ -746,7 +746,7 @@ const startServer = async ({ workspace, port }) => {
   sendEvent({ type: 'log', source: 'core', tone: 'quiet', message: `Starting local server process (PID ${serverProcess.pid})` });
   serverProcess.stdout.on('data', (chunk) => sendEvent({ type: 'log', source: 'server', tone: 'quiet', message: chunk.toString().trim() }));
   serverProcess.stderr.on('data', (chunk) => sendEvent({ type: 'log', source: 'server', tone: 'error', message: chunk.toString().trim() }));
-  serverProcess.on('message', (message) => {
+  serverProcess.on('message', async (message) => {
     if (serverProcess !== child) return;
     if (message?.type === 'ready') {
       serverState = { running: true, port: selectedPort, pid: serverProcess?.pid ?? null };
