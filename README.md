@@ -11,15 +11,15 @@ This section is the project handoff/source of truth for any new ChatGPT/Codex/AI
 ```text
 CURRENT_PHASE = P0_SKILL_V1_VALIDATE_AND_MERGE
 NEXT_PHASE = P1_X_SKILL_INTEGRATION
-STATUS = WAITING_FOR_MAC_RUNTIME_VALIDATION
+STATUS = READY_TO_MERGE
 BASELINE_MAIN = 750e42be30c2e5bef4ddd8d86051cdedb8089bc1
 ACTIVE_BRANCH = feature/hearth-skill-v1-repo-inspect
-MAC_RUNTIME_VALIDATION = PENDING (Mac was off when current branch was authored)
-BLOCKED_BY = MAC_OFF / local runtime validation unavailable
-LAST_COMPLETED_STEP = Skill v1 definitions + Registry/Loader + tests authored; canonical README handoff/checklist established
-NEXT_EXACT_ACTION = git checkout feature/hearth-skill-v1-repo-inspect && git pull && npm run test:skill-registry
-VALIDATION_REQUIRED = test:skill-registry -> test-skill-definitions -> test:local-skills -> build -> git diff --check -> inspect status/diff
-DO_NOT_START = P1/P2/P3/P4/P5/P6/P7/P8/P9 until P0 validation evidence is clean and Skill v1 is merged to main
+MAC_RUNTIME_VALIDATION = PASS
+BLOCKED_BY = none
+LAST_COMPLETED_STEP = P0 runtime/build/Git validation passed on Mac with clean worktree and expected 11-file branch scope
+NEXT_EXACT_ACTION = merge feature/hearth-skill-v1-repo-inspect into main (user authorized 2026-09-17)
+VALIDATION_REQUIRED = COMPLETE: test:skill-registry 10/10 -> skill definitions 4/4 -> test:local-skills 46/46 -> build PASS -> git diff --check PASS -> status clean -> diff scope verified
+DO_NOT_START = P1/P2/P3/P4/P5/P6/P7/P8/P9 until P0 merge completes and the P1 branch is created from updated main
 ```
 
 **Continuation rule:** if `BLOCKED_BY` is still true, do not invent substitute feature work. Wait for the blocker to clear, then execute `NEXT_EXACT_ACTION`. After every meaningful completed step, update `LAST_COMPLETED_STEP`, `NEXT_EXACT_ACTION`, checklist state, and evidence before switching chats.
@@ -43,7 +43,7 @@ UI redesign happens only after the backend/control path is complete.
 
 ### Current active branch — what already exists
 
-`feature/hearth-skill-v1-repo-inspect` is ahead of the baseline `main` and currently contains unmerged Skill v1 work plus the locked Remote Updater design document.
+`feature/hearth-skill-v1-repo-inspect` is ahead of the baseline `main` and currently contains the validated, unmerged Skill v1 work plus the locked Remote Updater design document.
 
 Current branch additions/changes:
 
@@ -60,7 +60,7 @@ package.json                         # adds Skill Registry test script
 docs/REMOTE-ONE-CLICK-UPDATER-V1.md # design only; do NOT implement on this branch
 ```
 
-Important: these files were authored through GitHub while the Mac was off. They have **not** yet received local runtime/build validation. Do not call this branch production-ready until P0 is complete.
+These files were authored through GitHub while the Mac was off, then validated locally on the Mac on 2026-09-17. P0 evidence is recorded below. The branch is ready to merge but P0 is not complete until the merge and post-merge handoff fields are updated.
 
 ---
 
@@ -91,18 +91,68 @@ This checklist is the handoff ledger for every future chat/agent. **A phase is n
 - [x] Registry tests authored: `scripts/test-skill-registry.mjs`
 - [x] Skill definition tests authored: `scripts/test-skill-definitions.mjs`
 - [x] Package script added for Skill Registry tests
-- [ ] Run `npm run test:skill-registry` on the Mac
-- [ ] Run `node --test scripts/test-skill-definitions.mjs` on the Mac
-- [ ] Run `npm run test:local-skills` on the Mac
-- [ ] Run `npm run build` on the Mac
-- [ ] Run `git diff --check`
-- [ ] Inspect `git status` and `git diff main...HEAD`
-- [ ] Fix only branch-caused failures if any
-- [ ] Record exact validation evidence below
+- [x] Run `npm run test:skill-registry` on the Mac — 10/10 PASS
+- [x] Run `node --test scripts/test-skill-definitions.mjs` on the Mac — 4/4 PASS
+- [x] Run `npm run test:local-skills` on the Mac — 46/46 PASS; Local Skills gateway subset 18 PASS
+- [x] Run `npm run build` on the Mac — PASS (`built in 67ms`)
+- [x] Run `git diff --check` — PASS (no output)
+- [x] Inspect `git status` and `git diff main...HEAD` — worktree clean; expected 11 changed files only
+- [x] Fix only branch-caused failures if any — no branch-caused failures found
+- [x] Record exact validation evidence below
 - [ ] Merge branch into `main`
 - [ ] Update `BASELINE_MAIN` to the new merged `main` HEAD
 - [ ] Set `CURRENT_PHASE = P1_X_SKILL_INTEGRATION`
 - [ ] Set the new `ACTIVE_BRANCH` for P1 before coding
+
+### P0 validation evidence — 2026-09-17
+
+```text
+BRANCH = feature/hearth-skill-v1-repo-inspect
+PRE_MERGE_HEAD = 6d1c6d754d875d0855c8c25bf1aff227341ff2c9 (before this evidence-only README commit)
+BASELINE_MAIN = 750e42be30c2e5bef4ddd8d86051cdedb8089bc1
+
+npm run test:skill-registry
+  PASS = 10/10
+  FAIL = 0
+
+node --test scripts/test-skill-definitions.mjs
+  PASS = 4/4
+  FAIL = 0
+
+npm run test:local-skills
+  PASS = 46/46
+  FAIL = 0
+  Local Skills gateway subset = 18 passed
+
+npm run build
+  PASS
+  dist/index.html = 0.40 kB
+  dist/assets/index-D_VEEULc.css = 56.30 kB
+  dist/assets/index-rpJKux6c.js = 270.67 kB
+  built in 67ms
+
+Generated electron/build-meta.json changed during build and was restored deliberately.
+git status --short = CLEAN after restore
+git diff --check = PASS (no output)
+git diff --name-status main...HEAD = expected 11 files only
+Remote compare before evidence commit = branch ahead of main, behind by 0
+```
+
+Expected pre-merge changed-file scope:
+
+```text
+M README.md
+A docs/HEARTH-SKILL-V1.md
+A docs/REMOTE-ONE-CLICK-UPDATER-V1.md
+A mcp/skills/definitions/README.md
+A mcp/skills/definitions/bug-fix/SKILL.md
+A mcp/skills/definitions/repo-inspect/SKILL.md
+A mcp/skills/definitions/test-regression/SKILL.md
+A mcp/skills/registry.mjs
+M package.json
+A scripts/test-skill-definitions.mjs
+A scripts/test-skill-registry.mjs
+```
 
 ### Completion record — append one block for every completed phase
 
