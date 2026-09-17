@@ -612,6 +612,7 @@ const getUpdaterInfo = () => ({
   currentBuildId: buildMetadata.buildId,
   builtAt: buildMetadata.builtAt,
   updateDirectory: readSettings().updateDirectory,
+  isPackaged: app.isPackaged,
 });
 const startRollbackWatchdog = ({ token, target, backup, userDataPath }) => {
   const helper = path.join(__dirname, 'updater-helper.cjs');
@@ -1735,6 +1736,8 @@ app.whenReady().then(async () => {
       updateDirectory: info.updateDirectory,
       currentVersion: info.currentVersion,
       currentBuildId: info.currentBuildId,
+      currentBuiltAt: info.builtAt,
+      isPackaged: info.isPackaged,
       platform: process.platform,
       arch: process.arch,
     });
@@ -1752,6 +1755,8 @@ app.whenReady().then(async () => {
       updateDirectory: info.updateDirectory,
       currentVersion: info.currentVersion,
       currentBuildId: info.currentBuildId,
+      currentBuiltAt: info.builtAt,
+      isPackaged: info.isPackaged,
       platform: process.platform,
       arch: process.arch,
     });
@@ -1759,6 +1764,9 @@ app.whenReady().then(async () => {
     const manifest = await localUpdater.readAndValidateManifest(info.updateDirectory, process.platform, process.arch);
     const install = await localUpdater.installUpdate({
       manifest,
+      currentVersion: info.currentVersion,
+      currentBuiltAt: info.builtAt,
+      isPackaged: info.isPackaged,
       applicationsDirectory: '/Applications',
       userDataPath: app.getPath('userData'),
       launchRollbackHelper: startRollbackWatchdog,

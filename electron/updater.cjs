@@ -125,11 +125,44 @@ async function readAndValidateManifest(updateDirectory, expectedPlatform = proce
   return { ...manifest, appPath, manifestPath, sha256: actualChecksum };
 }
 
-async function inspectUpdate({ updateDirectory, currentVersion, currentBuildId, platform, arch }) {
+/**
+ * Whether a candidate manifest is actually newer than the running build.
+ * Semantic version is authoritative first; a HIGHER version is always newer,
+ * a LOWER version is never newer. Only when versions are EQUAL does build
+ * recency matter -- and buildId is an identity string, not a clock, so it is
+ * never used here. builtAt is compared chronologically instead; if either
+ * timestamp is missing or unparseable this fails closed (not newer), rather
+ * than ever treating an unverifiable same-version manifest as an update.
+ * @param {{ manifest: { version: string, builtAt: string }, currentVersion: string, currentBuiltAt: string|null|undefined }} params
+ * @returns {boolean}
+ */
+function isManifestNewer({ manifest, currentVersion, currentBuiltAt }) {
+  const versionComparison = compareVersions(manifest.version, currentVersion);
+  if (versionComparison === null) return false;
+  if (versionComparison === 1) return true;
+  if (versionComparison === -1) return false;
+  const manifestBuiltAtMs = Date.parse(manifest.builtAt);
+  const currentBuiltAtMs = Date.parse(currentBuiltAt);
+  if (Number.isNaN(manifestBuiltAtMs) || Number.isNaN(currentBuiltAtMs)) return false;
+  return manifestBuiltAtMs > currentBuiltAtMs;
+}
+
+/**
+ * `isPackaged: false` (development mode) means the running build's identity
+ * comes from a static, dev-restored electron/build-meta.json that has no
+ * relationship to the actual running source/HEAD (see restore-stable-build-
+ * meta.cjs). Comparing that static file against a packaged manifest would be
+ * meaningless at best and could surface a strictly older packaged build as
+ * "update ready" -- so development mode never reads or compares the
+ * manifest at all, and never reports UPDATE_READY.
+ */
+async function inspectUpdate({ updateDirectory, currentVersion, currentBuildId, currentBuiltAt, isPackaged, platform, arch }) {
+  if (isPackaged === false) {
+    return { state: UPDATE_STATES.UP_TO_DATE, currentVersion, currentBuildId, available: null, error: null, devMode: true };
+  }
   try {
     const manifest = await readAndValidateManifest(updateDirectory, platform, arch);
-    const versionComparison = compareVersions(manifest.version, currentVersion);
-    const isNewer = versionComparison === 1 || (versionComparison === 0 && manifest.buildId !== currentBuildId);
+    const isNewer = isManifestNewer({ manifest, currentVersion, currentBuiltAt });
     return {
       state: isNewer ? UPDATE_STATES.UPDATE_READY : UPDATE_STATES.UP_TO_DATE,
       currentVersion, currentBuildId,
@@ -147,9 +180,17 @@ const moveIfPresent = async (source, target) => {
 };
 const uniqueSibling = (target, label) => `${target}.${label}-${crypto.randomUUID()}`;
 
-async function installUpdate({ manifest, applicationsDirectory, userDataPath, launchRollbackHelper, userApproved }) {
+async function installUpdate({ manifest, currentVersion, currentBuiltAt, isPackaged, applicationsDirectory, userDataPath, launchRollbackHelper, userApproved }) {
   if (userApproved !== true) throw new Error('Local user approval is required before installing an update.');
   if (!manifest?.appPath || !manifest?.sha256) throw new Error('A verified update is required.');
+  // Independent guard, deliberately re-derived here rather than trusting the
+  // caller already ran inspectUpdate(): a stale renderer, race, or a future
+  // caller that forgets the pre-check must never be able to force an install
+  // that isn't actually newer than what's currently running.
+  if (isPackaged === false) throw new Error('Updates are not available in development mode.');
+  if (!isManifestNewer({ manifest, currentVersion, currentBuiltAt })) {
+    throw new Error('The selected build is not newer than the currently running version.');
+  }
   const source = manifest.appPath;
   const target = path.join(applicationsDirectory, PRODUCT_NAME);
   const backup = path.join(applicationsDirectory, 'Hearth Control.previous.app');
@@ -212,4 +253,4 @@ async function rollbackPendingUpdate({ userDataPath, token, target, backup }) {
   return { rolledBack: true, healthy: false, target };
 }
 
-module.exports = { PRODUCT_NAME, MANIFEST_NAME, UPDATE_STATES, sha256File, sha256Directory, compareVersions, isInside, readAndValidateManifest, inspectUpdate, installUpdate, recordStartupSuccess, rollbackPendingUpdate, safeReason };
+module.exports = { PRODUCT_NAME, MANIFEST_NAME, UPDATE_STATES, sha256File, sha256Directory, compareVersions, isManifestNewer, isInside, readAndValidateManifest, inspectUpdate, installUpdate, recordStartupSuccess, rollbackPendingUpdate, safeReason };

@@ -72,6 +72,12 @@ const fixture = async ({ version = '0.3.1', buildId = '0.3.1-20260910-aa11bb', s
   return { directory, app, checksum };
 };
 const current = { currentVersion: '0.3.0', currentBuildId: '0.3.0-20260909-001', platform: process.platform, arch: process.arch };
+// Shared "currently running packaged build" context for installUpdate() tests
+// that exercise install MECHANICS (backup, permissions, rollback, etc.),
+// not the newness gate itself -- genuinely older than every fixture()
+// manifest below (version 0.3.1, builtAt 2026-09-10) so those tests keep
+// testing what they always tested.
+const runningBuild = { currentVersion: current.currentVersion, currentBuiltAt: '2026-09-01T00:00:00.000Z', isPackaged: true };
 
 console.log('\n=== Hearth Local Updater V1 ===\n');
 await test('valid newer manifest becomes update_ready', async () => {
@@ -194,7 +200,7 @@ await test('install creates backup in fixture and keeps user data untouched', as
   const applications = await fs.promises.mkdtemp(path.join(root, 'Applications-')); const userData = await fs.promises.mkdtemp(path.join(root, 'user-data-'));
   await writeApp(applications, 'old-build'); await fs.promises.writeFile(path.join(userData, 'settings.json'), 'preserve-me');
   let helperCalled = false;
-  const installed = await updater.installUpdate({ manifest, applicationsDirectory: applications, userDataPath: userData, userApproved: true, launchRollbackHelper: async () => { helperCalled = true; } });
+  const installed = await updater.installUpdate({ manifest, ...runningBuild, applicationsDirectory: applications, userDataPath: userData, userApproved: true, launchRollbackHelper: async () => { helperCalled = true; } });
   assert.equal(helperCalled, true); assert.equal(installed.state, 'restarting');
   assert.equal(await fs.promises.readFile(path.join(applications, 'Hearth Control.previous.app', 'Contents', 'MacOS', 'Hearth Control'), 'utf8'), 'old-build');
   assert.equal(await fs.promises.readFile(path.join(userData, 'settings.json'), 'utf8'), 'preserve-me');
@@ -213,7 +219,7 @@ await test('install preserves executable permissions and relative symlinks witho
   const manifest = await updater.readAndValidateManifest(update.directory, process.platform, process.arch);
   const applications = await fs.promises.mkdtemp(path.join(root, 'Applications-'));
   const userData = await fs.promises.mkdtemp(path.join(root, 'user-data-'));
-  const install = await updater.installUpdate({ manifest, applicationsDirectory: applications, userDataPath: userData, userApproved: true, launchRollbackHelper: async () => {} });
+  const install = await updater.installUpdate({ manifest, ...runningBuild, applicationsDirectory: applications, userDataPath: userData, userApproved: true, launchRollbackHelper: async () => {} });
   const installedApp = install.target;
   assert.equal((await fs.promises.stat(path.join(installedApp, 'Contents', 'MacOS', 'Hearth Control'))).mode & 0o111, 0o111);
   assert.equal(await fs.promises.readlink(path.join(installedApp, 'Contents', 'Frameworks', 'Example.framework', 'Example')), 'Versions/A/Example');
@@ -223,7 +229,7 @@ await test('install preserves executable permissions and relative symlinks witho
 await test('rollback restores the fixture application', async () => {
   const update = await fixture({ buildId: '0.3.1-20260910-cc22dd' }); const manifest = await updater.readAndValidateManifest(update.directory, process.platform, process.arch);
   const applications = await fs.promises.mkdtemp(path.join(root, 'Applications-')); const userData = await fs.promises.mkdtemp(path.join(root, 'user-data-'));
-  await writeApp(applications, 'old-build'); const install = await updater.installUpdate({ manifest, applicationsDirectory: applications, userDataPath: userData, userApproved: true, launchRollbackHelper: async () => {} });
+  await writeApp(applications, 'old-build'); const install = await updater.installUpdate({ manifest, ...runningBuild, applicationsDirectory: applications, userDataPath: userData, userApproved: true, launchRollbackHelper: async () => {} });
   const rollback = await updater.rollbackPendingUpdate({ userDataPath: userData, token: install.token, target: install.target, backup: install.backup });
   assert.equal(rollback.rolledBack, true); assert.equal(await fs.promises.readFile(path.join(applications, 'Hearth Control.app', 'Contents', 'MacOS', 'Hearth Control'), 'utf8'), 'old-build');
 });
@@ -231,7 +237,7 @@ await test('rollback after startup failure runs exactly once and restores a laun
   const update = await fixture({ buildId: '0.3.1-20260910-rollback-once' }); const manifest = await updater.readAndValidateManifest(update.directory, process.platform, process.arch);
   const applications = await fs.promises.mkdtemp(path.join(root, 'Applications-')); const userData = await fs.promises.mkdtemp(path.join(root, 'user-data-'));
   await writeApp(applications, 'old-build'); await fs.promises.chmod(path.join(applications, 'Hearth Control.app', 'Contents', 'MacOS', 'Hearth Control'), 0o755);
-  const install = await updater.installUpdate({ manifest, applicationsDirectory: applications, userDataPath: userData, userApproved: true, launchRollbackHelper: async () => {} });
+  const install = await updater.installUpdate({ manifest, ...runningBuild, applicationsDirectory: applications, userDataPath: userData, userApproved: true, launchRollbackHelper: async () => {} });
   const first = await updater.rollbackPendingUpdate({ userDataPath: userData, token: install.token, target: install.target, backup: install.backup });
   assert.equal(first.rolledBack, true);
   await assert.rejects(() => updater.rollbackPendingUpdate({ userDataPath: userData, token: install.token, target: install.target, backup: install.backup }), /previous version was not available/);
@@ -241,7 +247,7 @@ await test('rollback after startup failure runs exactly once and restores a laun
 await test('startup marker prevents rollback', async () => {
   const update = await fixture({ buildId: '0.3.1-20260910-ee22ff' }); const manifest = await updater.readAndValidateManifest(update.directory, process.platform, process.arch);
   const applications = await fs.promises.mkdtemp(path.join(root, 'Applications-')); const userData = await fs.promises.mkdtemp(path.join(root, 'user-data-'));
-  await writeApp(applications, 'old-build'); const install = await updater.installUpdate({ manifest, applicationsDirectory: applications, userDataPath: userData, userApproved: true, launchRollbackHelper: async () => {} });
+  await writeApp(applications, 'old-build'); const install = await updater.installUpdate({ manifest, ...runningBuild, applicationsDirectory: applications, userDataPath: userData, userApproved: true, launchRollbackHelper: async () => {} });
   await updater.recordStartupSuccess(userData); const result = await updater.rollbackPendingUpdate({ userDataPath: userData, token: install.token, target: install.target, backup: install.backup });
   assert.equal(result.healthy, true);
 });
@@ -255,20 +261,148 @@ await test('restart state is returned only after helper is scheduled', async () 
   const update = await fixture({ buildId: `0.3.1-20260910-${crypto.randomBytes(3).toString('hex')}` }); const manifest = await updater.readAndValidateManifest(update.directory, process.platform, process.arch);
   const applications = await fs.promises.mkdtemp(path.join(root, 'Applications-')); const userData = await fs.promises.mkdtemp(path.join(root, 'user-data-'));
   await writeApp(applications, 'old-build'); let helper = false;
-  const result = await updater.installUpdate({ manifest, applicationsDirectory: applications, userDataPath: userData, userApproved: true, launchRollbackHelper: async () => { helper = true; } });
+  const result = await updater.installUpdate({ manifest, ...runningBuild, applicationsDirectory: applications, userDataPath: userData, userApproved: true, launchRollbackHelper: async () => { helper = true; } });
   assert.equal(helper, true); assert.equal(result.state, 'restarting');
 });
 await test('watchdog receives the final installed app path, never staging or backup', async () => {
   const update = await fixture({ buildId: '0.3.1-20260910-relaunch-target' }); const manifest = await updater.readAndValidateManifest(update.directory, process.platform, process.arch);
   const applications = await fs.promises.mkdtemp(path.join(root, 'Applications-')); const userData = await fs.promises.mkdtemp(path.join(root, 'user-data-'));
   await writeApp(applications, 'old-build'); let helperArgs;
-  const install = await updater.installUpdate({ manifest, applicationsDirectory: applications, userDataPath: userData, userApproved: true, launchRollbackHelper: async (args) => { helperArgs = args; } });
+  const install = await updater.installUpdate({ manifest, ...runningBuild, applicationsDirectory: applications, userDataPath: userData, userApproved: true, launchRollbackHelper: async (args) => { helperArgs = args; } });
   assert.equal(helperArgs.target, install.target);
   assert.equal(helperArgs.backup, install.backup);
   assert.equal(path.basename(helperArgs.target), 'Hearth Control.app');
   assert.equal(helperArgs.target.includes('.installing-'), false);
   assert.equal(helperArgs.target.includes('.previous.app'), false);
 });
+console.log('\n=== Development-mode / chronological-newness guard ===\n');
+
+// Helper: a fixture manifest with a specific version/builtAt, independent of
+// the default fixture()'s hardcoded values above.
+const versionedFixture = async ({ version, buildId, builtAt }) => {
+  const directory = await fs.promises.mkdtemp(path.join(root, 'vfixture-'));
+  const app = await writeApp(directory, buildId);
+  const checksum = await updater.sha256Directory(app);
+  await fs.promises.writeFile(path.join(directory, 'update-manifest.json'), JSON.stringify({
+    version, buildId, builtAt, platform: process.platform, arch: process.arch, appPath: 'Hearth Control.app', sha256: checksum,
+  }));
+  return { directory, app, checksum };
+};
+
+await test('1. dev mode never reports update_ready, even for a manifest with a different buildId', async () => {
+  const update = await fixture(); // version 0.3.1, different buildId from current
+  const result = await updater.inspectUpdate({
+    updateDirectory: update.directory,
+    currentVersion: current.currentVersion, currentBuildId: current.currentBuildId, currentBuiltAt: '2026-09-01T00:00:00.000Z',
+    isPackaged: false, platform: process.platform, arch: process.arch,
+  });
+  assert.notEqual(result.state, 'update_ready');
+  assert.equal(result.available, null);
+  assert.equal(result.devMode, true);
+});
+
+await test('1b. installUpdate refuses in development mode even with an otherwise-valid newer manifest', async () => {
+  const update = await fixture();
+  const manifest = await updater.readAndValidateManifest(update.directory, process.platform, process.arch);
+  const applications = await fs.promises.mkdtemp(path.join(root, 'Applications-'));
+  const userData = await fs.promises.mkdtemp(path.join(root, 'user-data-'));
+  await assert.rejects(
+    () => updater.installUpdate({
+      manifest, currentVersion: current.currentVersion, currentBuiltAt: '2026-09-01T00:00:00.000Z', isPackaged: false,
+      applicationsDirectory: applications, userDataPath: userData, userApproved: true, launchRollbackHelper: async () => {},
+    }),
+    /development mode/,
+  );
+});
+
+await test('2. packaged: same version, current built AFTER manifest -> no update', async () => {
+  const update = await versionedFixture({ version: '0.4.3', buildId: '0.4.3-20260915031249-20d0cd', builtAt: '2026-09-15T03:12:49.000Z' });
+  const result = await updater.inspectUpdate({
+    updateDirectory: update.directory, currentVersion: '0.4.3', currentBuildId: '0.4.3-20260916165149-c6aba9', currentBuiltAt: '2026-09-16T16:51:49.000Z',
+    isPackaged: true, platform: process.platform, arch: process.arch,
+  });
+  assert.equal(result.state, 'up_to_date');
+  assert.equal(result.available, null);
+});
+
+await test('3. packaged: same version, manifest built AFTER current -> update available', async () => {
+  const update = await versionedFixture({ version: '0.4.3', buildId: '0.4.3-20260916165149-c6aba9', builtAt: '2026-09-16T16:51:49.000Z' });
+  const result = await updater.inspectUpdate({
+    updateDirectory: update.directory, currentVersion: '0.4.3', currentBuildId: '0.4.3-20260912150720-3bd6ad', currentBuiltAt: '2026-09-12T15:07:20.000Z',
+    isPackaged: true, platform: process.platform, arch: process.arch,
+  });
+  assert.equal(result.state, 'update_ready');
+  assert.equal(result.available.buildId, '0.4.3-20260916165149-c6aba9');
+});
+
+await test('4. higher semantic version is always newer, regardless of builtAt', async () => {
+  const update = await versionedFixture({ version: '0.4.4', buildId: '0.4.4-20260901000000-aaaaaa', builtAt: '2026-09-01T00:00:00.000Z' });
+  const result = await updater.inspectUpdate({
+    updateDirectory: update.directory, currentVersion: '0.4.3', currentBuildId: '0.4.3-20260916165149-c6aba9', currentBuiltAt: '2026-09-16T16:51:49.000Z',
+    isPackaged: true, platform: process.platform, arch: process.arch,
+  });
+  assert.equal(result.state, 'update_ready');
+});
+
+await test('5. lower semantic version is never newer, regardless of builtAt', async () => {
+  const update = await versionedFixture({ version: '0.4.3', buildId: '0.4.3-20260916165149-c6aba9', builtAt: '2026-09-16T16:51:49.000Z' });
+  const result = await updater.inspectUpdate({
+    updateDirectory: update.directory, currentVersion: '0.4.4', currentBuildId: '0.4.4-20260901000000-aaaaaa', currentBuiltAt: '2026-09-01T00:00:00.000Z',
+    isPackaged: true, platform: process.platform, arch: process.arch,
+  });
+  assert.equal(result.state, 'up_to_date');
+});
+
+await test('6. same version, same builtAt, different buildId -> not newer (buildId is identity, not chronology)', async () => {
+  const builtAt = '2026-09-16T16:51:49.000Z';
+  const update = await versionedFixture({ version: '0.4.3', buildId: '0.4.3-20260916165149-different', builtAt });
+  const result = await updater.inspectUpdate({
+    updateDirectory: update.directory, currentVersion: '0.4.3', currentBuildId: '0.4.3-20260916165149-c6aba9', currentBuiltAt: builtAt,
+    isPackaged: true, platform: process.platform, arch: process.arch,
+  });
+  assert.equal(result.state, 'up_to_date');
+  assert.equal(updater.isManifestNewer({ manifest: { version: '0.4.3', builtAt }, currentVersion: '0.4.3', currentBuiltAt: builtAt }), false);
+});
+
+await test('7a. same semver, current builtAt missing -> fails closed, no update', async () => {
+  const update = await versionedFixture({ version: '0.4.3', buildId: '0.4.3-20260916165149-c6aba9', builtAt: '2026-09-16T16:51:49.000Z' });
+  const result = await updater.inspectUpdate({
+    updateDirectory: update.directory, currentVersion: '0.4.3', currentBuildId: 'development-build', currentBuiltAt: null,
+    isPackaged: true, platform: process.platform, arch: process.arch,
+  });
+  assert.equal(result.state, 'up_to_date');
+  assert.equal(result.available, null);
+});
+
+await test('7b. same semver, manifest builtAt invalid -> readAndValidateManifest rejects it as malformed metadata (fails closed before comparison)', async () => {
+  const directory = await fs.promises.mkdtemp(path.join(root, 'badtime-'));
+  const app = await writeApp(directory, '0.4.3-badtime');
+  const checksum = await updater.sha256Directory(app);
+  await fs.promises.writeFile(path.join(directory, 'update-manifest.json'), JSON.stringify({
+    version: '0.4.3', buildId: '0.4.3-20260916165149-c6aba9', builtAt: 'not-a-real-date',
+    platform: process.platform, arch: process.arch, appPath: 'Hearth Control.app', sha256: checksum,
+  }));
+  const result = await updater.inspectUpdate({
+    updateDirectory: directory, currentVersion: '0.4.3', currentBuildId: 'development-build', currentBuiltAt: '2026-09-01T00:00:00.000Z',
+    isPackaged: true, platform: process.platform, arch: process.arch,
+  });
+  assert.equal(result.state, 'error');
+});
+
+await test('8. installUpdate refuses a manifest that is not classified as newer', async () => {
+  const update = await versionedFixture({ version: '0.4.3', buildId: '0.4.3-20260912150720-3bd6ad', builtAt: '2026-09-12T15:07:20.000Z' });
+  const manifest = await updater.readAndValidateManifest(update.directory, process.platform, process.arch);
+  const applications = await fs.promises.mkdtemp(path.join(root, 'Applications-'));
+  const userData = await fs.promises.mkdtemp(path.join(root, 'user-data-'));
+  await assert.rejects(
+    () => updater.installUpdate({
+      manifest, currentVersion: '0.4.3', currentBuiltAt: '2026-09-16T16:51:49.000Z', isPackaged: true,
+      applicationsDirectory: applications, userDataPath: userData, userApproved: true, launchRollbackHelper: async () => {},
+    }),
+    /not newer/,
+  );
+});
+
 await fs.promises.rm(root, { recursive: true, force: true });
 console.log(`\nResults: ${passed} passed, ${failed} failed\n`);
 if (failed) process.exit(1);
