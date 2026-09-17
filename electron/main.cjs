@@ -65,6 +65,11 @@ let publicTasksSession = null;
 // just a different, dedicated table (public.review_items, never
 // public.tasks -- see mcp/bridge/review-queue-sync.mjs's own docstring).
 let reviewItemsClientInstance = null;
+// Remote Goal ingress (public.goal_requests): also shares Project X's SAME
+// session as publicTasksClientInstance/reviewItemsClientInstance -- same
+// Supabase project/owner, a third dedicated table (never public.tasks, never
+// review_items -- see mcp/bridge/goal-requests-client.mjs's own docstring).
+let goalRequestsClientInstance = null;
 let bridgeState = {
   enabled: false,
   deviceId: '',
@@ -75,6 +80,8 @@ let bridgeState = {
   pairingReady: false,
   pendingTasks: [],
   activeRemoteTaskId: null,
+  pendingGoalRequests: [],
+  activeGoalRequestId: null,
 };
 const taskNotifier = createTaskNotifier({ Notification, app });
 const taskMonitors = new Map();
@@ -308,6 +315,32 @@ const resyncTerminalPublicXTasks = async () => {
   for (const receipt of xQueueStore.receipts.values()) {
     if (receipt.queueStatus === 'terminal' && typeof receipt.requestId === 'string' && receipt.requestId.startsWith(SUPABASE_REQUEST_ID_PREFIX)) {
       await syncTerminalReceiptToPublicTasks(receipt);
+    }
+  }
+};
+/**
+ * Remote Goal ingress: projects EVERY locally-linked Goal's CURRENT durable
+ * state onto its goal_requests row -- read-only against goals.json (via
+ * goalRunner.list_goals(), the same live instance every other caller uses),
+ * best-effort against the remote row. Mirrors resyncTerminalPublicXTasks's
+ * own philosophy exactly: goals.json is the sole authoritative truth, this
+ * only ever PROJECTS it outward, never re-derives/re-imports/re-runs
+ * anything from the remote side, and a write failure here can never rerun
+ * Goal/X work -- it just gets retried on the next tick or reconnect.
+ * Safe to call on every poll tick and on reconnect/sign-in alike.
+ */
+const resyncGoalRequestStates = async () => {
+  if (!goalRunner || !goalRequestsClientInstance?.ownerId) return;
+  let goals;
+  try { goals = goalRunner.list_goals(); } catch { return; }
+  for (const goal of goals) {
+    if (goal.remoteGoalRequest?.provider !== 'project-x') continue;
+    const requestId = goal.remoteGoalRequest.requestId;
+    if (!requestId) continue;
+    try {
+      await goalRequestsClientInstance.projectGoalState({ id: requestId, goal });
+    } catch (err) {
+      console.warn(`[Bridge] Failed to project Goal '${goal.id}' state to goal_requests row '${requestId}' (will retry):`, err.message);
     }
   }
 };
@@ -708,6 +741,7 @@ const applyPublicTasksSession = (data) => {
   // Same Supabase project/owner, a different table -- see
   // reviewItemsClientInstance's own declaration comment.
   reviewItemsClientInstance?.setSession({ accessToken: session.accessToken, ownerId: session.ownerId });
+  goalRequestsClientInstance?.setSession({ accessToken: session.accessToken, ownerId: session.ownerId });
   return session;
 };
 
@@ -1941,6 +1975,7 @@ app.whenReady().then(async () => {
     const { HearthBridgeClient } = await importFromHere('../mcp/bridge/client.mjs');
     const { PublicTasksClient } = await importFromHere('../mcp/bridge/public-tasks-client.mjs');
     const { ReviewItemsClient, resyncPendingReviewItems, syncReviewItemToRemote } = await importFromHere('../mcp/bridge/review-queue-sync.mjs');
+    const { GoalRequestsClient } = await importFromHere('../mcp/bridge/goal-requests-client.mjs');
     const settings = readSettings();
     loadBridgeSecrets();
     loadPublicTasksSecrets();
@@ -2005,6 +2040,16 @@ app.whenReady().then(async () => {
       accessToken: publicTasksSession?.accessToken || null,
       ownerId: publicTasksSession?.ownerId || null,
     });
+    // Same session-sharing pattern as reviewItemsClientInstance above; see
+    // goalRequestsClientInstance's own declaration comment.
+    goalRequestsClientInstance = new GoalRequestsClient({
+      supabaseUrl: settings.publicTasksSupabaseUrl || '',
+      supabaseAnonKey: settings.publicTasksSupabaseAnonKey || '',
+    });
+    goalRequestsClientInstance.setSession({
+      accessToken: publicTasksSession?.accessToken || null,
+      ownerId: publicTasksSession?.ownerId || null,
+    });
     // The ONLY wiring between GoalRunner and any remote/network concern --
     // GoalRunner itself only ever calls this as an opaque, fire-and-forget
     // notification (see onReviewItemPersisted's own doc comment in
@@ -2034,6 +2079,13 @@ app.whenReady().then(async () => {
       // restored session can be stale (see refreshPublicTasksSessionBestEffort),
       // so refresh first.
       void refreshPublicTasksSessionBestEffort().then(() => resyncPendingReviewItems({ client: reviewItemsClientInstance, goalRunner }));
+      // Same reconnect trigger for remote Goal state projection -- read-only
+      // against goals.json, best-effort idempotent writes, never re-imports
+      // or re-runs anything.
+      void refreshPublicTasksSessionBestEffort().then(() => resyncGoalRequestStates());
+      // And for finishing any import that was already authorized (claimed)
+      // but got interrupted before completing -- never claims anything new.
+      void refreshPublicTasksSessionBestEffort().then(() => recoverUnimportedGoalRequests());
     }
 
     const registerBridgeDevice = async () => {
@@ -2128,6 +2180,7 @@ app.whenReady().then(async () => {
       bridgeState.connected = true;
       const xTasks = await syncPublicXTasks();
       bridgeState.pendingTasks = [...tasks, ...xTasks];
+      bridgeState.pendingGoalRequests = await syncRemoteGoalRequests();
       sendEvent({ type: 'bridge:state', state: bridgeState });
       try {
         const { flushPendingRemoteSyncs } = await importFromHere('../mcp/bridge/client.mjs');
@@ -2139,6 +2192,53 @@ app.whenReady().then(async () => {
     const handleBridgeError = (_err) => {
       bridgeState.connected = false;
       sendEvent({ type: 'bridge:state', state: bridgeState });
+    };
+
+    // Main-process-only lookup from a goal_requests row id to its full,
+    // already-validated remote-goal-v1 payload -- same shape/lifetime as
+    // publicXTaskRowsById above, just for the Remote Goals card list.
+    let goalRequestRowsById = new Map();
+
+    /**
+     * A PURE read, same shape as syncPublicXTasks -- fetchQueuedGoalRequests()
+     * never claims or imports anything. Returns small display-shaped
+     * summaries (title, step count, X-step count, workspace, constraints,
+     * ordered step titles) to merge into bridgeState.pendingGoalRequests; the
+     * full parsed remote-goal-v1 stays in goalRequestRowsById for the
+     * approve/reject handlers below to use. NEVER exposes raw xTask JSON to
+     * the renderer. Called from syncBridgeTasks above (declared after it in
+     * source, but only ever invoked later via the polling callback, so this
+     * ordering is safe).
+     */
+    const syncRemoteGoalRequests = async () => {
+      if (publicTasksSession?.refreshToken) { try { await ensurePublicTasksSession(); } catch {} }
+      if (!publicTasksReady() || !goalRequestsClientInstance) { goalRequestRowsById = new Map(); return []; }
+      let rows;
+      try { rows = await goalRequestsClientInstance.fetchQueuedGoalRequests(); }
+      catch (err) { console.warn('[Bridge] Failed to fetch Project X queued goal requests:', err.message); return []; }
+      const nextRows = new Map();
+      const summaries = rows.map((row) => {
+        nextRows.set(row.id, row);
+        const xStepCount = row.goal.steps.filter((s) => s.route === 'x').length;
+        return {
+          id: row.id,
+          title: row.title,
+          objective: row.goal.objective,
+          workspace: row.goal.workspace,
+          constraints: row.goal.constraints,
+          stepCount: row.goal.steps.length,
+          xStepCount,
+          stepTitles: row.goal.steps.map((s) => s.title),
+          createdAt: row.createdAt,
+        };
+      });
+      goalRequestRowsById = nextRows;
+      // Best-effort: also re-project any already-imported remote Goal's
+      // current state on the same tick, so progress stays fresh without a
+      // second timer, and finish any import interrupted mid-way.
+      void resyncGoalRequestStates();
+      void recoverUnimportedGoalRequests();
+      return summaries;
     };
 
     if (bridgeClientInstance.enabled && bridgeClientInstance.supabaseUrl) {
@@ -2214,6 +2314,8 @@ app.whenReady().then(async () => {
         sendPublicTasksState();
         void resyncTerminalPublicXTasks();
         void resyncPendingReviewItems({ client: reviewItemsClientInstance, goalRunner });
+        void resyncGoalRequestStates();
+        void recoverUnimportedGoalRequests();
         return { signedIn: true, needsEmailVerification: false };
       }
       return { signedIn: false, needsEmailVerification: true };
@@ -2232,14 +2334,21 @@ app.whenReady().then(async () => {
       // Same reconnect trigger for the Review Queue remote projection --
       // read-only against local state, best-effort idempotent writes.
       void resyncPendingReviewItems({ client: reviewItemsClientInstance, goalRunner });
+      // Same reconnect trigger for remote Goal state projection.
+      void resyncGoalRequestStates();
+      void recoverUnimportedGoalRequests();
       return getPublicTasksState();
     });
 
     ipcMain.handle('publicTasks:sign-out', async () => {
       publicTasksClientInstance?.setSession({ accessToken: null, ownerId: null });
       reviewItemsClientInstance?.setSession({ accessToken: null, ownerId: null });
+      goalRequestsClientInstance?.setSession({ accessToken: null, ownerId: null });
       clearPublicTasksSession();
+      bridgeState.pendingGoalRequests = [];
+      goalRequestRowsById = new Map();
       sendPublicTasksState();
+      sendEvent({ type: 'bridge:state', state: bridgeState });
       return getPublicTasksState();
     });
 
@@ -2538,6 +2647,132 @@ app.whenReady().then(async () => {
       sendEvent({ type: 'bridge:state', state: bridgeState });
       return true;
     });
+
+    /**
+     * Shared import core: workspace authority check (the SAME "task
+     * workspace vs CURRENT settings workspace" decision ingestXTask makes
+     * for a bare X task, here applied once to the whole Goal) -> the
+     * EXISTING create_goal() on the LIVE goalRunner instance (never a
+     * second GoalRunner/GoalStorage) -> durable local_goal_id written back.
+     * ONLY imports -- never calls run_goal, never touches X approval.
+     * Deterministic `remote-goal:<rowId>` local id makes this idempotent
+     * whether called from a fresh approve or a crash-recovery retry.
+     * Used by both approveRemoteGoalRequest (row already claimed just now)
+     * and recoverUnimportedGoalRequests (row was claimed in a PRIOR,
+     * interrupted attempt).
+     */
+    const importGoalFromRequestRow = async (requestId, row) => {
+      if (!goalRunner) throw new Error('Goal runner is not initialized.');
+      const currentWorkspace = readSettings().workspace;
+      if (!currentWorkspace) throw new Error('No local workspace is configured.');
+      let currentRoot;
+      try { currentRoot = fs.realpathSync(currentWorkspace); } catch { throw new Error('The currently configured workspace is not accessible.'); }
+      let goalRoot;
+      try { goalRoot = fs.realpathSync(row.goal.workspace); } catch { throw new Error('The remote Goal workspace is not accessible on this machine.'); }
+      if (goalRoot !== currentRoot) {
+        throw new Error('The remote Goal workspace does not match the currently configured Hearth workspace.');
+      }
+      const localGoalId = `remote-goal:${requestId}`;
+      let goal = goalRunner.get_goal(localGoalId);
+      if (!goal) {
+        goal = await goalRunner.create_goal({
+          id: localGoalId,
+          title: row.goal.title,
+          objective: row.goal.objective,
+          workspace: row.goal.workspace,
+          constraints: row.goal.constraints,
+          steps: row.goal.steps.map((s) => ({ id: s.id, title: s.title, route: s.route, xTask: s.xTask })),
+          remoteGoalRequest: { provider: 'project-x', requestId },
+        });
+      }
+      try { await goalRequestsClientInstance.recordLocalGoalId({ id: requestId, localGoalId: goal.id }); }
+      catch (err) { console.warn('[Bridge] Failed to record local_goal_id on goal_requests row (import still succeeded):', err.message); }
+      return goal;
+    };
+
+    /**
+     * Remote Goal ingress: Remote Goals card -> manual Approve -> conditional
+     * goal_requests claim (queued -> running) -> importGoalFromRequestRow.
+     * The user still has to press Run on the newly-imported Goal exactly as
+     * they would for any local Goal, and that already-existing Goal-level X
+     * approval prompt is the ONLY thing that can ever authorize an X step
+     * to dispatch.
+     */
+    const approveRemoteGoalRequest = async (requestId) => {
+      const row = goalRequestRowsById.get(requestId);
+      if (!row) throw new Error('Goal request not found in pending inbox.');
+      const claim = await goalRequestsClientInstance.claimQueuedGoalRequest({ id: requestId });
+      if (!claim.claimed) {
+        goalRequestRowsById.delete(requestId);
+        bridgeState.pendingGoalRequests = bridgeState.pendingGoalRequests.filter((g) => g.id !== requestId);
+        sendEvent({ type: 'bridge:state', state: bridgeState });
+        throw new Error('Goal request was already claimed or cancelled.');
+      }
+      bridgeState.activeGoalRequestId = requestId;
+      sendEvent({ type: 'bridge:state', state: bridgeState });
+      try {
+        const goal = await importGoalFromRequestRow(requestId, row);
+        goalRequestRowsById.delete(requestId);
+        bridgeState.pendingGoalRequests = bridgeState.pendingGoalRequests.filter((g) => g.id !== requestId);
+        bridgeState.activeGoalRequestId = null;
+        sendEvent({ type: 'bridge:state', state: bridgeState });
+        sendEvent({ type: 'goals:updated', goal });
+        void resyncGoalRequestStates();
+        return { success: true, goalId: goal.id };
+      } catch (err) {
+        bridgeState.activeGoalRequestId = null;
+        sendEvent({ type: 'bridge:state', state: bridgeState });
+        // The row was already claimed (queued -> running) but never actually
+        // imported (e.g. workspace mismatch) -- make the failure visible on
+        // the SAME row, never silently retry, never leave it stuck at
+        // 'running' with no record of why.
+        try { await goalRequestsClientInstance.markGoalRequestFailed({ id: requestId, error: err.message || String(err) }); }
+        catch (syncErr) { console.warn('[Bridge] Failed to mark an unimported Goal request as failed on goal_requests:', syncErr.message); }
+        throw err;
+      }
+    };
+
+    /** Rejects a still-queued Goal request (queued -> cancelled). Never claims, never imports, never touches an already-claimed row. */
+    const rejectRemoteGoalRequest = async (requestId) => {
+      if (!goalRequestRowsById.has(requestId)) throw new Error('Goal request not found in pending inbox.');
+      const rejected = await goalRequestsClientInstance.rejectQueuedGoalRequest({ id: requestId });
+      goalRequestRowsById.delete(requestId);
+      bridgeState.pendingGoalRequests = bridgeState.pendingGoalRequests.filter((g) => g.id !== requestId);
+      sendEvent({ type: 'bridge:state', state: bridgeState });
+      if (!rejected) throw new Error('Goal request was already claimed or cancelled.');
+      return { success: true };
+    };
+
+    /**
+     * Crash-recovery sweep: finds rows THIS owner already claimed (running)
+     * but that never got a local_goal_id -- i.e. Hearth was interrupted
+     * strictly between a successful claim and finishing the local import
+     * (workspace unreachable at that moment, a crash, a forced quit). A row
+     * here was already claimed by a genuine prior approve click; this never
+     * claims anything new and never runs/approves X -- it only finishes an
+     * import that had already been authorized. Safe to call repeatedly
+     * (idempotent via the SAME deterministic id + get_goal check
+     * importGoalFromRequestRow already does) and on every poll tick.
+     */
+    const recoverUnimportedGoalRequests = async () => {
+      if (!goalRunner || !goalRequestsClientInstance?.ownerId) return;
+      let rows;
+      try { rows = await goalRequestsClientInstance.fetchClaimedUnimportedGoalRequests(); }
+      catch (err) { console.warn('[Bridge] Failed to fetch claimed-unimported goal requests:', err.message); return; }
+      for (const row of rows) {
+        try {
+          const goal = await importGoalFromRequestRow(row.id, row);
+          sendEvent({ type: 'goals:updated', goal });
+        } catch (err) {
+          console.warn(`[Bridge] Failed to recover unimported goal_requests row '${row.id}':`, err.message);
+          try { await goalRequestsClientInstance.markGoalRequestFailed({ id: row.id, error: err.message || String(err) }); }
+          catch (syncErr) { console.warn('[Bridge] Failed to mark an unrecoverable goal_requests row as failed:', syncErr.message); }
+        }
+      }
+    };
+
+    ipcMain.handle('bridge:approve-goal-request', async (_event, requestId) => approveRemoteGoalRequest(requestId));
+    ipcMain.handle('bridge:reject-goal-request', async (_event, requestId) => rejectRemoteGoalRequest(requestId));
   } catch (err) {
     console.error('Failed to initialize bridge:', err);
   }

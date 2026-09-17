@@ -60,6 +60,19 @@ interface BridgeTask {
   routedTo?: 'x';
 }
 
+/** Display-shaped summary of a queued public.goal_requests row -- never the raw xTask JSON. */
+interface GoalRequestCard {
+  id: string;
+  title: string;
+  objective: string;
+  workspace: string;
+  constraints: string[];
+  stepCount: number;
+  xStepCount: number;
+  stepTitles: string[];
+  createdAt: string;
+}
+
 interface BridgeState {
   enabled: boolean;
   deviceId: string;
@@ -70,6 +83,8 @@ interface BridgeState {
   pairingReady: boolean;
   pendingTasks: BridgeTask[];
   activeRemoteTaskId: string | null;
+  pendingGoalRequests: GoalRequestCard[];
+  activeGoalRequestId: string | null;
 }
 
 /** Project X's OWN auth state -- a separate namespace from BridgeState/the legacy bridge. */
@@ -177,6 +192,8 @@ interface Window { controlApp: {
   bridgeSetEnabled: (enabled: boolean) => Promise<BridgeState>;
   bridgeApproveTask: (taskId: string) => Promise<{ success: boolean; taskId: string; conversationId?: string; routedTo?: 'x'; queueId?: string }>;
   bridgeRejectTask: (taskId: string) => Promise<boolean>;
+  bridgeApproveGoalRequest: (requestId: string) => Promise<{ success: boolean; goalId: string }>;
+  bridgeRejectGoalRequest: (requestId: string) => Promise<{ success: boolean }>;
   publicTasksGetState: () => Promise<PublicTasksState>;
   publicTasksSaveAnonKey: (anonKey: string) => Promise<PublicTasksState>;
   publicTasksSignUp: (credentials: { email: string; password: string }) => Promise<{ signedIn: boolean; needsEmailVerification: boolean }>;

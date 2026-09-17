@@ -104,6 +104,8 @@ export default function App() {
   const [bridgeState, setBridgeState] = useState<BridgeState | null>(null);
   const [reviewTask, setReviewTask] = useState<BridgeTask | null>(null);
   const [bridgeBusy, setBridgeBusy] = useState(false);
+  const [reviewGoalRequest, setReviewGoalRequest] = useState<GoalRequestCard | null>(null);
+  const [goalRequestBusy, setGoalRequestBusy] = useState(false);
   const [bridgeEmail, setBridgeEmail] = useState('');
   const [bridgePassword, setBridgePassword] = useState('');
   const [bridgeAuthMode, setBridgeAuthMode] = useState<'sign-in' | 'sign-up'>('sign-in');
@@ -988,6 +990,38 @@ export default function App() {
     }
   };
 
+  // Importing a remote Goal only creates it locally (status 'ready') -- it
+  // does NOT run anything and does NOT grant X approval. goals:updated adds
+  // it to the existing Goals list; the user still presses Run there and
+  // still sees the existing, unmodified Goal-level X approval prompt.
+  const handleImportRemoteGoalRequest = async (goalRequest: GoalRequestCard) => {
+    if (goalRequestBusy) return;
+    setGoalRequestBusy(true);
+    try {
+      const res = await window.controlApp.bridgeApproveGoalRequest(goalRequest.id);
+      setReviewGoalRequest(null);
+      flash(`Remote Goal imported (${res.goalId}). Open Goals to review and press Run.`);
+    } catch (err: any) {
+      flash(`Failed to import remote Goal: ${err?.message || 'Unknown error'}`);
+    } finally {
+      setGoalRequestBusy(false);
+    }
+  };
+
+  const handleRejectRemoteGoalRequest = async (goalRequest: GoalRequestCard) => {
+    if (goalRequestBusy) return;
+    setGoalRequestBusy(true);
+    try {
+      await window.controlApp.bridgeRejectGoalRequest(goalRequest.id);
+      setReviewGoalRequest(null);
+      flash('Remote Goal request rejected');
+    } catch (err: any) {
+      flash(`Failed to reject remote Goal request: ${err?.message || 'Unknown error'}`);
+    } finally {
+      setGoalRequestBusy(false);
+    }
+  };
+
   return (
     <div className="app-frame">
       <div className="titlebar-drag-region" aria-hidden="true">
@@ -1535,6 +1569,52 @@ export default function App() {
                   <small>{publicXState.accountEmail}. Queued Project X tasks appear in the Remote Inbox above once approved.</small>
                 </div>
               )}
+
+              {/* PROJECT X REMOTE GOALS -- a dedicated, distinct transport from
+                  the single-task Remote Tasks above. Importing only creates
+                  the Goal locally (status 'ready'); it never runs anything and
+                  never grants X approval -- open Goals, press Run, and the
+                  existing Goal-level X approval prompt is still required. */}
+              {publicXState?.signedIn && (
+                <>
+                  <div className="remote-inbox-header" style={{ marginTop: '1.5rem' }}>
+                    <div>
+                      <p className="kicker">PROJECT X</p>
+                      <h2>Project X Remote Goals</h2>
+                    </div>
+                  </div>
+                  {!bridgeState?.pendingGoalRequests?.length ? (
+                    <div className="remote-inbox-empty">
+                      <Icon name="flag" />
+                      <p>No pending remote Goals</p>
+                      <small>A complete, pre-authored multi-step Goal queued by Chat/Main Brain will appear here for your review and import.</small>
+                    </div>
+                  ) : (
+                    <div className="remote-tasks-list">
+                      {bridgeState.pendingGoalRequests.map((g) => (
+                        <div key={g.id} className="remote-task-card">
+                          <div className="remote-task-main">
+                            <div className="remote-task-meta">
+                              <span className="remote-source-tag">goal</span>
+                              <strong className="remote-task-title">{g.title}</strong>
+                              <span className="remote-task-time">{new Date(g.createdAt).toLocaleTimeString()}</span>
+                            </div>
+                            <p className="remote-task-preview">{g.objective.slice(0, 140)}{g.objective.length > 140 ? '…' : ''}</p>
+                            <small>{g.stepCount} step{g.stepCount === 1 ? '' : 's'} · {g.xStepCount} X step{g.xStepCount === 1 ? '' : 's'} · <code>{g.workspace}</code></small>
+                          </div>
+                          <div className="remote-task-actions">
+                            <button className="remote-action-btn review" type="button" onClick={() => setReviewGoalRequest(g)}>Review</button>
+                            <button className="remote-action-btn reject" type="button" disabled={goalRequestBusy} onClick={() => handleRejectRemoteGoalRequest(g)}>Reject</button>
+                            <button className="remote-action-btn approve" type="button" disabled={goalRequestBusy} onClick={() => handleImportRemoteGoalRequest(g)} title="Import into Goals -- does not run or approve X">
+                              Import
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
             </section>
           </div>
         ) : activeNav === 'Goals' ? (
@@ -1981,6 +2061,57 @@ export default function App() {
                 onClick={() => handleApproveRemoteTask(reviewTask)}
               >
                 Approve & Run
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {reviewGoalRequest && (
+        <div className="approval-backdrop" role="presentation">
+          <section className="approval-dialog review-dialog" role="dialog" aria-modal="true" aria-labelledby="review-goal-request-title">
+            <div className="approval-icon"><Icon name="flag" /></div>
+            <p className="section-kicker">REMOTE GOAL REVIEW</p>
+            <h2 id="review-goal-request-title">{reviewGoalRequest.title}</h2>
+            <div className="review-meta-row">
+              <span>Workspace: <code>{reviewGoalRequest.workspace}</code></span>
+              <span>Received: <strong>{new Date(reviewGoalRequest.createdAt).toLocaleTimeString()}</strong></span>
+              <span>{reviewGoalRequest.stepCount} step{reviewGoalRequest.stepCount === 1 ? '' : 's'} ({reviewGoalRequest.xStepCount} X)</span>
+            </div>
+            <div className="review-prompt-container">
+              <label>Objective</label>
+              <div className="review-prompt-text">{reviewGoalRequest.objective}</div>
+            </div>
+            {reviewGoalRequest.constraints.length > 0 && (
+              <div className="review-prompt-container">
+                <label>Constraints</label>
+                <div className="review-prompt-text">{reviewGoalRequest.constraints.join(', ')}</div>
+              </div>
+            )}
+            <div className="review-prompt-container">
+              <label>Ordered Steps</label>
+              <div className="review-prompt-text">
+                {reviewGoalRequest.stepTitles.map((title, i) => <div key={i}>{i + 1}. {title}</div>)}
+              </div>
+            </div>
+            <p className="approval-note">Importing only adds this Goal to your local Goals list. It does not run and does not grant X approval -- you still press Run there, and the existing Goal-level X approval prompt still applies.</p>
+            <div className="approval-actions">
+              <button className="deny-button" onClick={() => setReviewGoalRequest(null)}>Close</button>
+              <button
+                className="deny-button"
+                style={{ borderColor: 'var(--rose)', color: 'var(--rose)' }}
+                disabled={goalRequestBusy}
+                onClick={() => handleRejectRemoteGoalRequest(reviewGoalRequest)}
+              >
+                Reject
+              </button>
+              <button
+                className="allow-button"
+                autoFocus
+                disabled={goalRequestBusy}
+                onClick={() => handleImportRemoteGoalRequest(reviewGoalRequest)}
+              >
+                Import
               </button>
             </div>
           </section>

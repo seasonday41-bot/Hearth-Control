@@ -179,7 +179,7 @@ export class GoalRunner {
   /**
    * Operation 1: create_goal
    */
-  async create_goal({ title, objective, workspace, steps = [], constraints = [] }) {
+  async create_goal({ id, title, objective, workspace, steps = [], constraints = [], remoteGoalRequest = null }) {
     if (!workspace || typeof workspace !== 'string') {
       throw new Error('Goal must be bound to a valid workspace path');
     }
@@ -193,7 +193,7 @@ export class GoalRunner {
       throw new Error(`Invalid or inaccessible workspace path '${workspace}': ${err.message}`);
     }
 
-    const goal = createGoal({ title, objective, workspace, steps, constraints });
+    const goal = createGoal({ id, title, objective, workspace, steps, constraints, remoteGoalRequest });
     return this.storage.saveGoal(goal);
   }
 

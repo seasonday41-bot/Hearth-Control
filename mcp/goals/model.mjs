@@ -162,6 +162,25 @@ export const validateXApproval = (approval) => {
 };
 
 /**
+ * Validates the durable local<->remote correlation link for a Goal imported
+ * from a remote Goal-request row (e.g. Project X's public.goal_requests).
+ * Reference-only: an id and a provider tag, never the remote payload itself
+ * -- the local Goal (goals.json) is read exactly once at import time and is
+ * the sole source of truth from then on; this field exists purely so a
+ * resync sweep can find "which local Goals came from where" without
+ * depending on any in-memory Map. A missing/malformed link normalizes to
+ * `null` (fails closed to "not remote-linked"), never a half-valid one.
+ * @param {any} link
+ * @returns {{provider: string, requestId: string}|null}
+ */
+export const validateRemoteGoalRequestLink = (link) => {
+  if (!link || typeof link !== 'object') return null;
+  if (typeof link.provider !== 'string' || !link.provider.trim()) return null;
+  if (typeof link.requestId !== 'string' || !link.requestId.trim()) return null;
+  return { provider: link.provider.trim().slice(0, 100), requestId: link.requestId.trim().slice(0, 300) };
+};
+
+/**
  * Validates a goal object schema and attributes.
  * @param {any} goal
  * @returns {object} validated goal
@@ -219,6 +238,7 @@ export const validateGoal = (goal) => {
   const specialistResultDecisions = Array.isArray(goal.specialistResultDecisions)
     ? goal.specialistResultDecisions.map(validateSpecialistResultDecision).filter(Boolean)
     : [];
+  const remoteGoalRequest = validateRemoteGoalRequestLink(goal.remoteGoalRequest);
 
   const now = new Date().toISOString();
 
@@ -238,6 +258,7 @@ export const validateGoal = (goal) => {
     specialistExecutions,
     specialistResults,
     specialistResultDecisions,
+    remoteGoalRequest,
     createdAt: goal.createdAt || now,
     startedAt: goal.startedAt || null,
     updatedAt: goal.updatedAt || now,
@@ -435,7 +456,7 @@ export const validateReviewQueueItem = (item) => {
  * Helper to construct a new Goal instance.
  * Sets status to 'ready' if valid steps are present, otherwise 'draft'.
  */
-export const createGoal = ({ id, title, objective, workspace, steps = [], constraints = [] }) => {
+export const createGoal = ({ id, title, objective, workspace, steps = [], constraints = [], remoteGoalRequest = null }) => {
   const goal = validateGoal({
     id,
     title,
@@ -443,6 +464,7 @@ export const createGoal = ({ id, title, objective, workspace, steps = [], constr
     workspace,
     steps,
     constraints,
+    remoteGoalRequest,
     status: steps.length > 0 ? 'ready' : 'draft',
   });
   return goal;

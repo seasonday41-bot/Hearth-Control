@@ -43,6 +43,11 @@ function buildAuthHarness({ settings = {}, fetchImpl } = {}) {
   // is, so applyPublicTasksSession's real source (which now also mirrors
   // the session onto this) does not hit a ReferenceError in this sandbox.
   let reviewItemsClientInstance = { accessToken: null, ownerId: null, setSession(s) { this.accessToken = s.accessToken; this.ownerId = s.ownerId; } };
+  // Same Supabase project/owner, a third table (see main.cjs's own
+  // declaration comment) -- injected the same way, so applyPublicTasksSession's
+  // real source (which now also mirrors the session onto this) does not hit
+  // a ReferenceError in this sandbox.
+  let goalRequestsClientInstance = { accessToken: null, ownerId: null, setSession(s) { this.accessToken = s.accessToken; this.ownerId = s.ownerId; } };
   const factorySource = `
     let bridgeSession = null;
     let publicTasksSession = null;
@@ -54,10 +59,10 @@ function buildAuthHarness({ settings = {}, fetchImpl } = {}) {
       getSession: () => publicTasksSession,
     };
   `;
-  const factory = new Function('decryptLocalSecret', 'readSettings', 'saveSettings', 'encryptLocalSecret', 'sendEvent', 'publicTasksClientInstance', 'reviewItemsClientInstance', 'fetch', factorySource);
-  const api = factory(decryptLocalSecret, readSettings, saveSettings, encryptLocalSecret, () => {}, publicTasksClientInstance, reviewItemsClientInstance,
+  const factory = new Function('decryptLocalSecret', 'readSettings', 'saveSettings', 'encryptLocalSecret', 'sendEvent', 'publicTasksClientInstance', 'reviewItemsClientInstance', 'goalRequestsClientInstance', 'fetch', factorySource);
+  const api = factory(decryptLocalSecret, readSettings, saveSettings, encryptLocalSecret, () => {}, publicTasksClientInstance, reviewItemsClientInstance, goalRequestsClientInstance,
     fetchImpl || (async () => { throw new Error('fetch must not be called in this test'); }));
-  return { ...api, settingsState, savedSettings, publicTasksClientInstance, reviewItemsClientInstance };
+  return { ...api, settingsState, savedSettings, publicTasksClientInstance, reviewItemsClientInstance, goalRequestsClientInstance };
 }
 
 // ── namespace isolation ─────────────────────────────────────────────────
