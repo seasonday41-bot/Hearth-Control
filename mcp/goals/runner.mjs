@@ -2254,14 +2254,16 @@ export class GoalRunner {
       throw new Error(`Linked X review item is missing or resolved; specialist execution cannot be authorized`);
     }
 
-    const execId = deriveSpecialistExecutionId(handoffId);
     const existingExecs = goal.specialistExecutions || [];
-    const existing = existingExecs.find((e) => e.id === execId || e.handoffId === handoffId);
+    const priorForHandoff = existingExecs.filter((e) => e.handoffId === handoffId);
+    const existing = priorForHandoff.find((e) => ['authorized', 'dispatching', 'running', 'completed'].includes(e.status));
     if (existing) {
-      if (['authorized', 'dispatching', 'running', 'completed'].includes(existing.status)) {
-        return { execution: existing, goal };
-      }
+      return { execution: existing, goal };
     }
+    // Every prior attempt for this handoff (if any) has already terminated as
+    // interrupted/failed; derive a fresh, non-colliding generation-suffixed id so a
+    // retry never overwrites or duplicates the historical record of that attempt.
+    const execId = deriveSpecialistExecutionId(handoffId, priorForHandoff.length + 1);
 
     const lockCheck = isWorkspaceLocked(goal.workspace, {
       jobManager: this.jobManager,
@@ -2288,7 +2290,7 @@ export class GoalRunner {
       target: handoffPackage.handoff.target,
       goalId: goal.id,
       stepId: handoffPackage.source.step_id,
-      generation: 1,
+      generation: priorForHandoff.length + 1,
       status: 'authorized',
       workspace: goal.workspace,
       source: {

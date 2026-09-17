@@ -96,6 +96,9 @@ export const validateStep = (step) => {
     evidence: step.evidence ? sanitizeEvidence(step.evidence) : null,
     startedAt: step.startedAt || null,
     finishedAt: step.finishedAt || null,
+    specialistResultId: typeof step.specialistResultId === 'string' ? step.specialistResultId.trim().slice(0, 300) : null,
+    specialistExecutionId: typeof step.specialistExecutionId === 'string' ? step.specialistExecutionId.trim().slice(0, 300) : null,
+    specialistHandoffId: typeof step.specialistHandoffId === 'string' ? step.specialistHandoffId.trim().slice(0, 300) : null,
   };
 };
 
