@@ -1,0 +1,11 @@
+create index conversations_origin_device_owner_idx on public.conversations(origin_device_id, user_id) where origin_device_id is not null;
+create index messages_conversation_owner_idx on public.messages(conversation_id, user_id);
+create index messages_origin_device_owner_idx on public.messages(origin_device_id, user_id) where origin_device_id is not null;
+create index memories_origin_device_owner_idx on public.memories(origin_device_id, user_id) where origin_device_id is not null;
+create index memories_source_conversation_owner_idx on public.memories(source_conversation_id, user_id) where source_conversation_id is not null;
+create index memories_source_message_owner_idx on public.memories(source_message_id, user_id) where source_message_id is not null;
+create index tasks_conversation_owner_idx on public.tasks(conversation_id, user_id) where conversation_id is not null;
+create index tasks_origin_device_owner_idx on public.tasks(origin_device_id, user_id) where origin_device_id is not null;
+create index sync_state_device_owner_idx on public.sync_state(device_id, user_id);
+create index invites_invited_by_idx on public.invites(invited_by) where invited_by is not null;
+create index invites_accepted_by_idx on public.invites(accepted_by) where accepted_by is not null;;
