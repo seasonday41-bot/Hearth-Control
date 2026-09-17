@@ -56,6 +56,82 @@ Important: these files were authored through GitHub while the Mac was off. They 
 
 ---
 
+## ✅ Canonical progress checklist — MUST be maintained
+
+This checklist is the handoff ledger for every future chat/agent. **A phase is not complete until its evidence is recorded here.** When a phase finishes, mark its checkbox, add the completion record, update `CURRENT_PHASE`, `NEXT_PHASE`, `ACTIVE_BRANCH`, and the exact next action before doing later work.
+
+### Overall roadmap
+
+- [ ] **P0 — Validate and merge Hearth Skill v1** ← CURRENT
+- [ ] **P1 — Wire Skill Registry into X**
+- [ ] **P2 — Remote One-Click Updater**
+- [ ] **P3 — Connection Registry + Secure Credential Store**
+- [ ] **P4 — GitHub multi-connection (2+)**
+- [ ] **P5 — Supabase multi-project (2+)**
+- [ ] **P6 — Vercel connection**
+- [ ] **P7 — Console / connection health / approvals / evidence**
+- [ ] **P8 — Multi-Agent Router + universal `ส่งงาน:` ingress**
+- [ ] **P9 — Full UI redesign LAST**
+
+### P0 detailed checklist — current truth
+
+- [x] Hearth Skill v1 contract authored: `docs/HEARTH-SKILL-V1.md`
+- [x] `repo-inspect` Skill definition authored
+- [x] `bug-fix` Skill definition authored
+- [x] `test-regression` Skill definition authored
+- [x] Skill Registry/Loader authored: `mcp/skills/registry.mjs`
+- [x] Registry tests authored: `scripts/test-skill-registry.mjs`
+- [x] Skill definition tests authored: `scripts/test-skill-definitions.mjs`
+- [x] Package script added for Skill Registry tests
+- [ ] Run `npm run test:skill-registry` on the Mac
+- [ ] Run `node --test scripts/test-skill-definitions.mjs` on the Mac
+- [ ] Run `npm run test:local-skills` on the Mac
+- [ ] Run `npm run build` on the Mac
+- [ ] Run `git diff --check`
+- [ ] Inspect `git status` and `git diff main...HEAD`
+- [ ] Fix only branch-caused failures if any
+- [ ] Record exact validation evidence below
+- [ ] Merge branch into `main`
+- [ ] Update `BASELINE_MAIN` to the new merged `main` HEAD
+- [ ] Set `CURRENT_PHASE = P1_X_SKILL_INTEGRATION`
+- [ ] Set the new `ACTIVE_BRANCH` for P1 before coding
+
+### Completion record — append one block for every completed phase
+
+Use this exact structure so a new chat can continue without reconstructing history:
+
+```text
+PHASE_COMPLETED = P?
+STATUS = PASS
+COMPLETED_AT = <ISO timestamp or local date/time>
+BRANCH = <branch used>
+MERGED_MAIN_HEAD = <SHA, if merged>
+VALIDATION = <exact test/build commands + pass counts/results>
+FILES/ARCHITECTURE = <short summary of what became canonical>
+KNOWN_LIMITATIONS = <none or explicit remaining limitations>
+NEXT_PHASE = P?
+NEXT_EXACT_ACTION = <first concrete action only>
+```
+
+### Session handoff checklist — update before changing chats
+
+Before ending a substantial session or moving to another chat, the current agent must verify:
+
+- [ ] `CURRENT_PHASE` matches the first unfinished roadmap phase.
+- [ ] The completed work in that phase is checked off above.
+- [ ] Validation evidence is recorded; do not mark runtime work complete from code inspection alone.
+- [ ] `ACTIVE_BRANCH` is correct.
+- [ ] `BASELINE_MAIN` is updated if a merge occurred.
+- [ ] `NEXT_PHASE` is correct.
+- [ ] `NEXT_EXACT_ACTION` is written in the latest completion/handoff note.
+- [ ] Any locked design document path is named so the next chat does not invent a second architecture.
+- [ ] Known failures/blockers are written explicitly.
+- [ ] No later phase was started while an earlier required checklist item remained incomplete, unless the user explicitly changed priorities.
+
+**Rule:** if the README and a chat summary disagree, inspect Git/relevant evidence and update this README first. Once corrected, this README becomes the continuation source of truth again.
+
+---
+
 ## Canonical priority order
 
 ### P0 — Validate and merge Hearth Skill v1 branch **NOW**
