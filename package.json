@@ -32,6 +32,7 @@
     "test:context-builder": "node --test scripts/test-context-builder.mjs",
     "test:context-inspector": "node --test scripts/test-context-inspector.mjs",
     "test:local-skills": "node --test scripts/test-local-skills.mjs scripts/test-local-skills-loop.mjs scripts/test-grounding-gate.mjs",
+    "test:skill-registry": "node --test scripts/test-skill-registry.mjs",
     "test:storage-audit": "node --test scripts/test-storage-audit.mjs",
     "test:test-runner": "node --test-isolation=none --test scripts/test-test-runner.mjs",
     "smoke:local-provider": "node scripts/smoke-local-provider.mjs",
