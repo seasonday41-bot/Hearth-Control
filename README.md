@@ -11,10 +11,18 @@ This section is the project handoff/source of truth for any new ChatGPT/Codex/AI
 ```text
 CURRENT_PHASE = P0_SKILL_V1_VALIDATE_AND_MERGE
 NEXT_PHASE = P1_X_SKILL_INTEGRATION
+STATUS = WAITING_FOR_MAC_RUNTIME_VALIDATION
 BASELINE_MAIN = 750e42be30c2e5bef4ddd8d86051cdedb8089bc1
 ACTIVE_BRANCH = feature/hearth-skill-v1-repo-inspect
 MAC_RUNTIME_VALIDATION = PENDING (Mac was off when current branch was authored)
+BLOCKED_BY = MAC_OFF / local runtime validation unavailable
+LAST_COMPLETED_STEP = Skill v1 definitions + Registry/Loader + tests authored; canonical README handoff/checklist established
+NEXT_EXACT_ACTION = git checkout feature/hearth-skill-v1-repo-inspect && git pull && npm run test:skill-registry
+VALIDATION_REQUIRED = test:skill-registry -> test-skill-definitions -> test:local-skills -> build -> git diff --check -> inspect status/diff
+DO_NOT_START = P1/P2/P3/P4/P5/P6/P7/P8/P9 until P0 validation evidence is clean and Skill v1 is merged to main
 ```
+
+**Continuation rule:** if `BLOCKED_BY` is still true, do not invent substitute feature work. Wait for the blocker to clear, then execute `NEXT_EXACT_ACTION`. After every meaningful completed step, update `LAST_COMPLETED_STEP`, `NEXT_EXACT_ACTION`, checklist state, and evidence before switching chats.
 
 ### Current validated/stable direction
 
@@ -118,12 +126,13 @@ NEXT_EXACT_ACTION = <first concrete action only>
 Before ending a substantial session or moving to another chat, the current agent must verify:
 
 - [ ] `CURRENT_PHASE` matches the first unfinished roadmap phase.
+- [ ] `STATUS`, `BLOCKED_BY`, `LAST_COMPLETED_STEP`, `NEXT_EXACT_ACTION`, `VALIDATION_REQUIRED`, and `DO_NOT_START` reflect current truth.
 - [ ] The completed work in that phase is checked off above.
 - [ ] Validation evidence is recorded; do not mark runtime work complete from code inspection alone.
 - [ ] `ACTIVE_BRANCH` is correct.
 - [ ] `BASELINE_MAIN` is updated if a merge occurred.
 - [ ] `NEXT_PHASE` is correct.
-- [ ] `NEXT_EXACT_ACTION` is written in the latest completion/handoff note.
+- [ ] `NEXT_EXACT_ACTION` is the first concrete action only; do not make a new chat infer it from prose.
 - [ ] Any locked design document path is named so the next chat does not invent a second architecture.
 - [ ] Known failures/blockers are written explicitly.
 - [ ] No later phase was started while an earlier required checklist item remained incomplete, unless the user explicitly changed priorities.
