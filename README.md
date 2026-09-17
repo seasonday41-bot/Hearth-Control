@@ -9,17 +9,17 @@ A local macOS desktop control center, built with Electron, React, TypeScript, an
 This section is the project handoff/source of truth for any new ChatGPT/Codex/AI session. **Do not start a fresh architecture plan, choose a different next feature, or rediscover the roadmap from scratch.** Read this section first, inspect only the files needed for the current phase, and continue the first incomplete priority below.
 
 ```text
-CURRENT_PHASE = P0_SKILL_V1_VALIDATE_AND_MERGE
-NEXT_PHASE = P1_X_SKILL_INTEGRATION
-STATUS = READY_TO_MERGE
-BASELINE_MAIN = 750e42be30c2e5bef4ddd8d86051cdedb8089bc1
-ACTIVE_BRANCH = feature/hearth-skill-v1-repo-inspect
-MAC_RUNTIME_VALIDATION = PASS
+CURRENT_PHASE = P1_X_SKILL_INTEGRATION
+NEXT_PHASE = P2_REMOTE_ONE_CLICK_UPDATER
+STATUS = IN_PROGRESS
+BASELINE_MAIN = 764116776806a665dce10a716c91921c10e87d8d
+ACTIVE_BRANCH = feature/x-skill-integration-v1
+MAC_RUNTIME_VALIDATION = P0 PASS; P1 PENDING
 BLOCKED_BY = none
-LAST_COMPLETED_STEP = P0 runtime/build/Git validation passed on Mac with clean worktree and expected 11-file branch scope
-NEXT_EXACT_ACTION = merge feature/hearth-skill-v1-repo-inspect into main (user authorized 2026-09-17)
-VALIDATION_REQUIRED = COMPLETE: test:skill-registry 10/10 -> skill definitions 4/4 -> test:local-skills 46/46 -> build PASS -> git diff --check PASS -> status clean -> diff scope verified
-DO_NOT_START = P1/P2/P3/P4/P5/P6/P7/P8/P9 until P0 merge completes and the P1 branch is created from updated main
+LAST_COMPLETED_STEP = P0 Skill v1 validated on Mac and merged to main; P1 branch created and pushed from merged main
+NEXT_EXACT_ACTION = inspect and implement the smallest safe Skill Registry hook into X without changing claim/lease/durable runtime/Result Gate
+VALIDATION_REQUIRED = P1 targeted integration tests + existing Skill tests + existing X regression tests + build + git diff --check + clean/scope review
+DO_NOT_START = P2/P3/P4/P5/P6/P7/P8/P9 until P1 integration evidence is clean and P1 is merged to main
 ```
 
 **Continuation rule:** if `BLOCKED_BY` is still true, do not invent substitute feature work. Wait for the blocker to clear, then execute `NEXT_EXACT_ACTION`. After every meaningful completed step, update `LAST_COMPLETED_STEP`, `NEXT_EXACT_ACTION`, checklist state, and evidence before switching chats.
@@ -43,9 +43,9 @@ UI redesign happens only after the backend/control path is complete.
 
 ### Current active branch — what already exists
 
-`feature/hearth-skill-v1-repo-inspect` is ahead of the baseline `main` and currently contains the validated, unmerged Skill v1 work plus the locked Remote Updater design document.
+`feature/x-skill-integration-v1` was created from merged `main` at `764116776806a665dce10a716c91921c10e87d8d` and is the only branch for P1 work.
 
-Current branch additions/changes:
+P0 Skill v1 is now canonical on `main` and includes:
 
 ```text
 docs/HEARTH-SKILL-V1.md
@@ -57,10 +57,10 @@ mcp/skills/definitions/test-regression/SKILL.md
 scripts/test-skill-registry.mjs
 scripts/test-skill-definitions.mjs
 package.json                         # adds Skill Registry test script
-docs/REMOTE-ONE-CLICK-UPDATER-V1.md # design only; do NOT implement on this branch
+docs/REMOTE-ONE-CLICK-UPDATER-V1.md # design only; do NOT implement during P1
 ```
 
-These files were authored through GitHub while the Mac was off, then validated locally on the Mac on 2026-09-17. P0 evidence is recorded below. The branch is ready to merge but P0 is not complete until the merge and post-merge handoff fields are updated.
+P1 must reuse those components. Do not create a second Skill Registry, alternate task runner, alternate gateway, or alternate Result Gate.
 
 ---
 
@@ -70,8 +70,8 @@ This checklist is the handoff ledger for every future chat/agent. **A phase is n
 
 ### Overall roadmap
 
-- [ ] **P0 — Validate and merge Hearth Skill v1** ← CURRENT
-- [ ] **P1 — Wire Skill Registry into X**
+- [x] **P0 — Validate and merge Hearth Skill v1**
+- [ ] **P1 — Wire Skill Registry into X** ← CURRENT
 - [ ] **P2 — Remote One-Click Updater**
 - [ ] **P3 — Connection Registry + Secure Credential Store**
 - [ ] **P4 — GitHub multi-connection (2+)**
@@ -81,7 +81,7 @@ This checklist is the handoff ledger for every future chat/agent. **A phase is n
 - [ ] **P8 — Multi-Agent Router + universal `ส่งงาน:` ingress**
 - [ ] **P9 — Full UI redesign LAST**
 
-### P0 detailed checklist — current truth
+### P0 detailed checklist — completed
 
 - [x] Hearth Skill v1 contract authored: `docs/HEARTH-SKILL-V1.md`
 - [x] `repo-inspect` Skill definition authored
@@ -99,17 +99,17 @@ This checklist is the handoff ledger for every future chat/agent. **A phase is n
 - [x] Inspect `git status` and `git diff main...HEAD` — worktree clean; expected 11 changed files only
 - [x] Fix only branch-caused failures if any — no branch-caused failures found
 - [x] Record exact validation evidence below
-- [ ] Merge branch into `main`
-- [ ] Update `BASELINE_MAIN` to the new merged `main` HEAD
-- [ ] Set `CURRENT_PHASE = P1_X_SKILL_INTEGRATION`
-- [ ] Set the new `ACTIVE_BRANCH` for P1 before coding
+- [x] Merge branch into `main`
+- [x] Update `BASELINE_MAIN` to merged `main` HEAD `764116776806a665dce10a716c91921c10e87d8d`
+- [x] Set `CURRENT_PHASE = P1_X_SKILL_INTEGRATION`
+- [x] Create/push `feature/x-skill-integration-v1` from updated `main`
 
 ### P0 validation evidence — 2026-09-17
 
 ```text
 BRANCH = feature/hearth-skill-v1-repo-inspect
-PRE_MERGE_HEAD = 6d1c6d754d875d0855c8c25bf1aff227341ff2c9 (before this evidence-only README commit)
-BASELINE_MAIN = 750e42be30c2e5bef4ddd8d86051cdedb8089bc1
+PRE_MERGE_HEAD = 6d1c6d754d875d0855c8c25bf1aff227341ff2c9 (before evidence-only README commit)
+MERGED_MAIN_HEAD = 764116776806a665dce10a716c91921c10e87d8d
 
 npm run test:skill-registry
   PASS = 10/10
@@ -135,10 +135,10 @@ Generated electron/build-meta.json changed during build and was restored deliber
 git status --short = CLEAN after restore
 git diff --check = PASS (no output)
 git diff --name-status main...HEAD = expected 11 files only
-Remote compare before evidence commit = branch ahead of main, behind by 0
+Remote compare after merge = main and P0 branch identical
 ```
 
-Expected pre-merge changed-file scope:
+Expected P0 changed-file scope:
 
 ```text
 M README.md
@@ -152,6 +152,50 @@ A mcp/skills/registry.mjs
 M package.json
 A scripts/test-skill-definitions.mjs
 A scripts/test-skill-registry.mjs
+```
+
+### P1 detailed checklist — current truth
+
+- [x] P1 branch created from merged P0 `main`: `feature/x-skill-integration-v1`
+- [x] P1 branch pushed to `origin`
+- [x] Inspect current X execution path: `run-x-task.mjs` -> `execute-x-task.mjs` -> `repair-loop.mjs` -> `local-executor.mjs`
+- [x] Confirm Skill Registry remains permission-neutral (`grantsPermissions: false`)
+- [x] Confirm existing read-only gateway owns `repo_list`, `repo_read_file`, `file_search`, `git_inspect`
+- [x] Confirm Test Runner owns only approved `test_run` profiles
+- [x] Confirm `x-task-v1` already carries `allowed_tools`; do not add a second permission source merely for Skills
+- [ ] Define the smallest deterministic Skill selection/loading hook for X
+- [ ] Intersect Skill-requested tools with `task.allowed_tools` and actual Hearth-provided tool availability
+- [ ] Inject only selected Skill instructions/tool availability into the X model/execution context
+- [ ] Ensure missing Skill tools fail closed; no shell/general-command fallback
+- [ ] Ensure Skill metadata cannot widen workspace scope, write authority, validation authority, or approval boundaries
+- [ ] Keep `run-x-task.mjs` claim/lease/run persistence unchanged unless runtime evidence proves a targeted change is required
+- [ ] Keep dispatcher/durable runtime/continuation/Result Gate unchanged
+- [ ] Add targeted P1 integration tests for the three current Skills
+- [ ] Prove `repo-inspect` remains read-only end-to-end
+- [ ] Prove `bug-fix` does not gain write authority from the Skill definition itself
+- [ ] Prove `test-regression` can request only approved Test Runner profiles
+- [ ] Run existing Skill Registry/definition/Local Skills regressions
+- [ ] Run relevant existing X regressions
+- [ ] Run `npm run build`
+- [ ] Run `git diff --check`
+- [ ] Inspect `git status` and `git diff main...HEAD`
+- [ ] Record P1 evidence here
+- [ ] Merge P1 to `main` only after user authorization
+- [ ] Update `BASELINE_MAIN`, set `CURRENT_PHASE = P2_REMOTE_ONE_CLICK_UPDATER`, and create the P2 branch before coding P2
+
+### P0 completion record
+
+```text
+PHASE_COMPLETED = P0
+STATUS = PASS
+COMPLETED_AT = 2026-09-17
+BRANCH = feature/hearth-skill-v1-repo-inspect
+MERGED_MAIN_HEAD = 764116776806a665dce10a716c91921c10e87d8d
+VALIDATION = test:skill-registry 10/10 PASS; skill definitions 4/4 PASS; test:local-skills 46/46 PASS; build PASS; git diff --check PASS; clean/scope review PASS
+FILES/ARCHITECTURE = Hearth Skill v1 contract, three initial Skill definitions, permission-neutral Registry/Loader, tests, and locked Remote Updater design became canonical
+KNOWN_LIMITATIONS = Skill Registry is not yet wired into X execution; that is P1
+NEXT_PHASE = P1_X_SKILL_INTEGRATION
+NEXT_EXACT_ACTION = implement the smallest safe Skill selection/loading hook into X while preserving all existing safety/runtime owners
 ```
 
 ### Completion record — append one block for every completed phase
@@ -193,60 +237,55 @@ Before ending a substantial session or moving to another chat, the current agent
 
 ## Canonical priority order
 
-### P0 — Validate and merge Hearth Skill v1 branch **NOW**
+### P0 — Validate and merge Hearth Skill v1 — COMPLETE
 
-Do this first when the Mac is available. Do not add more features before this branch is validated.
-
-Required actions:
-
-```bash
-git checkout feature/hearth-skill-v1-repo-inspect
-git pull
-npm run test:skill-registry
-node --test scripts/test-skill-definitions.mjs
-npm run test:local-skills
-npm run build
-git diff --check
-```
-
-Then inspect `git status`, `git diff main...HEAD`, and test output. Fix only failures caused by this branch. Do not redesign unrelated stable subsystems.
-
-Acceptance for P0:
+P0 is merged into `main` at:
 
 ```text
-Skill Registry tests PASS
-Skill definition tests PASS
-existing Local Skills tests PASS
-production build/typecheck PASS
-git diff --check PASS
-no unintended generated/source changes
+764116776806a665dce10a716c91921c10e87d8d
 ```
 
-After evidence is clean, merge this branch to `main`. Update this README phase marker to `P1_X_SKILL_INTEGRATION`.
+Do not reopen P0 unless new regression evidence shows a concrete defect in the merged Skill v1 foundation.
 
-### P1 — Wire Skill Registry into X
+### P1 — Wire Skill Registry into X **NOW**
 
-After P0 is merged, integrate the declarative Skill Registry with X using the smallest safe hook.
+Integrate the declarative Skill Registry with X using the smallest safe hook.
 
 Locked rules:
 
 - Reuse `mcp/skills/registry.mjs`.
 - Reuse existing `mcp/skills/gateway.mjs` and `mcp/skills/test-runner.mjs` as tool execution layers.
 - Skills are playbooks/policy consumers; they never grant permissions.
-- Task constraints + Hearth permissions always override Skill metadata.
-- No shell fallback when a Skill tool is unavailable.
+- `task.allowed_tools`, task scope/constraints, Hearth permissions, and actual available tools always override Skill metadata.
+- No shell/general-command fallback when a Skill tool is unavailable.
 - Do not redesign X claim/run stores, dispatcher, durable runtime, continuation, or Result Gate.
 - Do not add more Skill categories until the three current definitions (`repo-inspect`, `bug-fix`, `test-regression`) can be selected/loaded and tested end-to-end.
+- `x-task-v1` already has `allowed_tools`; do not create a second parallel permission field solely for Skills without a demonstrated contract need.
 
 Canonical Skill spec: `docs/HEARTH-SKILL-V1.md`.
 
-Completion means X can load the appropriate current Skill definition, intersect requested tools with allowed tools, execute through existing safe tool layers, and return evidence without bypassing current task/approval constraints.
+Current execution path to preserve:
+
+```text
+runXTask
+  -> executeXTask
+     -> runTaskWithRepair
+        -> executeTask (LocalExecutor)
+           -> Context Loader
+           -> ModelAdapter
+           -> Scoped Edit Writer
+        -> Validation Runner
+     -> Result Gate
+     -> X Result
+```
+
+P1 completion means X can deterministically select/load the appropriate current Skill, intersect the Skill's requested tools with task/Hearth availability, expose only that bounded playbook/tool set to execution, and return grounded evidence without bypassing current task/workspace/approval/result constraints.
 
 ### P2 — Remote One-Click Updater
 
 This is next because manual DMG drag/Replace creates friction on every iteration.
 
-Create a **new branch from then-current `main`** after P1 is complete (or after P1 is safely merged if work is split). Do not implement Remote Updater on the current Skill branch.
+Create a **new branch from then-current `main`** after P1 is complete. Do not implement Remote Updater on the P1 Skill Integration branch.
 
 Canonical design: `docs/REMOTE-ONE-CLICK-UPDATER-V1.md`.
 
@@ -348,7 +387,7 @@ Do not build GVideo/Search/other agent runtimes before this foundation is ready.
 
 Current UI is known to be crowded. Do not spend backend implementation time polishing/restructuring the display before P0-P8 are stable enough to define the real information architecture.
 
-When this phase starts, split the current large `src/App.tsx`/styles into clear pages/components without silently changing runtime/business behavior.
+When this phase starts, split the current large `src/App.tsx`/styles into clear pages/components without silently changing runtime/business behavior. Target UX direction is easy to use, polished, colorful, and visually rich rather than ultra-minimal; detailed visual design is intentionally deferred until P9.
 
 ---
 
