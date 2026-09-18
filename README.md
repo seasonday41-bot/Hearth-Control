@@ -4,22 +4,22 @@ A local macOS desktop control center, built with Electron, React, TypeScript, an
 
 ## 🚨 READ FIRST — Canonical continuation path
 
-**Last updated: 2026-09-17**
+**Last updated: 2026-09-18**
 
 This section is the project handoff/source of truth for any new ChatGPT/Codex/AI session. **Do not start a fresh architecture plan, choose a different next feature, or rediscover the roadmap from scratch.** Read this section first, inspect only the files needed for the current phase, and continue the first incomplete priority below.
 
 ```text
-CURRENT_PHASE = P0_SKILL_V1_VALIDATE_AND_MERGE
-NEXT_PHASE = P1_X_SKILL_INTEGRATION
-STATUS = READY_TO_MERGE
-BASELINE_MAIN = 750e42be30c2e5bef4ddd8d86051cdedb8089bc1
-ACTIVE_BRANCH = feature/hearth-skill-v1-repo-inspect
+CURRENT_PHASE = P2_REMOTE_ONE_CLICK_UPDATER
+NEXT_PHASE = P3_CONNECTION_REGISTRY
+STATUS = READY_FOR_P2
+BASELINE_MAIN = afdf3578f1e31c52f86bd12bc41fe18d171b4bd0
+ACTIVE_BRANCH = main
 MAC_RUNTIME_VALIDATION = PASS
 BLOCKED_BY = none
-LAST_COMPLETED_STEP = P0 runtime/build/Git validation passed on Mac with clean worktree and expected 11-file branch scope
-NEXT_EXACT_ACTION = merge feature/hearth-skill-v1-repo-inspect into main (user authorized 2026-09-17)
-VALIDATION_REQUIRED = COMPLETE: test:skill-registry 10/10 -> skill definitions 4/4 -> test:local-skills 46/46 -> build PASS -> git diff --check PASS -> status clean -> diff scope verified
-DO_NOT_START = P1/P2/P3/P4/P5/P6/P7/P8/P9 until P0 merge completes and the P1 branch is created from updated main
+LAST_COMPLETED_STEP = P1 Skill Registry integration closed, validated, installed, Smoke 007 passed, remote sync verified, baseline frozen and merged to main
+NEXT_EXACT_ACTION = read docs/REMOTE-ONE-CLICK-UPDATER-V1.md and create the P2 branch from current main
+VALIDATION_REQUIRED = P1 complete: 294/294 regression PASS; installed Main Smoke 007 PASS; remote Goal projection PASS
+DO_NOT_START = P3/P4/P5/P6/P7/P8/P9 until P2 is completed
 ```
 
 **Continuation rule:** if `BLOCKED_BY` is still true, do not invent substitute feature work. Wait for the blocker to clear, then execute `NEXT_EXACT_ACTION`. After every meaningful completed step, update `LAST_COMPLETED_STEP`, `NEXT_EXACT_ACTION`, checklist state, and evidence before switching chats.
@@ -43,24 +43,9 @@ UI redesign happens only after the backend/control path is complete.
 
 ### Current active branch — what already exists
 
-`feature/hearth-skill-v1-repo-inspect` is ahead of the baseline `main` and currently contains the validated, unmerged Skill v1 work plus the locked Remote Updater design document.
+`main` contains the merged and validated P0 (Skill v1) and P1 (X Skill Integration + Remote Sync Fix) baselines.
 
-Current branch additions/changes:
-
-```text
-docs/HEARTH-SKILL-V1.md
-mcp/skills/registry.mjs
-mcp/skills/definitions/README.md
-mcp/skills/definitions/repo-inspect/SKILL.md
-mcp/skills/definitions/bug-fix/SKILL.md
-mcp/skills/definitions/test-regression/SKILL.md
-scripts/test-skill-registry.mjs
-scripts/test-skill-definitions.mjs
-package.json                         # adds Skill Registry test script
-docs/REMOTE-ONE-CLICK-UPDATER-V1.md # design only; do NOT implement on this branch
-```
-
-These files were authored through GitHub while the Mac was off, then validated locally on the Mac on 2026-09-17. P0 evidence is recorded below. The branch is ready to merge but P0 is not complete until the merge and post-merge handoff fields are updated.
+P2 work will be authored on a dedicated branch created from `main` (`feature/remote-one-click-updater-v1`).
 
 ---
 
@@ -70,9 +55,9 @@ This checklist is the handoff ledger for every future chat/agent. **A phase is n
 
 ### Overall roadmap
 
-- [ ] **P0 — Validate and merge Hearth Skill v1** ← CURRENT
-- [ ] **P1 — Wire Skill Registry into X**
-- [ ] **P2 — Remote One-Click Updater**
+- [x] **P0 — Validate and merge Hearth Skill v1**
+- [x] **P1 — Wire Skill Registry into X**
+- [ ] **P2 — Remote One-Click Updater** ← CURRENT
 - [ ] **P3 — Connection Registry + Secure Credential Store**
 - [ ] **P4 — GitHub multi-connection (2+)**
 - [ ] **P5 — Supabase multi-project (2+)**
@@ -99,10 +84,28 @@ This checklist is the handoff ledger for every future chat/agent. **A phase is n
 - [x] Inspect `git status` and `git diff main...HEAD` — worktree clean; expected 11 changed files only
 - [x] Fix only branch-caused failures if any — no branch-caused failures found
 - [x] Record exact validation evidence below
-- [ ] Merge branch into `main`
-- [ ] Update `BASELINE_MAIN` to the new merged `main` HEAD
-- [ ] Set `CURRENT_PHASE = P1_X_SKILL_INTEGRATION`
-- [ ] Set the new `ACTIVE_BRANCH` for P1 before coding
+- [x] Merge branch into `main`
+- [x] Update `BASELINE_MAIN` to the new merged `main` HEAD
+- [x] Set `CURRENT_PHASE = P1_X_SKILL_INTEGRATION`
+- [x] Set the new `ACTIVE_BRANCH` for P1 before coding
+
+### P1 detailed checklist — current truth
+
+- [x] Create branch `feature/x-skill-integration-v1` from merged `main`
+- [x] Design and implement Skill integration into X: `mcp/x/skill-integration.mjs`
+- [x] Wire Skill selection and loading into LocalExecutor (`mcp/x/local-executor.mjs`)
+- [x] Preserve strict read-only authority enforcement (`repo_edit` sole write gate)
+- [x] Support safe Review Queue reject resolution (`mcp/goals/model.mjs`, `mcp/goals/runner.mjs`, `mcp/tools.mjs`)
+- [x] Dynamic path-scope schema and eligible file enums preserved
+- [x] Goal remote sync fix: automatic projection on durable persistence (`goalRunner.onGoalPersisted`)
+- [x] P1 supervisor integration test: `scripts/test-x-skill-integration.mjs` (22/22 PASS)
+- [x] Core X regression: 159/159 PASS
+- [x] Full regression suite: 294/294 PASS
+- [x] Packaged macOS arm64 release and installed `/Applications/Hearth Control.app`
+- [x] Installed `app.asar` SHA256 matches release: `f75ffc3888817aca39e093192e703861ec6b8320ceffd72fd66d41e2edb94962`
+- [x] Post-install smoke 007 PASS (zero mutation, validation pass, automatic Supabase sync)
+- [x] Freeze baseline commit `66489b9134de02f0482671cb8b8ce1c18e169a4d` with tag `hearth-p1-validated-20260918`
+- [x] Merge `feature/x-skill-integration-v1` into `main`
 
 ### P0 validation evidence — 2026-09-17
 
@@ -154,38 +157,52 @@ A scripts/test-skill-definitions.mjs
 A scripts/test-skill-registry.mjs
 ```
 
-### Completion record — append one block for every completed phase
-
-Use this exact structure so a new chat can continue without reconstructing history:
+### Completion records
 
 ```text
-PHASE_COMPLETED = P?
+PHASE_COMPLETED = P0
 STATUS = PASS
-COMPLETED_AT = <ISO timestamp or local date/time>
-BRANCH = <branch used>
-MERGED_MAIN_HEAD = <SHA, if merged>
-VALIDATION = <exact test/build commands + pass counts/results>
-FILES/ARCHITECTURE = <short summary of what became canonical>
-KNOWN_LIMITATIONS = <none or explicit remaining limitations>
-NEXT_PHASE = P?
-NEXT_EXACT_ACTION = <first concrete action only>
+COMPLETED_AT = 2026-09-17
+BRANCH = feature/hearth-skill-v1-repo-inspect
+MERGED_MAIN_HEAD = 764116776806a665dce10a716c91921c10e87d8d
+VALIDATION = test:skill-registry 10/10 PASS; skill-definitions 4/4 PASS; test:local-skills 46/46 PASS; build PASS
+FILES/ARCHITECTURE = docs/HEARTH-SKILL-V1.md, mcp/skills/registry.mjs, initial skill definitions (repo-inspect, bug-fix, test-regression)
+KNOWN_LIMITATIONS = none
+NEXT_PHASE = P1
+NEXT_EXACT_ACTION = wire Skill Registry into X via feature/x-skill-integration-v1
+```
+
+```text
+PHASE_COMPLETED = P1
+STATUS = PASS
+COMPLETED_AT = 2026-09-18
+BRANCH = feature/x-skill-integration-v1
+MERGED_MAIN_HEAD = afdf3578f1e31c52f86bd12bc41fe18d171b4bd0
+VALIDATED_BASELINE = 66489b9134de02f0482671cb8b8ce1c18e169a4d
+TAG = hearth-p1-validated-20260918
+VALIDATION = 294/294 PASS + Smoke 007 PASS
+INSTALLED_APP_ASAR_SHA256 = f75ffc3888817aca39e093192e703861ec6b8320ceffd72fd66d41e2edb94962
+FILES/ARCHITECTURE = mcp/x/skill-integration.mjs, LocalExecutor skill loading & prompt injection, repo_edit-only authority enforcement, Review Queue reject support, dynamic path-scope schema, goalRunner.onGoalPersisted automatic remote Goal sync
+KNOWN_LIMITATIONS = evidence text count normalization mismatch (38/38+23/23 text vs 46/46+15/15 structured); non-blocking separate follow-up
+NEXT_PHASE = P2
+NEXT_EXACT_ACTION = read docs/REMOTE-ONE-CLICK-UPDATER-V1.md before implementation
 ```
 
 ### Session handoff checklist — update before changing chats
 
 Before ending a substantial session or moving to another chat, the current agent must verify:
 
-- [ ] `CURRENT_PHASE` matches the first unfinished roadmap phase.
-- [ ] `STATUS`, `BLOCKED_BY`, `LAST_COMPLETED_STEP`, `NEXT_EXACT_ACTION`, `VALIDATION_REQUIRED`, and `DO_NOT_START` reflect current truth.
-- [ ] The completed work in that phase is checked off above.
-- [ ] Validation evidence is recorded; do not mark runtime work complete from code inspection alone.
-- [ ] `ACTIVE_BRANCH` is correct.
-- [ ] `BASELINE_MAIN` is updated if a merge occurred.
-- [ ] `NEXT_PHASE` is correct.
-- [ ] `NEXT_EXACT_ACTION` is the first concrete action only; do not make a new chat infer it from prose.
-- [ ] Any locked design document path is named so the next chat does not invent a second architecture.
-- [ ] Known failures/blockers are written explicitly.
-- [ ] No later phase was started while an earlier required checklist item remained incomplete, unless the user explicitly changed priorities.
+- [x] `CURRENT_PHASE` matches the first unfinished roadmap phase.
+- [x] `STATUS`, `BLOCKED_BY`, `LAST_COMPLETED_STEP`, `NEXT_EXACT_ACTION`, `VALIDATION_REQUIRED`, and `DO_NOT_START` reflect current truth.
+- [x] The completed work in that phase is checked off above.
+- [x] Validation evidence is recorded; do not mark runtime work complete from code inspection alone.
+- [x] `ACTIVE_BRANCH` is correct.
+- [x] `BASELINE_MAIN` is updated if a merge occurred.
+- [x] `NEXT_PHASE` is correct.
+- [x] `NEXT_EXACT_ACTION` is the first concrete action only; do not make a new chat infer it from prose.
+- [x] Any locked design document path is named so the next chat does not invent a second architecture.
+- [x] Known failures/blockers are written explicitly.
+- [x] No later phase was started while an earlier required checklist item remained incomplete, unless the user explicitly changed priorities.
 
 **Rule:** if the README and a chat summary disagree, inspect Git/relevant evidence and update this README first. Once corrected, this README becomes the continuation source of truth again.
 
