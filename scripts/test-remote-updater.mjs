@@ -60,6 +60,25 @@ const {
   resolveUpdatesDirectory,
 } = require('../electron/remote-updater.cjs');
 
+const {
+  PRODUCT_NAME,
+  MANIFEST_NAME,
+  sha256Directory,
+  readAndValidateManifest,
+} = require('../electron/updater.cjs');
+
+const {
+  HDIUTIL_BIN,
+  MOUNT_DIR_NAME,
+  STAGED_DIR_NAME,
+  mountDmgReadOnly,
+  detachDmg,
+  validateAppCandidate,
+  copyAppBundle,
+  buildLocalManifestFromRemote,
+  stageVerifiedUpdate,
+} = require('../electron/remote-update-stager.cjs');
+
 // Test Ed25519 keypair generated in-memory only for this test run
 const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
 const TEST_KEY_ID = 'hearth-test-key-2026';
@@ -2092,4 +2111,701 @@ test('TLS Security: agent and requests preserve default certificate validation',
   assert.ok(agent instanceof https.Agent, 'Must create an https.Agent for https: protocol');
   assert.notEqual(agent.options?.rejectUnauthorized, false, 'rejectUnauthorized must not be disabled');
   agent.destroy();
+});
+
+// ============================================================================
+// P2C: verified DMG mount + exact app staging
+//
+// electron/remote-update-stager.cjs sits in front of the already-verified
+// P2A/P2B artifacts. hdiutil is never invoked for real in this suite --
+// every test injects a mock execFileFn and asserts the fixed binary path,
+// argv, and shell:false option the real implementation would use.
+// ============================================================================
+
+async function createAppFixture(root, { name = PRODUCT_NAME } = {}) {
+  const appPath = path.join(root, name);
+  await fs.promises.mkdir(path.join(appPath, 'Contents', 'MacOS'), { recursive: true });
+  await fs.promises.writeFile(path.join(appPath, 'Contents', 'MacOS', 'Hearth Control'), 'binary-stub');
+  await fs.promises.chmod(path.join(appPath, 'Contents', 'MacOS', 'Hearth Control'), 0o755);
+  await fs.promises.mkdir(path.join(appPath, 'Contents', 'Frameworks', 'Example.framework', 'Versions', 'A'), { recursive: true });
+  await fs.promises.writeFile(path.join(appPath, 'Contents', 'Frameworks', 'Example.framework', 'Versions', 'A', 'Example'), 'framework-binary');
+  await fs.promises.symlink('Versions/A/Example', path.join(appPath, 'Contents', 'Frameworks', 'Example.framework', 'Example'));
+  await fs.promises.symlink('A', path.join(appPath, 'Contents', 'Frameworks', 'Example.framework', 'Versions', 'Current'));
+  return appPath;
+}
+
+function makeMockHdiutil({ onAttach, onDetach, failDetachTimes = 0 } = {}) {
+  const calls = [];
+  let detachAttempts = 0;
+  const execFileFn = async (file, args, options) => {
+    calls.push({ file, args, options });
+    assert.equal(file, HDIUTIL_BIN, 'hdiutil must always be invoked via its fixed absolute path');
+    assert.equal(options.shell, false, 'hdiutil must never be invoked through a shell');
+    if (args[0] === 'attach') {
+      if (onAttach) await onAttach(args, options);
+      return { stdout: '', stderr: '' };
+    }
+    if (args[0] === 'detach') {
+      detachAttempts += 1;
+      if (detachAttempts <= failDetachTimes) {
+        throw Object.assign(new Error('Resource busy'), { code: 16 });
+      }
+      if (onDetach) await onDetach(args, options);
+      return { stdout: '', stderr: '' };
+    }
+    throw new Error(`Unexpected hdiutil invocation: ${args.join(' ')}`);
+  };
+  return { execFileFn, calls };
+}
+
+function buildRemoteManifestFixture(appTreeSha256, overrides = {}) {
+  return {
+    schema: SCHEMA_V2,
+    version: '0.5.0',
+    buildId: `0.5.0-p2c-${crypto.randomBytes(4).toString('hex')}`,
+    builtAt: '2026-09-18T09:00:00.000Z',
+    channel: 'stable',
+    platform: 'darwin',
+    arch: 'arm64',
+    appPath: APP_NAME,
+    sha256: appTreeSha256,
+    artifact: {
+      kind: 'dmg',
+      path: 'releases/p2c/Hearth-Control.dmg',
+      size: 4096,
+      sha256: sampleDmgHash,
+    },
+    releaseNotes: 'P2C staging test fixture',
+    signature: { algorithm: 'ed25519', keyId: TEST_KEY_ID, value: Buffer.alloc(64, 7).toString('base64') },
+    ...overrides,
+  };
+}
+
+const noopDelay = async () => {};
+
+test('P2C: 1. verified DMG can enter mount/stage phase and produces staged app + local manifest', async () => {
+  const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'hearth-p2c-'));
+  try {
+    const dmgPath = path.join(tmpDir, 'Hearth-Control.dmg');
+    await fs.promises.writeFile(dmgPath, 'not-a-real-dmg');
+
+    const { execFileFn } = makeMockHdiutil({
+      onAttach: async (args) => {
+        const mountPoint = args[args.indexOf('-mountpoint') + 1];
+        await createAppFixture(mountPoint);
+      },
+    });
+
+    const appTreeSha256 = await (async () => {
+      const scratchRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'hearth-p2c-hash-'));
+      const scratchApp = await createAppFixture(scratchRoot);
+      const hash = await sha256Directory(scratchApp);
+      await fs.promises.rm(scratchRoot, { recursive: true, force: true });
+      return hash;
+    })();
+
+    const manifest = buildRemoteManifestFixture(appTreeSha256);
+
+    const result = await stageVerifiedUpdate({
+      manifest,
+      dmgPath,
+      updatesDir: tmpDir,
+      execFileFn,
+      delayFn: noopDelay,
+    });
+
+    assert.equal(result.stagedAppPath, path.join(tmpDir, manifest.buildId, STAGED_DIR_NAME, PRODUCT_NAME));
+    assert.equal(await fs.promises.stat(result.stagedAppPath).then((s) => s.isDirectory()), true);
+    const localManifest = JSON.parse(await fs.promises.readFile(result.localManifestPath, 'utf8'));
+    assert.equal(localManifest.version, manifest.version);
+    assert.equal(localManifest.buildId, manifest.buildId);
+    assert.equal(localManifest.appPath, PRODUCT_NAME);
+    assert.equal(localManifest.sha256, appTreeSha256);
+
+    // The raw verified remote manifest is also persisted at the build root for audit/diagnostics.
+    const rawManifestPath = path.join(tmpDir, manifest.buildId, MANIFEST_NAME);
+    const rawManifest = JSON.parse(await fs.promises.readFile(rawManifestPath, 'utf8'));
+    assert.equal(rawManifest.buildId, manifest.buildId);
+  } finally {
+    await fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test('P2C: 2. hdiutil invoked via fixed /usr/bin/hdiutil, no shell', async () => {
+  const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'hearth-p2c-'));
+  try {
+    const dmgPath = path.join(tmpDir, 'Hearth-Control.dmg');
+    await fs.promises.writeFile(dmgPath, 'not-a-real-dmg');
+    const { execFileFn, calls } = makeMockHdiutil({
+      onAttach: async (args) => { await createAppFixture(args[args.indexOf('-mountpoint') + 1]); },
+    });
+    const scratchRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'hearth-p2c-hash-'));
+    const appTreeSha256 = await sha256Directory(await createAppFixture(scratchRoot));
+    await fs.promises.rm(scratchRoot, { recursive: true, force: true });
+
+    await stageVerifiedUpdate({
+      manifest: buildRemoteManifestFixture(appTreeSha256),
+      dmgPath,
+      updatesDir: tmpDir,
+      execFileFn,
+      delayFn: noopDelay,
+    });
+
+    assert.ok(calls.length >= 2, 'must invoke hdiutil for both attach and detach');
+    for (const call of calls) {
+      assert.equal(call.file, HDIUTIL_BIN);
+      assert.equal(call.options.shell, false);
+      assert.ok(Number.isFinite(call.options.timeout) && call.options.timeout > 0, 'must use a bounded timeout');
+    }
+  } finally {
+    await fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test('P2C: 3. mount uses read-only, non-browse, no-autoopen flags', async () => {
+  const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'hearth-p2c-'));
+  try {
+    const dmgPath = path.join(tmpDir, 'Hearth-Control.dmg');
+    await fs.promises.writeFile(dmgPath, 'not-a-real-dmg');
+    const { execFileFn, calls } = makeMockHdiutil({
+      onAttach: async (args) => { await createAppFixture(args[args.indexOf('-mountpoint') + 1]); },
+    });
+    const scratchRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'hearth-p2c-hash-'));
+    const appTreeSha256 = await sha256Directory(await createAppFixture(scratchRoot));
+    await fs.promises.rm(scratchRoot, { recursive: true, force: true });
+
+    await stageVerifiedUpdate({
+      manifest: buildRemoteManifestFixture(appTreeSha256),
+      dmgPath,
+      updatesDir: tmpDir,
+      execFileFn,
+      delayFn: noopDelay,
+    });
+
+    const attachCall = calls.find((c) => c.args[0] === 'attach');
+    assert.ok(attachCall, 'must call hdiutil attach');
+    assert.ok(attachCall.args.includes('-readonly'));
+    assert.ok(attachCall.args.includes('-nobrowse'));
+    assert.ok(attachCall.args.includes('-noautoopen'));
+    assert.equal(attachCall.args[1], dmgPath);
+  } finally {
+    await fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test('P2C: 4. missing Hearth Control.app rejected', async () => {
+  const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'hearth-p2c-'));
+  try {
+    const dmgPath = path.join(tmpDir, 'Hearth-Control.dmg');
+    await fs.promises.writeFile(dmgPath, 'not-a-real-dmg');
+    const { execFileFn } = makeMockHdiutil({
+      onAttach: async (args) => {
+        // Mount succeeds but the volume is empty -- no app bundle at all.
+        await fs.promises.mkdir(args[args.indexOf('-mountpoint') + 1], { recursive: true });
+      },
+    });
+
+    const manifest = buildRemoteManifestFixture(sampleTreeHash);
+    await assert.rejects(
+      () => stageVerifiedUpdate({ manifest, dmgPath, updatesDir: tmpDir, execFileFn, delayFn: noopDelay }),
+      /was not found in the mounted image/,
+    );
+
+    const stagedAppPath = path.join(tmpDir, manifest.buildId, STAGED_DIR_NAME, PRODUCT_NAME);
+    assert.equal(await fs.promises.stat(stagedAppPath).then(() => true).catch(() => false), false);
+  } finally {
+    await fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test('P2C: 5. differently named app rejected', async () => {
+  const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'hearth-p2c-'));
+  try {
+    const dmgPath = path.join(tmpDir, 'Hearth-Control.dmg');
+    await fs.promises.writeFile(dmgPath, 'not-a-real-dmg');
+    const { execFileFn } = makeMockHdiutil({
+      onAttach: async (args) => {
+        const mountPoint = args[args.indexOf('-mountpoint') + 1];
+        await createAppFixture(mountPoint, { name: 'Something Else.app' });
+      },
+    });
+
+    const manifest = buildRemoteManifestFixture(sampleTreeHash);
+    await assert.rejects(
+      () => stageVerifiedUpdate({ manifest, dmgPath, updatesDir: tmpDir, execFileFn, delayFn: noopDelay }),
+      /was not found in the mounted image/,
+    );
+  } finally {
+    await fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test('P2C: 6. top-level candidate symlink rejected', async () => {
+  const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'hearth-p2c-'));
+  try {
+    const dmgPath = path.join(tmpDir, 'Hearth-Control.dmg');
+    await fs.promises.writeFile(dmgPath, 'not-a-real-dmg');
+    const { execFileFn } = makeMockHdiutil({
+      onAttach: async (args) => {
+        const mountPoint = args[args.indexOf('-mountpoint') + 1];
+        // A legitimate-looking sibling directory, but the top-level entry
+        // claiming to be the app is only a symlink alias to it.
+        const realDir = path.join(mountPoint, 'real-app-dir');
+        await fs.promises.mkdir(realDir, { recursive: true });
+        await fs.promises.symlink(realDir, path.join(mountPoint, PRODUCT_NAME));
+      },
+    });
+
+    const manifest = buildRemoteManifestFixture(sampleTreeHash);
+    await assert.rejects(
+      () => stageVerifiedUpdate({ manifest, dmgPath, updatesDir: tmpDir, execFileFn, delayFn: noopDelay }),
+      /must not be a symlink/,
+    );
+  } finally {
+    await fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test('P2C: 7. candidate path escape rejected', async () => {
+  const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'hearth-p2c-'));
+  try {
+    const dmgPath = path.join(tmpDir, 'Hearth-Control.dmg');
+    await fs.promises.writeFile(dmgPath, 'not-a-real-dmg');
+    const outsideDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'hearth-p2c-outside-'));
+    const { execFileFn } = makeMockHdiutil({
+      onAttach: async (args) => {
+        const mountPoint = args[args.indexOf('-mountpoint') + 1];
+        await fs.promises.mkdir(mountPoint, { recursive: true });
+        // Escaping symlink: claims to be the app but resolves entirely outside the mount root.
+        await fs.promises.symlink(outsideDir, path.join(mountPoint, PRODUCT_NAME));
+      },
+    });
+
+    const manifest = buildRemoteManifestFixture(sampleTreeHash);
+    await assert.rejects(
+      () => stageVerifiedUpdate({ manifest, dmgPath, updatesDir: tmpDir, execFileFn, delayFn: noopDelay }),
+      /must not be a symlink/,
+    );
+  } finally {
+    await fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test('P2C: 8. exact Hearth Control.app directory accepted; legitimate framework symlinks and executable permissions preserved', async () => {
+  const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'hearth-p2c-'));
+  try {
+    const dmgPath = path.join(tmpDir, 'Hearth-Control.dmg');
+    await fs.promises.writeFile(dmgPath, 'not-a-real-dmg');
+    const { execFileFn } = makeMockHdiutil({
+      onAttach: async (args) => { await createAppFixture(args[args.indexOf('-mountpoint') + 1]); },
+    });
+    const scratchRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'hearth-p2c-hash-'));
+    const appTreeSha256 = await sha256Directory(await createAppFixture(scratchRoot));
+    await fs.promises.rm(scratchRoot, { recursive: true, force: true });
+
+    const manifest = buildRemoteManifestFixture(appTreeSha256);
+    const result = await stageVerifiedUpdate({ manifest, dmgPath, updatesDir: tmpDir, execFileFn, delayFn: noopDelay });
+
+    const binaryPath = path.join(result.stagedAppPath, 'Contents', 'MacOS', 'Hearth Control');
+    const binaryStat = await fs.promises.stat(binaryPath);
+    assert.equal(binaryStat.mode & 0o777, 0o755, 'executable permission bits must be preserved');
+
+    const frameworkDir = path.join(result.stagedAppPath, 'Contents', 'Frameworks', 'Example.framework');
+    assert.equal(await fs.promises.readlink(path.join(frameworkDir, 'Example')), 'Versions/A/Example');
+    assert.equal(await fs.promises.readlink(path.join(frameworkDir, 'Versions', 'Current')), 'A');
+  } finally {
+    await fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test('P2C: 9. copy failure removes incomplete staging and still detaches', async (t) => {
+  if (typeof process.getuid === 'function' && process.getuid() === 0) {
+    t.skip('Running as root: permission-based failure injection is not effective.');
+    return;
+  }
+  const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'hearth-p2c-'));
+  let lockedDir = null;
+  try {
+    const dmgPath = path.join(tmpDir, 'Hearth-Control.dmg');
+    await fs.promises.writeFile(dmgPath, 'not-a-real-dmg');
+    const { execFileFn, calls } = makeMockHdiutil({
+      onAttach: async (args) => {
+        const mountPoint = args[args.indexOf('-mountpoint') + 1];
+        const appPath = await createAppFixture(mountPoint);
+        lockedDir = path.join(appPath, 'Contents', 'Frameworks', 'Example.framework', 'Versions', 'A');
+        await fs.promises.chmod(lockedDir, 0o000);
+      },
+    });
+
+    const manifest = buildRemoteManifestFixture(sampleTreeHash);
+    await assert.rejects(() => stageVerifiedUpdate({ manifest, dmgPath, updatesDir: tmpDir, execFileFn, delayFn: noopDelay }));
+
+    const stagedAppPath = path.join(tmpDir, manifest.buildId, STAGED_DIR_NAME, PRODUCT_NAME);
+    assert.equal(await fs.promises.stat(stagedAppPath).then(() => true).catch(() => false), false, 'incomplete staged app must be removed');
+
+    const detachCall = calls.find((c) => c.args[0] === 'detach');
+    assert.ok(detachCall, 'detach must still run after a copy failure');
+  } finally {
+    if (lockedDir) await fs.promises.chmod(lockedDir, 0o755).catch(() => {});
+    await fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test('P2C: 10. mount failure leaves no staged app and never attempts detach', async () => {
+  const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'hearth-p2c-'));
+  try {
+    const dmgPath = path.join(tmpDir, 'Hearth-Control.dmg');
+    await fs.promises.writeFile(dmgPath, 'not-a-real-dmg');
+    const { execFileFn, calls } = makeMockHdiutil({
+      onAttach: async () => { throw new Error('image not recognized'); },
+    });
+
+    const manifest = buildRemoteManifestFixture(sampleTreeHash);
+    await assert.rejects(
+      () => stageVerifiedUpdate({ manifest, dmgPath, updatesDir: tmpDir, execFileFn, delayFn: noopDelay }),
+      /could not be mounted/,
+    );
+
+    const stagedDir = path.join(tmpDir, manifest.buildId, STAGED_DIR_NAME);
+    assert.equal(await fs.promises.stat(stagedDir).then(() => true).catch(() => false), false);
+    assert.equal(calls.some((c) => c.args[0] === 'detach'), false, 'a failed attach must never be followed by a detach attempt');
+  } finally {
+    await fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test('P2C: 11. detach occurs after success', async () => {
+  const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'hearth-p2c-'));
+  try {
+    const dmgPath = path.join(tmpDir, 'Hearth-Control.dmg');
+    await fs.promises.writeFile(dmgPath, 'not-a-real-dmg');
+    const { execFileFn, calls } = makeMockHdiutil({
+      onAttach: async (args) => { await createAppFixture(args[args.indexOf('-mountpoint') + 1]); },
+    });
+    const scratchRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'hearth-p2c-hash-'));
+    const appTreeSha256 = await sha256Directory(await createAppFixture(scratchRoot));
+    await fs.promises.rm(scratchRoot, { recursive: true, force: true });
+
+    await stageVerifiedUpdate({
+      manifest: buildRemoteManifestFixture(appTreeSha256),
+      dmgPath,
+      updatesDir: tmpDir,
+      execFileFn,
+      delayFn: noopDelay,
+    });
+
+    const detachCall = calls.find((c) => c.args[0] === 'detach');
+    assert.ok(detachCall, 'detach must run after a successful stage');
+    assert.equal(detachCall.args.includes('-force'), false, 'first detach attempt must not be forced');
+  } finally {
+    await fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test('P2C: 12. detach retry is bounded, only forcing on the final attempt', async () => {
+  const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'hearth-p2c-'));
+  try {
+    const dmgPath = path.join(tmpDir, 'Hearth-Control.dmg');
+    await fs.promises.writeFile(dmgPath, 'not-a-real-dmg');
+    const { execFileFn, calls } = makeMockHdiutil({
+      onAttach: async (args) => { await createAppFixture(args[args.indexOf('-mountpoint') + 1]); },
+      failDetachTimes: 2,
+    });
+    const scratchRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'hearth-p2c-hash-'));
+    const appTreeSha256 = await sha256Directory(await createAppFixture(scratchRoot));
+    await fs.promises.rm(scratchRoot, { recursive: true, force: true });
+
+    await stageVerifiedUpdate({
+      manifest: buildRemoteManifestFixture(appTreeSha256),
+      dmgPath,
+      updatesDir: tmpDir,
+      execFileFn,
+      delayFn: noopDelay,
+      detachMaxAttempts: 3,
+    });
+
+    const detachCalls = calls.filter((c) => c.args[0] === 'detach');
+    assert.equal(detachCalls.length, 3, 'must retry a bounded number of times, not indefinitely');
+    assert.equal(detachCalls[0].args.includes('-force'), false);
+    assert.equal(detachCalls[1].args.includes('-force'), false);
+    assert.equal(detachCalls[2].args.includes('-force'), true, 'only the final bounded attempt may force detach');
+  } finally {
+    await fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test('P2C: 13. stale incomplete staged directory from a previous run is not trusted and is replaced', async () => {
+  const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'hearth-p2c-'));
+  try {
+    const dmgPath = path.join(tmpDir, 'Hearth-Control.dmg');
+    await fs.promises.writeFile(dmgPath, 'not-a-real-dmg');
+    const { execFileFn } = makeMockHdiutil({
+      onAttach: async (args) => { await createAppFixture(args[args.indexOf('-mountpoint') + 1]); },
+    });
+    const scratchRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'hearth-p2c-hash-'));
+    const appTreeSha256 = await sha256Directory(await createAppFixture(scratchRoot));
+    await fs.promises.rm(scratchRoot, { recursive: true, force: true });
+
+    const manifest = buildRemoteManifestFixture(appTreeSha256);
+    const staleStagedDir = path.join(tmpDir, manifest.buildId, STAGED_DIR_NAME);
+    await fs.promises.mkdir(staleStagedDir, { recursive: true });
+    await fs.promises.writeFile(path.join(staleStagedDir, 'leftover-from-crashed-run.txt'), 'stale');
+
+    const result = await stageVerifiedUpdate({ manifest, dmgPath, updatesDir: tmpDir, execFileFn, delayFn: noopDelay });
+
+    const entries = await fs.promises.readdir(result.stagedDir);
+    assert.ok(!entries.includes('leftover-from-crashed-run.txt'), 'stale leftover content must not survive into the fresh stage');
+    assert.ok(entries.includes(PRODUCT_NAME));
+    assert.ok(entries.includes(MANIFEST_NAME));
+  } finally {
+    await fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test('P2C: 14. installed /Applications/Hearth Control.app is never referenced by the stager', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'electron', 'remote-update-stager.cjs'), 'utf8');
+  assert.ok(!source.includes('/Applications'), 'the staging module must never reference the installed app location');
+  assert.ok(!/\.installUpdate\s*\(/.test(source), 'the staging module must never call the existing installer');
+});
+
+test('P2C: 15. existing verified DMG is not modified or moved during staging', async () => {
+  const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'hearth-p2c-'));
+  try {
+    const dmgPath = path.join(tmpDir, 'Hearth-Control.dmg');
+    const dmgBytes = crypto.randomBytes(2048);
+    await fs.promises.writeFile(dmgPath, dmgBytes);
+    const dmgShaBefore = crypto.createHash('sha256').update(dmgBytes).digest('hex');
+
+    const { execFileFn } = makeMockHdiutil({
+      onAttach: async (args) => { await createAppFixture(args[args.indexOf('-mountpoint') + 1]); },
+    });
+    const scratchRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'hearth-p2c-hash-'));
+    const appTreeSha256 = await sha256Directory(await createAppFixture(scratchRoot));
+    await fs.promises.rm(scratchRoot, { recursive: true, force: true });
+
+    await stageVerifiedUpdate({
+      manifest: buildRemoteManifestFixture(appTreeSha256),
+      dmgPath,
+      updatesDir: tmpDir,
+      execFileFn,
+      delayFn: noopDelay,
+    });
+
+    const dmgBytesAfter = await fs.promises.readFile(dmgPath);
+    const dmgShaAfter = crypto.createHash('sha256').update(dmgBytesAfter).digest('hex');
+    assert.equal(dmgShaAfter, dmgShaBefore, 'the already-verified DMG must remain byte-identical after staging');
+  } finally {
+    await fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test('P2C: 16. staged trusted local manifest/layout satisfies updater.cjs readAndValidateManifest', async () => {
+  const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'hearth-p2c-'));
+  try {
+    const dmgPath = path.join(tmpDir, 'Hearth-Control.dmg');
+    await fs.promises.writeFile(dmgPath, 'not-a-real-dmg');
+    const { execFileFn } = makeMockHdiutil({
+      onAttach: async (args) => { await createAppFixture(args[args.indexOf('-mountpoint') + 1]); },
+    });
+    const scratchRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'hearth-p2c-hash-'));
+    const appTreeSha256 = await sha256Directory(await createAppFixture(scratchRoot));
+    await fs.promises.rm(scratchRoot, { recursive: true, force: true });
+
+    const manifest = buildRemoteManifestFixture(appTreeSha256);
+    const result = await stageVerifiedUpdate({ manifest, dmgPath, updatesDir: tmpDir, execFileFn, delayFn: noopDelay });
+
+    // This is the exact existing-updater call a future handoff would make.
+    const validated = await readAndValidateManifest(result.stagedDir, 'darwin', 'arm64');
+    assert.equal(validated.version, manifest.version);
+    assert.equal(validated.buildId, manifest.buildId);
+    assert.equal(validated.appPath, result.stagedAppPath);
+    assert.equal(validated.sha256, appTreeSha256);
+  } finally {
+    await fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test('P2C: 17. app-tree checksum mismatch is rejected by the EXISTING updater validation on handoff', async () => {
+  const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'hearth-p2c-'));
+  try {
+    const dmgPath = path.join(tmpDir, 'Hearth-Control.dmg');
+    await fs.promises.writeFile(dmgPath, 'not-a-real-dmg');
+    const { execFileFn } = makeMockHdiutil({
+      onAttach: async (args) => { await createAppFixture(args[args.indexOf('-mountpoint') + 1]); },
+    });
+    const scratchRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'hearth-p2c-hash-'));
+    const appTreeSha256 = await sha256Directory(await createAppFixture(scratchRoot));
+    await fs.promises.rm(scratchRoot, { recursive: true, force: true });
+
+    const manifest = buildRemoteManifestFixture(appTreeSha256);
+    const result = await stageVerifiedUpdate({ manifest, dmgPath, updatesDir: tmpDir, execFileFn, delayFn: noopDelay });
+
+    // Tamper with the staged app tree after a successful stage (simulating disk corruption/tampering).
+    await fs.promises.appendFile(path.join(result.stagedAppPath, 'Contents', 'MacOS', 'Hearth Control'), 'tampered-bytes');
+
+    await assert.rejects(
+      () => readAndValidateManifest(result.stagedDir, 'darwin', 'arm64'),
+      /checksum did not match/,
+    );
+  } finally {
+    await fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test('P2C: 18. no installUpdate call occurs during staging', async () => {
+  const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'hearth-p2c-'));
+  const updaterModule = require('../electron/updater.cjs');
+  const originalInstallUpdate = updaterModule.installUpdate;
+  let installCalled = false;
+  updaterModule.installUpdate = async (...args) => {
+    installCalled = true;
+    throw new Error('installUpdate must never be called by the staging layer');
+  };
+  try {
+    const dmgPath = path.join(tmpDir, 'Hearth-Control.dmg');
+    await fs.promises.writeFile(dmgPath, 'not-a-real-dmg');
+    const { execFileFn } = makeMockHdiutil({
+      onAttach: async (args) => { await createAppFixture(args[args.indexOf('-mountpoint') + 1]); },
+    });
+    const scratchRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'hearth-p2c-hash-'));
+    const appTreeSha256 = await sha256Directory(await createAppFixture(scratchRoot));
+    await fs.promises.rm(scratchRoot, { recursive: true, force: true });
+
+    await stageVerifiedUpdate({
+      manifest: buildRemoteManifestFixture(appTreeSha256),
+      dmgPath,
+      updatesDir: tmpDir,
+      execFileFn,
+      delayFn: noopDelay,
+    });
+
+    assert.equal(installCalled, false, 'staging must never invoke installUpdate');
+  } finally {
+    updaterModule.installUpdate = originalInstallUpdate;
+    await fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test('P2C: 19. buildId path traversal is rejected before touching the filesystem', async () => {
+  const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'hearth-p2c-'));
+  try {
+    const dmgPath = path.join(tmpDir, 'Hearth-Control.dmg');
+    await fs.promises.writeFile(dmgPath, 'not-a-real-dmg');
+    const { execFileFn, calls } = makeMockHdiutil();
+    const manifest = buildRemoteManifestFixture(sampleTreeHash, { buildId: '../../etc' });
+
+    await assert.rejects(
+      () => stageVerifiedUpdate({ manifest, dmgPath, updatesDir: tmpDir, execFileFn, delayFn: noopDelay }),
+      /buildId is invalid/,
+    );
+    assert.equal(calls.length, 0, 'hdiutil must never be invoked for an invalid buildId');
+  } finally {
+    await fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test('P2C: 20. staging succeeds but detach fails after all bounded retries -> fails closed, staged candidate discarded', async () => {
+  const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'hearth-p2c-'));
+  try {
+    const dmgPath = path.join(tmpDir, 'Hearth-Control.dmg');
+    const dmgBytes = crypto.randomBytes(2048);
+    await fs.promises.writeFile(dmgPath, dmgBytes);
+    const dmgShaBefore = crypto.createHash('sha256').update(dmgBytes).digest('hex');
+
+    const { execFileFn, calls } = makeMockHdiutil({
+      onAttach: async (args) => { await createAppFixture(args[args.indexOf('-mountpoint') + 1]); },
+      failDetachTimes: Infinity, // every detach attempt fails, including the final forced one
+    });
+    const scratchRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'hearth-p2c-hash-'));
+    const appTreeSha256 = await sha256Directory(await createAppFixture(scratchRoot));
+    await fs.promises.rm(scratchRoot, { recursive: true, force: true });
+
+    const manifest = buildRemoteManifestFixture(appTreeSha256);
+
+    await assert.rejects(
+      () => stageVerifiedUpdate({ manifest, dmgPath, updatesDir: tmpDir, execFileFn, delayFn: noopDelay, detachMaxAttempts: 3 }),
+      /could not be detached after staging succeeded.*discarded/i,
+    );
+
+    // The staged trusted-candidate state must never survive a permanent detach failure.
+    const stagedDir = path.join(tmpDir, manifest.buildId, STAGED_DIR_NAME);
+    const stagedAppPath = path.join(stagedDir, PRODUCT_NAME);
+    assert.equal(await fs.promises.stat(stagedDir).then(() => true).catch(() => false), false, 'staged/ must be discarded, not left as a trusted candidate');
+    assert.equal(await fs.promises.stat(stagedAppPath).then(() => true).catch(() => false), false);
+
+    // Bounded retry/force behavior must be unchanged: exactly maxAttempts detach
+    // calls, and only the final one forced.
+    const detachCalls = calls.filter((c) => c.args[0] === 'detach');
+    assert.equal(detachCalls.length, 3);
+    assert.equal(detachCalls[0].args.includes('-force'), false);
+    assert.equal(detachCalls[1].args.includes('-force'), false);
+    assert.equal(detachCalls[2].args.includes('-force'), true);
+
+    // The already-verified DMG must remain untouched even on this failure path.
+    const dmgBytesAfter = await fs.promises.readFile(dmgPath);
+    const dmgShaAfter = crypto.createHash('sha256').update(dmgBytesAfter).digest('hex');
+    assert.equal(dmgShaAfter, dmgShaBefore);
+  } finally {
+    await fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test('P2C: 21. staging fails and detach also fails -> original staging error remains primary', async () => {
+  const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'hearth-p2c-'));
+  try {
+    const dmgPath = path.join(tmpDir, 'Hearth-Control.dmg');
+    await fs.promises.writeFile(dmgPath, 'not-a-real-dmg');
+    const { execFileFn, calls } = makeMockHdiutil({
+      onAttach: async (args) => {
+        // Mount succeeds but the volume is empty -- staging will fail on the
+        // missing app candidate, independent of the detach outcome below.
+        await fs.promises.mkdir(args[args.indexOf('-mountpoint') + 1], { recursive: true });
+      },
+      failDetachTimes: Infinity,
+    });
+
+    const manifest = buildRemoteManifestFixture(sampleTreeHash);
+
+    let caughtError = null;
+    await stageVerifiedUpdate({ manifest, dmgPath, updatesDir: tmpDir, execFileFn, delayFn: noopDelay, detachMaxAttempts: 3 })
+      .catch((err) => { caughtError = err; });
+
+    assert.ok(caughtError, 'stageVerifiedUpdate must reject');
+    assert.match(caughtError.message, /was not found in the mounted image/, 'the original staging failure must remain the primary, reported error');
+    assert.ok(caughtError.cleanupError, 'the detach failure must be attached, not silently discarded');
+    assert.match(caughtError.cleanupError.message, /detached/i);
+
+    const detachCalls = calls.filter((c) => c.args[0] === 'detach');
+    assert.equal(detachCalls.length, 3, 'detach must still be attempted (and bounded) even though staging already failed');
+
+    const stagedDir = path.join(tmpDir, manifest.buildId, STAGED_DIR_NAME);
+    assert.equal(await fs.promises.stat(stagedDir).then(() => true).catch(() => false), false);
+  } finally {
+    await fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test('P2C: 22. normal successful staging with a clean detach still succeeds and returns the staged candidate', async () => {
+  const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'hearth-p2c-'));
+  try {
+    const dmgPath = path.join(tmpDir, 'Hearth-Control.dmg');
+    await fs.promises.writeFile(dmgPath, 'not-a-real-dmg');
+    const { execFileFn, calls } = makeMockHdiutil({
+      onAttach: async (args) => { await createAppFixture(args[args.indexOf('-mountpoint') + 1]); },
+    });
+    const scratchRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'hearth-p2c-hash-'));
+    const appTreeSha256 = await sha256Directory(await createAppFixture(scratchRoot));
+    await fs.promises.rm(scratchRoot, { recursive: true, force: true });
+
+    const manifest = buildRemoteManifestFixture(appTreeSha256);
+    const result = await stageVerifiedUpdate({ manifest, dmgPath, updatesDir: tmpDir, execFileFn, delayFn: noopDelay });
+
+    assert.ok(result);
+    assert.equal(await fs.promises.stat(result.stagedAppPath).then((s) => s.isDirectory()), true);
+    const detachCalls = calls.filter((c) => c.args[0] === 'detach');
+    assert.equal(detachCalls.length, 1, 'a clean first-attempt detach must not retry');
+    assert.equal(detachCalls[0].args.includes('-force'), false);
+  } finally {
+    await fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
 });
