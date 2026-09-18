@@ -89,8 +89,8 @@ export function classifyExecutorFailure(executorResult) {
   return FAILURE_CLASSIFICATION[key] ?? 'escalate';
 }
 
-const MAX_EVIDENCE_BYTES = 2_000;
-const MAX_EVIDENCE_TAIL_BYTES = 500;
+const MAX_EVIDENCE_BYTES = 2_500;
+const MAX_EVIDENCE_TAIL_BYTES = 1_800;
 const MAX_REPAIR_PREFERRED_FILES = 50;
 
 const truncateText = (text, maxBytes) => {
@@ -98,10 +98,25 @@ const truncateText = (text, maxBytes) => {
   return buf.byteLength <= maxBytes ? String(text ?? '') : buf.subarray(0, maxBytes).toString('utf8');
 };
 
+/**
+ * Extracts the true tail (end) of text up to maxBytes, ensuring UTF-8 boundary safety.
+ * Beginning/earlier noise is truncated away so the final error/diagnostic lines survive.
+ */
+export const truncateTailText = (text, maxBytes) => {
+  const str = String(text ?? '');
+  const buf = Buffer.from(str, 'utf8');
+  if (buf.byteLength <= maxBytes) return str;
+  let start = buf.byteLength - maxBytes;
+  while (start < buf.byteLength && (buf[start] & 0xc0) === 0x80) {
+    start += 1;
+  }
+  return buf.subarray(start).toString('utf8');
+};
+
 const dedupe = (values) => [...new Set(values)];
 
 /** A small, bounded, deterministic text summary of the round just attempted -- never chain-of-thought, never unbounded process output. */
-function buildRepairEvidence(round) {
+export function buildRepairEvidence(round) {
   const lines = [`Repair context from round ${round.round}:`];
   if (round.kind === 'execution') {
     const blocker = round.executor.blockers?.[0];
@@ -112,12 +127,15 @@ function buildRepairEvidence(round) {
     }
   } else {
     for (const result of round.validation.required) {
-      const tail = truncateText(result.stderr || result.stdout || '', MAX_EVIDENCE_TAIL_BYTES);
+      const output = (result.stderr && result.stdout)
+        ? `${result.stdout}\n${result.stderr}`
+        : (result.stderr || result.stdout || '');
+      const tail = truncateTailText(output, MAX_EVIDENCE_TAIL_BYTES);
       lines.push(`Validation '${result.command}': ${result.status}; exit ${result.exitCode ?? 'none'}${result.signal ? `; signal ${result.signal}` : ''}${result.timedOut ? '; timed out' : ''}`);
       if (tail) lines.push(`  tail: ${tail}`);
     }
   }
-  return truncateText(lines.join('\n'), MAX_EVIDENCE_BYTES);
+  return truncateTailText(lines.join('\n'), MAX_EVIDENCE_BYTES);
 }
 
 /**
@@ -138,6 +156,8 @@ function buildRepairTask(originalTask, rounds) {
   return {
     ...originalTask,
     attempt: originalTask.attempt + rounds.length,
+    is_repair: true,
+    repair_round: rounds.length + 1,
     known_evidence: [...(originalTask.known_evidence ?? []), evidence],
     scope: {
       ...originalTask.scope,

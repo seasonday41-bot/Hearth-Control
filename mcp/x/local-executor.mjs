@@ -242,6 +242,12 @@ function buildTaskSection(task) {
   if (Array.isArray(task.acceptance_criteria) && task.acceptance_criteria.length) {
     lines.push('Acceptance criteria:', ...task.acceptance_criteria.map((c) => `- ${c}`));
   }
+  if (Array.isArray(task.done_criteria) && task.done_criteria.length) {
+    lines.push('Done criteria:', ...task.done_criteria.map((c) => `- ${c}`));
+  }
+  if (Array.isArray(task.teaching_notes) && task.teaching_notes.length) {
+    lines.push('Teaching notes:', ...task.teaching_notes.map((n) => `- ${n}`));
+  }
   return lines.join('\n');
 }
 
@@ -407,12 +413,37 @@ function escapeRegex(string) {
   return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+export function isRepairTask(task, context = null) {
+  if (task?.is_repair === true) return true;
+  if (Array.isArray(task?.known_evidence) && task.known_evidence.some((e) => typeof e === 'string' && e.includes('Repair context from round'))) {
+    return true;
+  }
+  if (Array.isArray(context?.evidence?.known_evidence) && context.evidence.known_evidence.some((e) => typeof e === 'string' && e.includes('Repair context from round'))) {
+    return true;
+  }
+  return false;
+}
+
+export function buildRepairDirectiveSection() {
+  return [
+    'Repair directive:',
+    '- A required validation failed in a previous attempt.',
+    '- Inspect the provided validation evidence and error diagnostic.',
+    '- Inspect the current file contents provided under Provided Context.',
+    '- Propose the necessary repository edit actions (create, replace, or patch) required to make validation pass.',
+    '- Return actions: [] ONLY if the current files already satisfy the failed validation evidence and no edit is actually required.',
+  ].join('\n');
+}
+
 export function buildModelRequest(task, context, skill = null) {
   const instructions = hasWriteAuthority(task) ? SCHEMA_INSTRUCTIONS : READ_ONLY_SCHEMA_INSTRUCTIONS;
   const skillSection = skill ? buildSkillSection(skill) : '';
+  const repairDirective = hasWriteAuthority(task) && isRepairTask(task, context)
+    ? `${buildRepairDirectiveSection()}\n\n`
+    : '';
   const messages = [
     { role: 'system', content: instructions },
-    { role: 'user', content: `${skillSection}${buildTaskSection(task)}\n\n${buildScopeSection(task.scope)}\n\n${buildContextSection(context)}` },
+    { role: 'user', content: `${skillSection}${repairDirective}${buildTaskSection(task)}\n\n${buildScopeSection(task.scope)}\n\n${buildContextSection(context)}` },
   ];
   return {
     messages,

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { executeTask, EXECUTOR_ACTION_TYPES, EXECUTOR_STATUSES, LOCAL_EXECUTOR_RESPONSE_SCHEMA, buildModelRequest, buildLocalExecutorResponseSchema, buildCreatePathPattern, hasWriteAuthority } from '../mcp/x/local-executor.mjs';
+import { executeTask, EXECUTOR_ACTION_TYPES, EXECUTOR_STATUSES, LOCAL_EXECUTOR_RESPONSE_SCHEMA, buildModelRequest, buildLocalExecutorResponseSchema, buildCreatePathPattern, hasWriteAuthority, isRepairTask } from '../mcp/x/local-executor.mjs';
 import { X_TASK_VERSION } from '../mcp/x/task-contract.mjs';
 
 const dirs = [];
@@ -1036,4 +1036,60 @@ test('R14 prompt instructions and output budget: read-only tasks instruct action
   assert.equal(writeReq.longResponse, true);
   const writeSystemMsg = writeReq.messages.find((m) => m.role === 'system');
   assert.match(writeSystemMsg.content, /Only use "create", "replace", or "patch" as an action type/);
+});
+
+test('E42 task authoring guidance: done_criteria and teaching_notes appear in user prompt', () => {
+  const task = writeTask('/tmp', {
+    done_criteria: ['scripts/fixtures/x-target.mjs is created', 'validation passes'],
+    teaching_notes: ['Use node:test and node:assert/strict', 'Import relative ./fixtures/x-target.mjs'],
+  });
+  const req = buildModelRequest(task, { files: [] });
+  const userMsg = req.messages.find((m) => m.role === 'user');
+  assert.match(userMsg.content, /Done criteria:\n- scripts\/fixtures\/x-target\.mjs is created\n- validation passes/);
+  assert.match(userMsg.content, /Teaching notes:\n- Use node:test and node:assert\/strict\n- Import relative \.\/fixtures\/x-target\.mjs/);
+});
+
+test('E43 initial round prompt does NOT contain repair directive', () => {
+  const task = writeTask('/tmp');
+  const req = buildModelRequest(task, { files: [] });
+  const userMsg = req.messages.find((m) => m.role === 'user');
+  assert.equal(userMsg.content.includes('Repair directive:'), false);
+  assert.equal(userMsg.content.includes('A required validation failed'), false);
+});
+
+test('E44 repair round prompt DOES contain repair directive, includes validation evidence and current context files', () => {
+  const repairTask = writeTask('/tmp', {
+    is_repair: true,
+    attempt: 2,
+    known_evidence: [
+      'Initial evidence item',
+      "Repair context from round 1:\nValidation 'node --test scripts/test-x.mjs': failed; exit 1\n  tail: Error [ERR_MODULE_NOT_FOUND]: Cannot find module",
+    ],
+  });
+  const context = {
+    files: [
+      { path: 'src/app.js', status: 'ok', content: '1: console.log("hello");' },
+    ],
+    evidence: {
+      known_evidence: repairTask.known_evidence,
+    },
+  };
+  const req = buildModelRequest(repairTask, context);
+  const userMsg = req.messages.find((m) => m.role === 'user');
+
+  // Repair directive is present with exact required points
+  assert.match(userMsg.content, /Repair directive:/);
+  assert.match(userMsg.content, /- A required validation failed in a previous attempt\./);
+  assert.match(userMsg.content, /- Inspect the provided validation evidence and error diagnostic\./);
+  assert.match(userMsg.content, /- Inspect the current file contents provided under Provided Context\./);
+  assert.match(userMsg.content, /- Propose the necessary repository edit actions \(create, replace, or patch\) required to make validation pass\./);
+  assert.match(userMsg.content, /- Return actions: \[\] ONLY if the current files already satisfy the failed validation evidence/);
+
+  // Validation evidence is included
+  assert.match(userMsg.content, /Repair context from round 1:/);
+  assert.match(userMsg.content, /Error \[ERR_MODULE_NOT_FOUND\]/);
+
+  // Current context files remain included
+  assert.match(userMsg.content, /--- src\/app\.js \(status: ok\) ---/);
+  assert.match(userMsg.content, /1: console\.log\("hello"\);/);
 });

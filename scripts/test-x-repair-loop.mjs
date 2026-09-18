@@ -3,7 +3,7 @@ import test, { afterEach } from 'node:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { runTaskWithRepair, classifyExecutorFailure, FAILURE_CLASSIFICATION, REPAIR_STATUSES } from '../mcp/x/repair-loop.mjs';
+import { runTaskWithRepair, classifyExecutorFailure, FAILURE_CLASSIFICATION, REPAIR_STATUSES, truncateTailText } from '../mcp/x/repair-loop.mjs';
 import { XContextScopeError } from '../mcp/x/context-loader.mjs';
 import { X_TASK_VERSION } from '../mcp/x/task-contract.mjs';
 
@@ -362,10 +362,10 @@ test('RL16 an optional validation failure still returns validated overall', asyn
 // Evidence bounding / determinism
 // ---------------------------------------------------------------------------
 
-test('RL17 repair evidence fed to the next round is bounded, not an unbounded dump', async () => {
+test('RL17 repair evidence fed to the next round is bounded and preserves true diagnostic tail', async () => {
   const root = tmpWorkspace();
   fs.mkdirSync(path.join(root, 'src'), { recursive: true });
-  const hugeTail = `STARTMARKER${'x'.repeat(5000)}ENDMARKER`;
+  const hugeTail = `STARTMARKER${'x'.repeat(5000)}ENDMARKER_ACTUAL_ERROR`;
   writeFile(root, 'scripts/test-huge-fail.mjs', [
     "import test from 'node:test';",
     `test('boom', () => { throw new Error(${JSON.stringify(hugeTail)}); });`,
@@ -380,7 +380,26 @@ test('RL17 repair evidence fed to the next round is bounded, not an unbounded du
 
   assert.equal(adapter.calls.length, 2);
   const round2Prompt = promptOf(adapter.calls[1]);
-  assert.equal(round2Prompt.includes('ENDMARKER'), false, 'evidence must be bounded, not an unbounded dump of process output');
+  // 1. long validation output preserves the final error lines
+  assert.equal(round2Prompt.includes('ENDMARKER_ACTUAL_ERROR'), true, 'final error lines must be preserved in tail');
+  // 2. beginning/noise may be truncated
+  assert.equal(round2Prompt.includes('STARTMARKER'), false, 'earlier noise/head must be truncated');
+  // 3. output remains bounded
+  assert.ok(round2Prompt.length < 20000, 'evidence must remain bounded');
+  assert.ok(!round2Prompt.includes('x'.repeat(3000)), 'does not dump thousands of repeated bytes');
+  // 4. command/status/exit metadata remains present
+  assert.match(round2Prompt, /Validation 'node --test scripts\/test-huge-fail\.mjs': failed; exit 1/);
+});
+
+test('RL17b truncateTailText correctly extracts true tail bytes and bounds output', () => {
+  const shortText = 'hello world';
+  assert.equal(truncateTailText(shortText, 50), 'hello world');
+
+  const longText = 'PREFIX_NOISE_' + 'A'.repeat(3000) + '_REAL_ERROR_TAIL';
+  const tail = truncateTailText(longText, 500);
+  assert.ok(tail.includes('_REAL_ERROR_TAIL'));
+  assert.ok(!tail.includes('PREFIX_NOISE_'));
+  assert.ok(Buffer.byteLength(tail, 'utf8') <= 500);
 });
 
 test('RL18 the outcome shape is deterministic and stable across equivalent runs', async () => {
