@@ -183,7 +183,7 @@ export const projectGoalStateForRemote = (goal) => {
   return sanitizeForRemote({
     local_goal_id: goal.id,
     goal_status: goal.status,
-    current_step_id: goal.currentStepId,
+    current_step_id: goal.status === 'completed' ? null : (goal.currentStepId ?? null),
     completed_steps: completedSteps,
     total_steps: totalSteps,
     review_open: reviewOpen,
@@ -365,9 +365,14 @@ export class GoalRequestsClient {
     this._requireReady();
     if (!id) throw new Error('id is required');
     const status = mapGoalStatusToRequestStatus(goal.status);
-    const body = { status, result: projectGoalStateForRemote(goal) };
-    if (status === 'completed' || status === 'failed') body.finished_at = new Date().toISOString();
-    if (goal.error) body.error = redactSecrets(String(goal.error));
+    const body = {
+      status,
+      result: projectGoalStateForRemote(goal),
+      error: goal.error ? redactSecrets(String(goal.error)) : null,
+      finished_at: (status === 'completed' || status === 'failed')
+        ? (goal.finishedAt || new Date().toISOString())
+        : null,
+    };
     const url = `${this.supabaseUrl}/rest/v1/goal_requests?id=eq.${encodeURIComponent(id)}&user_id=eq.${encodeURIComponent(this.ownerId)}`;
     const res = await this.fetchFn(url, {
       method: 'PATCH',

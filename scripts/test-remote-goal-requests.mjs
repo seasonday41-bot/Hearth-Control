@@ -382,6 +382,132 @@ await test('15. reconnect (a resync sweep) re-projects every remote-linked Goal 
   assert.equal(rowsAfter[0].result.local_goal_id, goal.id);
 });
 
+await test('15b. failed step -> retry (superseded review, execGen 2) -> completion -> remote projection becomes completed, review_open=false, error=null', async () => {
+  const { workspace, storage } = await setupHarness();
+  const step1Result = JSON.stringify({ version: 'x-result-v1', result_id: 'res-step-1' });
+  const step2OldResult = JSON.stringify({ version: 'x-result-v1', result_id: 'res-step-2-gen-1' });
+  const step2NewResult = JSON.stringify({ version: 'x-result-v1', result_id: 'ac293b47-45f5-465d-b43c-33030c3f2179' });
+
+  let persistedGoalNotifications = [];
+  const runner = new GoalRunner({
+    storage,
+    onGoalPersisted: (g) => persistedGoalNotifications.push(g),
+  });
+
+  const goal = await runner.create_goal({
+    id: 'remote-goal:row-15b',
+    title: 'P1 Goal',
+    objective: 'Test lifecycle projection',
+    workspace,
+    constraints: [],
+    steps: [
+      { id: 'step-1', title: 'Step 1', route: 'x', xTask: xTaskFixture('task-1', workspace), status: 'completed', result: step1Result, executionGeneration: 1 },
+      { id: 'step-2', title: 'Step 2', route: 'x', xTask: xTaskFixture('task-2', workspace), status: 'error', result: step2OldResult, executionGeneration: 1 },
+    ],
+    remoteGoalRequest: { provider: 'project-x', requestId: 'row-15b' },
+  });
+
+  // Add historical failed review item for step 2 (currently open)
+  goal.status = 'error';
+  goal.error = 'Step 2 structural failure';
+  goal.currentStepId = 'step-2';
+  goal.reviewQueue = [{
+    id: 'rev-item-1',
+    idempotencyKey: 'idem-rev-1',
+    goalId: goal.id,
+    stepId: 'step-2',
+    lifecycle: 'open',
+    status: 'needs_review',
+    executionGeneration: 1,
+  }];
+  storage.saveGoal(goal);
+
+  const transport = createMockGoalRequestsTransport([
+    makeRow('row-15b', 'owner-1', remoteGoalFixture(workspace, { stepCount: 2 }), {
+      status: 'failed',
+      error: 'Step 2 structural failure',
+      result: projectGoalStateForRemote(goal),
+    }),
+  ]);
+  const client = new GoalRequestsClient({ supabaseUrl: 'https://x.test', supabaseAnonKey: 'anon', fetchFn: transport.fetch });
+  client.setSession({ accessToken: 'tok', ownerId: 'owner-1' });
+
+  // Initial remote projection state: failed, review_open: true, error present
+  const initialRow = transport.getRows().find((r) => r.id === 'row-15b');
+  assert.equal(initialRow.status, 'failed');
+  assert.equal(initialRow.result.review_open, true);
+  assert.equal(initialRow.error, 'Step 2 structural failure');
+
+  // Supervisor performs retry: old review item superseded, step 2 updated to executionGeneration 2
+  goal.reviewQueue[0].lifecycle = 'superseded';
+  goal.steps[1].executionGeneration = 2;
+  goal.steps[1].status = 'running';
+  goal.status = 'running';
+  goal.error = null;
+  storage.saveGoal(goal);
+
+  // Step 2 revised execution completes successfully with new result
+  goal.steps[1].status = 'completed';
+  goal.steps[1].result = step2NewResult;
+  storage.saveGoal(goal);
+
+  // All steps completed -> complete_goal called
+  runner.complete_goal(goal.id);
+
+  const completedLocalGoal = runner.get_goal(goal.id);
+  assert.equal(completedLocalGoal.status, 'completed');
+  assert.equal(completedLocalGoal.currentStepId, null, 'complete_goal must clear currentStepId');
+  assert.ok(completedLocalGoal.finishedAt, 'finishedAt must be set');
+
+  // Remote sync runs
+  await client.projectGoalState({ id: 'row-15b', goal: completedLocalGoal });
+
+  const finalRow = transport.getRows().find((r) => r.id === 'row-15b');
+  assert.equal(finalRow.status, 'completed', 'remote status must update to completed');
+  assert.equal(finalRow.error, null, 'remote error must be cleared (null)');
+  assert.equal(finalRow.finished_at, completedLocalGoal.finishedAt, 'remote finished_at must match local finishedAt');
+  assert.equal(finalRow.result.goal_status, 'completed');
+  assert.equal(finalRow.result.review_open, false, 'superseded review must not leave review_open=true');
+  assert.equal(finalRow.result.current_step_id, null, 'completed goal must project current_step_id as null');
+  assert.equal(finalRow.result.completed_steps, 2);
+
+  // Step 2 result projection check: must contain newest generation 2 result
+  const step2Projection = finalRow.result.step_statuses.find((s) => s.id === 'step-2');
+  assert.equal(step2Projection.status, 'completed');
+  assert.ok(step2Projection.summary.includes('ac293b47-45f5-465d-b43c-33030c3f2179'), 'latest execution generation 2 result must win');
+
+  // Historical review remains superseded in local durable state
+  assert.equal(completedLocalGoal.reviewQueue.length, 1);
+  assert.equal(completedLocalGoal.reviewQueue[0].lifecycle, 'superseded');
+
+  // onGoalPersisted was called on saves
+  assert.ok(persistedGoalNotifications.length > 0, 'onGoalPersisted must be invoked on goal mutations');
+  assert.equal(persistedGoalNotifications[persistedGoalNotifications.length - 1].status, 'completed');
+});
+
+await test('15c. superseded review does not count as open, and completed goal cannot be regressed by stale remote data', async () => {
+  const goal = {
+    id: 'g-15c',
+    status: 'completed',
+    currentStepId: 'step-2', // Even if legacy field was still set, projection must project null
+    finishedAt: '2026-09-18T00:00:00.000Z',
+    updatedAt: '2026-09-18T00:00:00.000Z',
+    steps: [
+      { id: 's1', title: 'Step 1', status: 'completed', route: 'x', result: 'res-1' },
+      { id: 's2', title: 'Step 2', status: 'completed', route: 'x', result: 'res-2-gen-2' },
+    ],
+    reviewQueue: [
+      { id: 'rev-1', lifecycle: 'superseded', stepId: 's2' },
+    ],
+  };
+
+  const projection = projectGoalStateForRemote(goal);
+  assert.equal(projection.goal_status, 'completed');
+  assert.equal(projection.current_step_id, null, 'completed goal must project current_step_id=null');
+  assert.equal(projection.review_open, false, 'superseded review must not count as open');
+  assert.equal(projection.completed_steps, 2);
+});
+
 console.log('\n=== Compatibility (relies on adjacent suites; spot-checked here) ===\n');
 
 await test('16. this module never imports or writes public.tasks -- it only ever hits the /goal_requests REST path', async () => {

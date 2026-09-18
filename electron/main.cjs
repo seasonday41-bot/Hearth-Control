@@ -331,6 +331,7 @@ const resyncTerminalPublicXTasks = async () => {
  */
 const resyncGoalRequestStates = async () => {
   if (!goalRunner || !goalRequestsClientInstance?.ownerId) return;
+  await refreshPublicTasksSessionBestEffort();
   let goals;
   try { goals = goalRunner.list_goals(); } catch { return; }
   for (const goal of goals) {
@@ -752,6 +753,10 @@ const ensurePublicTasksSession = async () => {
   return applyPublicTasksSession(refreshed);
 };
 
+const refreshPublicTasksSessionBestEffort = async () => {
+  if (publicTasksSession?.refreshToken) { try { await ensurePublicTasksSession(); } catch {} }
+};
+
 const stopServer = async () => {
   if (!serverProcess) return serverState;
   const child = serverProcess;
@@ -891,6 +896,7 @@ const startServer = async ({ workspace, port }) => {
           });
           ok = true;
           sendEvent({ type: 'goals:updated', goal: result.goal });
+          void resyncGoalRequestStates();
         }
       } catch (err) {
         ok = false;
@@ -916,6 +922,7 @@ const startServer = async ({ workspace, port }) => {
           });
           ok = true;
           sendEvent({ type: 'goals:updated', goal: result.goal });
+          void resyncGoalRequestStates();
         }
       } catch (err) {
         ok = false;
@@ -1275,6 +1282,7 @@ app.whenReady().then(async () => {
     const reconcileContinuations = () => {
       void reconcileDurableContinuations({ taskStore, jobManager, continuationRunner })
         .catch((err) => console.error('[Continuation] Reconciliation failed:', err));
+      void resyncGoalRequestStates();
     };
     reconcileContinuations();
     continuationRecoveryTimer = setInterval(reconcileContinuations, 30000);
@@ -2023,9 +2031,7 @@ app.whenReady().then(async () => {
     // applyPublicTasksSession. Never throws: a failed refresh just leaves
     // the (possibly still-stale) token in place, and the sync call that
     // follows fails and retries later exactly as it already does today.
-    const refreshPublicTasksSessionBestEffort = async () => {
-      if (publicTasksSession?.refreshToken) { try { await ensurePublicTasksSession(); } catch {} }
-    };
+
 
     // Shares Project X's SAME session -- same Supabase project, same
     // authenticated owner, a different table. Never itself authenticates;
@@ -2061,6 +2067,13 @@ app.whenReady().then(async () => {
         void (async () => {
           await refreshPublicTasksSessionBestEffort();
           await syncReviewItemToRemote({ client: reviewItemsClientInstance, item, goalId: goal.id, goalTitle: goal.title });
+          await resyncGoalRequestStates();
+        })();
+      };
+      goalRunner.onGoalPersisted = (goal) => {
+        void (async () => {
+          await refreshPublicTasksSessionBestEffort();
+          await resyncGoalRequestStates();
         })();
       };
     }

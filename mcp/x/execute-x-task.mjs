@@ -12,3 +12,5 @@ export async function executeXTask(task, modelAdapter, options = {}) {
 
   return { repairOutcome, gateResult, xResult };
 }
+
+export { selectSkillId, loadSkillForTask } from './skill-integration.mjs';

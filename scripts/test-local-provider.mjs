@@ -75,6 +75,14 @@ test('FORMAT3 chatStream also forwards an explicit format request, and omits it 
   assert.equal(requestB.format, 'json');
 });
 
+test('FORMAT4 chat forwards structured-output object format to Ollama JSON payload', async () => {
+  let request;
+  const schema = { type: 'object', properties: { actions: { type: 'array' } } };
+  const provider = new OllamaProvider({ model: 'local', fetchFn: mockFetch((_url, options) => { request = JSON.parse(options.body); return response(200, { message: { content: '{"actions":[]}' }, done: true }); }) });
+  await provider.chat({ messages: [{ role: 'user', content: 'hello' }], format: schema });
+  assert.deepEqual(request.format, schema);
+});
+
 test('SKILL_PROVIDER1 chat forwards read-only tool definitions and normalizes tool calls', async () => {
   let request;
   const provider = new OllamaProvider({ model: 'local', fetchFn: mockFetch((_url, options) => { request = JSON.parse(options.body); return response(200, { message: { content: '', tool_calls: [{ function: { name: 'repo_list', arguments: '{}' } }] }, done: true }); }) });

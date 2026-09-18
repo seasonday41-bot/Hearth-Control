@@ -3,6 +3,7 @@ import { assertModelAdapterContract } from './model-adapter.mjs';
 import { loadTaskContext, XContextScopeError } from './context-loader.mjs';
 import { createFile, replaceFile, applyEdits } from './edit-writer.mjs';
 import { throwIfAborted } from './cancellation.mjs';
+import { loadSkillForTask, buildSkillSection } from './skill-integration.mjs';
 
 /**
  * LocalExecutor: orchestration only.
@@ -83,6 +84,65 @@ import { throwIfAborted } from './cancellation.mjs';
 export const EXECUTOR_ACTION_TYPES = Object.freeze(['create', 'replace', 'patch']);
 export const EXECUTOR_STATUSES = Object.freeze(['completed', 'failed', 'blocked']);
 
+export const LOCAL_EXECUTOR_RESPONSE_SCHEMA = Object.freeze({
+  type: 'object',
+  properties: Object.freeze({
+    actions: Object.freeze({
+      type: 'array',
+      items: Object.freeze({
+        anyOf: Object.freeze([
+          Object.freeze({
+            type: 'object',
+            properties: Object.freeze({
+              type: Object.freeze({ type: 'string', enum: Object.freeze(['create']) }),
+              path: Object.freeze({ type: 'string', pattern: '^[^/].*' }),
+              content: Object.freeze({ type: 'string' }),
+            }),
+            required: Object.freeze(['type', 'path', 'content']),
+            additionalProperties: false,
+          }),
+          Object.freeze({
+            type: 'object',
+            properties: Object.freeze({
+              type: Object.freeze({ type: 'string', enum: Object.freeze(['replace']) }),
+              path: Object.freeze({ type: 'string', pattern: '^[^/].*' }),
+              content: Object.freeze({ type: 'string' }),
+            }),
+            required: Object.freeze(['type', 'path', 'content']),
+            additionalProperties: false,
+          }),
+          Object.freeze({
+            type: 'object',
+            properties: Object.freeze({
+              type: Object.freeze({ type: 'string', enum: Object.freeze(['patch']) }),
+              path: Object.freeze({ type: 'string', pattern: '^[^/].*' }),
+              edits: Object.freeze({
+                type: 'array',
+                items: Object.freeze({
+                  type: 'object',
+                  properties: Object.freeze({
+                    old_string: Object.freeze({ type: 'string' }),
+                    new_string: Object.freeze({ type: 'string' }),
+                    replace_all: Object.freeze({ type: 'boolean' }),
+                  }),
+                  required: Object.freeze(['old_string', 'new_string']),
+                  additionalProperties: false,
+                }),
+              }),
+            }),
+            required: Object.freeze(['type', 'path', 'edits']),
+            additionalProperties: false,
+          }),
+        ]),
+      }),
+    }),
+    explanation: Object.freeze({ type: 'string' }),
+    confidence: Object.freeze({ type: 'number' }),
+  }),
+  required: Object.freeze(['actions']),
+  additionalProperties: false,
+});
+
 export const DEFAULT_EXECUTOR_LIMITS = Object.freeze({
   maxActions: 10,
   maxFilesChanged: 10,
@@ -119,6 +179,14 @@ const resolveExecutorLimits = (overrides) => {
 const isPlainObject = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const sha256 = (content) => crypto.createHash('sha256').update(Buffer.from(content, 'utf8')).digest('hex');
 
+export function hasWriteAuthority(task) {
+  return Boolean(
+    task &&
+    Array.isArray(task.allowed_tools) &&
+    task.allowed_tools.includes('repo_edit')
+  );
+}
+
 const SCHEMA_INSTRUCTIONS = [
   'Respond with ONLY one JSON object and nothing else -- no prose before or after it.',
   'You may wrap it in a single ```json fence and nothing else may appear outside that fence.',
@@ -134,12 +202,29 @@ const SCHEMA_INSTRUCTIONS = [
   '}',
   'Rules:',
   '- Only use "create", "replace", or "patch" as an action type. No other type exists.',
-  '- "replace" and "patch" must target a path already shown under Provided Context below. Do not invent content for a file you have not seen.',
-  '- "create" must target a NEW relative path that does NOT already appear under Provided Context, must be located under one of the Allowed paths listed below, and must not be under any Forbidden path.',
+  '- Every action.path MUST be repository-relative. Never output an absolute filesystem path. Never begin a path with "/". Never use ".." as a path segment. Never copy or invent user home paths such as /Users/... . Paths must refer only to files inside the task\'s allowed_paths.',
+  '- "replace" and "patch" paths must exactly match repository-relative paths shown under Provided Context below. Do not invent content for a file you have not seen.',
+  '- "create" must target a NEW repository-relative path within allowed_paths that does NOT already appear under Provided Context, must be located under one of the Allowed paths listed below, and must not be under any Forbidden path.',
   '- "replace" is only { "type": "replace", "path": "...", "content": "full new file text" }. Do NOT include expected_hash or expected_content -- you do not have the real hash of the file, and including either field will cause the whole response to be rejected.',
   '- "patch" is only { "type": "patch", "path": "...", "edits": [...] }. Do NOT include expected_hash -- it is not part of this schema and will cause the whole response to be rejected. Edits must match the shown content exactly; do not guess at text not shown.',
   '- If no change is needed, return "actions": [].',
   '- Never include a "workspace" or "scope" field -- authorization is not something this response can set. Allowed paths / Forbidden paths below are fixed by the task, not by you.',
+].join('\n');
+
+const READ_ONLY_SCHEMA_INSTRUCTIONS = [
+  'Respond with ONLY one JSON object and nothing else -- no prose before or after it.',
+  'You may wrap it in a single ```json fence and nothing else may appear outside that fence.',
+  'The object must match exactly this shape:',
+  '{',
+  '  "actions": [],',
+  '  "explanation": "one short sentence",',
+  '  "confidence": 0.0',
+  '}',
+  'Rules:',
+  '- This task has NO repository edit authority.',
+  '- You MUST return actions: [].',
+  '- Do not propose create, replace, or patch.',
+  '- Never include a "workspace" or "scope" field -- authorization is not something this response can set.',
 ].join('\n');
 
 const truncate = (text, maxBytes) => {
@@ -182,12 +267,144 @@ function buildContextSection(context) {
   return lines.join('\n');
 }
 
-function buildModelRequest(task, context) {
+export function buildCreatePathPattern(scope) {
+  const allowed = Array.isArray(scope?.allowed_paths) ? scope.allowed_paths : null;
+  if (!allowed) {
+    return '^[^/].*';
+  }
+  const normalized = allowed
+    .filter((p) => typeof p === 'string' && p.trim())
+    .map((p) => p.trim().replace(/^\/+|\/+$/g, ''))
+    .filter(Boolean);
+
+  if (normalized.length === 0) {
+    return '^$';
+  }
+
+  const escaped = normalized.map(escapeRegex);
+  return `^(?:${escaped.join('|')})(?:/.*)?$`;
+}
+
+export function getEligibleContextPaths(context) {
+  if (!Array.isArray(context?.files)) return [];
+  const paths = [];
+  for (const file of context.files) {
+    if (file && file.status === 'ok' && typeof file.path === 'string') {
+      const trimmed = file.path.trim();
+      if (trimmed && !paths.includes(trimmed)) {
+        paths.push(trimmed);
+      }
+    }
+  }
+  return paths;
+}
+
+export function buildLocalExecutorResponseSchema(task, context) {
+  if (!hasWriteAuthority(task)) {
+    return Object.freeze({
+      type: 'object',
+      properties: Object.freeze({
+        actions: Object.freeze({
+          type: 'array',
+          maxItems: 0,
+        }),
+        explanation: Object.freeze({ type: 'string' }),
+        confidence: Object.freeze({ type: 'number' }),
+      }),
+      required: Object.freeze(['actions']),
+      additionalProperties: false,
+    });
+  }
+
+  const createPattern = buildCreatePathPattern(task?.scope);
+  const eligiblePaths = getEligibleContextPaths(context);
+
+  const createSchema = Object.freeze({
+    type: 'object',
+    properties: Object.freeze({
+      type: Object.freeze({ type: 'string', enum: Object.freeze(['create']) }),
+      path: Object.freeze({ type: 'string', pattern: createPattern }),
+      content: Object.freeze({ type: 'string' }),
+    }),
+    required: Object.freeze(['type', 'path', 'content']),
+    additionalProperties: false,
+  });
+
+  const variants = [createSchema];
+
+  if (eligiblePaths.length > 0) {
+    const frozenEligible = Object.freeze([...eligiblePaths]);
+    const replaceSchema = Object.freeze({
+      type: 'object',
+      properties: Object.freeze({
+        type: Object.freeze({ type: 'string', enum: Object.freeze(['replace']) }),
+        path: Object.freeze({ type: 'string', enum: frozenEligible }),
+        content: Object.freeze({ type: 'string' }),
+      }),
+      required: Object.freeze(['type', 'path', 'content']),
+      additionalProperties: false,
+    });
+
+    const patchSchema = Object.freeze({
+      type: 'object',
+      properties: Object.freeze({
+        type: Object.freeze({ type: 'string', enum: Object.freeze(['patch']) }),
+        path: Object.freeze({ type: 'string', enum: frozenEligible }),
+        edits: Object.freeze({
+          type: 'array',
+          items: Object.freeze({
+            type: 'object',
+            properties: Object.freeze({
+              old_string: Object.freeze({ type: 'string' }),
+              new_string: Object.freeze({ type: 'string' }),
+              replace_all: Object.freeze({ type: 'boolean' }),
+            }),
+            required: Object.freeze(['old_string', 'new_string']),
+            additionalProperties: false,
+          }),
+        }),
+      }),
+      required: Object.freeze(['type', 'path', 'edits']),
+      additionalProperties: false,
+    });
+
+    variants.push(replaceSchema, patchSchema);
+  }
+
+  return Object.freeze({
+    type: 'object',
+    properties: Object.freeze({
+      actions: Object.freeze({
+        type: 'array',
+        items: Object.freeze({
+          anyOf: Object.freeze(variants),
+        }),
+      }),
+      explanation: Object.freeze({ type: 'string' }),
+      confidence: Object.freeze({ type: 'number' }),
+    }),
+    required: Object.freeze(['actions']),
+    additionalProperties: false,
+  });
+}
+
+function escapeRegex(string) {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+export function buildModelRequest(task, context, skill = null) {
+  const instructions = hasWriteAuthority(task) ? SCHEMA_INSTRUCTIONS : READ_ONLY_SCHEMA_INSTRUCTIONS;
+  const skillSection = skill ? buildSkillSection(skill) : '';
   const messages = [
-    { role: 'system', content: SCHEMA_INSTRUCTIONS },
-    { role: 'user', content: `${buildTaskSection(task)}\n\n${buildScopeSection(task.scope)}\n\n${buildContextSection(context)}` },
+    { role: 'system', content: instructions },
+    { role: 'user', content: `${skillSection}${buildTaskSection(task)}\n\n${buildScopeSection(task.scope)}\n\n${buildContextSection(context)}` },
   ];
-  return { messages };
+  return {
+    messages,
+    format: buildLocalExecutorResponseSchema(task, context),
+    num_predict: 4096,
+    longResponse: true,
+  };
 }
 
 /** Strips a single leading/trailing \`\`\` or \`\`\`json fence if the WHOLE trimmed response is wrapped in exactly one. No other normalization is performed -- this is a fixed, deterministic transform, not fuzzy interpretation. */
@@ -366,6 +583,20 @@ const blockedActionResult = (operation, path, detail) => ({
  */
 async function executeOneAction(task, action, context, writeLimits, signal) {
   throwIfAborted(signal);
+  if (!hasWriteAuthority(task)) {
+    return {
+      operation: action.type,
+      path: action.path,
+      status: 'error',
+      code: 'PERMISSION_DENIED',
+      detail: "task is not authorized for repository mutations; allowed_tools does not include 'repo_edit'",
+      before_hash: null,
+      after_hash: null,
+      bytes_written: 0,
+      created: false,
+      changed: false,
+    };
+  }
   if (action.type === 'create') return createFile(task, action.path, action.content, { limits: writeLimits, signal });
 
   if (action.type === 'replace') {
@@ -438,9 +669,15 @@ export async function executeTask(task, modelAdapter, options = {}) {
     if (err instanceof XContextScopeError) throw err;
     return blockedResult(taskId, 'context_load_failed', err?.message || 'failed to load task context');
   }
+  let skill = null;
+  try {
+    skill = await loadSkillForTask(task, options.skillOptions);
+  } catch {
+    // Skill loading is fail-safe; if registry root is absent or task has no match, continue without skill
+  }
   throwIfAborted(options.signal);
 
-  const request = buildModelRequest(task, context);
+  const request = buildModelRequest(task, context, skill);
   let modelResult;
   try {
     modelResult = await modelAdapter.generate(request, options.signal

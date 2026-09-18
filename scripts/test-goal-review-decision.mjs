@@ -18,6 +18,7 @@ import { GoalStorage } from '../mcp/goals/storage.mjs';
 import { GoalRunner } from '../mcp/goals/runner.mjs';
 import { X_TASK_VERSION } from '../mcp/x/task-contract.mjs';
 import { registerWorkspaceTools, toolNames } from '../mcp/tools.mjs';
+import { projectGoalStateForRemote, mapGoalStatusToRequestStatus } from '../mcp/bridge/goal-requests-client.mjs';
 
 let passed = 0;
 let failed = 0;
@@ -376,6 +377,276 @@ await test('E. review_queue_acknowledge and review_queue_resolve MCP tools funct
   const finalGoal = storage.getGoal(goal.id);
   assert.equal(finalGoal.steps[0].status, 'completed');
   assert.equal(finalGoal.status, 'completed');
+});
+
+// ── F. RESOLVE: NEEDS_REVIEW reject ─────────────────────────────────────────
+await test('F1. resolve_review(reject) marks step and goal as error, sets resolution rejected, zero X dispatch', async () => {
+  const storagePath = freshStoragePath();
+  const storage = new GoalStorage({ storagePath });
+  const xExecutor = makeMockXExecutor();
+  const runner = new GoalRunner({ storage, xExecutor });
+
+  const goal = await runner.create_goal({
+    title: 'Reject Goal',
+    objective: 'Test resolve reject',
+    workspace: testWorkspace,
+    steps: [
+      { id: 's1', title: 'Step 1', description: '', route: 'x', xTask: validXTask('REJ-1') },
+      { id: 's2', title: 'Step 2', description: '', route: 'x', xTask: validXTask('REJ-2') },
+    ],
+  });
+
+  const req1 = `goal:${goal.id}:step:s1`;
+  const structuredResult = { version: 'x-result-v1', result_id: 'rej-res-1', task_id: 'REJ-1', gate_status: 'NEEDS_REVIEW', reason_code: 'repair_budget_exhausted_transient' };
+  xExecutor.statuses.set(req1, { found: true, queue_status: 'terminal', terminal_status: 'needs_review', result: structuredResult });
+
+  await runner.run_goal(goal.id);
+  assert.equal(xExecutor.dispatchLog.length, 1, 'Only step 1 dispatched');
+  const preGoal = storage.getGoal(goal.id);
+  assert.equal(preGoal.status, 'waiting');
+  assert.equal(preGoal.steps[0].status, 'waiting');
+  assert.equal(preGoal.steps[1].status, 'pending');
+  const reviewItemId = preGoal.reviewQueue[0].id;
+
+  // Resolve review with action: 'reject'
+  const resolveResult = await runner.resolve_review(goal.id, reviewItemId, {
+    action: 'reject',
+    note: 'Rejected: unauthorized mutations detected',
+  });
+
+  assert.equal(resolveResult.item.lifecycle, 'resolved');
+  assert.equal(resolveResult.item.resolution, 'rejected');
+  assert.ok(resolveResult.item.resolvedAt);
+  assert.equal(resolveResult.item.note, 'Rejected: unauthorized mutations detected');
+
+  const afterReject = storage.getGoal(goal.id);
+  // Step 1: terminal unsuccessful (error), not completed
+  assert.equal(afterReject.steps[0].status, 'error', 'Step 1 must be error');
+  assert.notEqual(afterReject.steps[0].status, 'completed', 'Step 1 must NOT be completed');
+  assert.ok(afterReject.steps[0].finishedAt);
+  assert.equal(afterReject.steps[0].result, JSON.stringify(structuredResult), 'Original result preserved');
+
+  // Step 2: remains pending, never executed
+  assert.equal(afterReject.steps[1].status, 'pending', 'Step 2 must remain pending');
+
+  // Goal: terminal unsuccessful (error), not completed
+  assert.equal(afterReject.status, 'error', 'Goal must transition to error');
+  assert.notEqual(afterReject.status, 'completed', 'Goal must NOT be completed');
+  assert.match(afterReject.error, /Rejected: unauthorized mutations detected/);
+
+  // Zero additional X dispatch
+  assert.equal(xExecutor.dispatchLog.length, 1, 'Reject must NOT dispatch X');
+
+  // Checkpoint verified
+  const latestCheckpoint = afterReject.checkpoints[afterReject.checkpoints.length - 1];
+  assert.ok(latestCheckpoint.summary.includes("Review resolved: step 'Step 1' rejected by supervisor"));
+  assert.equal(latestCheckpoint.nextStep, null, 'nextStep must be null on reject');
+
+  // Continuation context: review is closed, next legal action is GOAL_FAILED
+  const context = await runner.getGoalContext(goal.id);
+  assert.equal(context.review, null, 'No active review item in context');
+  assert.equal(context.next_legal_action.type, 'GOAL_FAILED');
+  assert.equal(context.progress.completed_step_ids.length, 0, 'Zero completed steps');
+
+  // Remote projection: review_open is false, goal_status is error, mapped request status is failed
+  const remoteProjection = projectGoalStateForRemote(afterReject);
+  assert.equal(remoteProjection.review_open, false, 'review_open must be false after reject');
+  assert.equal(remoteProjection.goal_status, 'error');
+  assert.equal(mapGoalStatusToRequestStatus(afterReject.status), 'failed', 'Remote request status must be failed');
+
+  // Restart durability
+  const restartedStorage = new GoalStorage({ storagePath });
+  const restartedGoal = restartedStorage.getGoal(goal.id);
+  assert.equal(restartedGoal.reviewQueue[0].lifecycle, 'resolved');
+  assert.equal(restartedGoal.reviewQueue[0].resolution, 'rejected');
+  assert.equal(restartedGoal.steps[0].status, 'error');
+  assert.equal(restartedGoal.status, 'error');
+});
+
+await test('F2. Idempotent double reject and cross-action conflict guards', async () => {
+  const storagePath = freshStoragePath();
+  const storage = new GoalStorage({ storagePath });
+  const xExecutor = makeMockXExecutor();
+  const runner = new GoalRunner({ storage, xExecutor });
+
+  const goal = await runner.create_goal({
+    title: 'Idempotency Goal',
+    objective: 'Test reject idempotency',
+    workspace: testWorkspace,
+    steps: [{ id: 's1', title: 'Step 1', description: '', route: 'x', xTask: validXTask('IDEM-1') }],
+  });
+
+  const req1 = `goal:${goal.id}:step:s1`;
+  xExecutor.statuses.set(req1, {
+    found: true, queue_status: 'terminal', terminal_status: 'needs_review',
+    result: { version: 'x-result-v1', result_id: 'idem-res-1', task_id: 'IDEM-1' },
+  });
+
+  await runner.run_goal(goal.id);
+  const reviewItemId = storage.getGoal(goal.id).reviewQueue[0].id;
+
+  // First reject
+  const first = await runner.resolve_review(goal.id, reviewItemId, { action: 'reject', note: 'First reject' });
+  assert.equal(first.item.resolution, 'rejected');
+
+  // Idempotent second reject
+  const second = await runner.resolve_review(goal.id, reviewItemId, { action: 'reject' });
+  assert.equal(second.alreadyResolved, true);
+  assert.equal(second.item.lifecycle, 'resolved');
+  assert.equal(second.item.resolution, 'rejected');
+
+  // Conflicting accept on already-rejected review MUST fail closed
+  await assert.rejects(
+    () => runner.resolve_review(goal.id, reviewItemId, { action: 'accept' }),
+    /already resolved with conflicting resolution 'rejected'/
+  );
+
+  // Cross-check: create second goal, resolve as accept, then reject MUST fail closed
+  const goal2 = await runner.create_goal({
+    title: 'Idempotency Goal 2',
+    objective: 'Test accept then reject conflict',
+    workspace: testWorkspace,
+    steps: [{ id: 's1', title: 'Step 1', description: '', route: 'x', xTask: validXTask('IDEM-2') }],
+  });
+  const req2 = `goal:${goal2.id}:step:s1`;
+  xExecutor.statuses.set(req2, {
+    found: true, queue_status: 'terminal', terminal_status: 'needs_review',
+    result: { version: 'x-result-v1', result_id: 'idem-res-2', task_id: 'IDEM-2' },
+  });
+  await runner.run_goal(goal2.id);
+  const reviewItemId2 = storage.getGoal(goal2.id).reviewQueue[0].id;
+  await runner.resolve_review(goal2.id, reviewItemId2, { action: 'accept' });
+  await assert.rejects(
+    () => runner.resolve_review(goal2.id, reviewItemId2, { action: 'reject' }),
+    /already resolved with conflicting resolution 'accepted'/
+  );
+});
+
+await test('F3. resume_goal refuses on rejected error goal and causes zero X dispatch', async () => {
+  const storagePath = freshStoragePath();
+  const storage = new GoalStorage({ storagePath });
+  const xExecutor = makeMockXExecutor();
+  const runner = new GoalRunner({ storage, xExecutor });
+
+  const goal = await runner.create_goal({
+    title: 'Resume Refusal Goal',
+    objective: 'Rejected goal cannot be resumed',
+    workspace: testWorkspace,
+    steps: [
+      { id: 's1', title: 'Step 1', description: '', route: 'x', xTask: validXTask('REF-1') },
+      { id: 's2', title: 'Step 2', description: '', route: 'x', xTask: validXTask('REF-2') },
+    ],
+  });
+
+  const req1 = `goal:${goal.id}:step:s1`;
+  xExecutor.statuses.set(req1, {
+    found: true, queue_status: 'terminal', terminal_status: 'needs_review',
+    result: { version: 'x-result-v1', result_id: 'ref-res-1', task_id: 'REF-1' },
+  });
+
+  await runner.run_goal(goal.id);
+  const reviewItemId = storage.getGoal(goal.id).reviewQueue[0].id;
+
+  await runner.resolve_review(goal.id, reviewItemId, { action: 'reject', note: 'Unsafe output' });
+  assert.equal(xExecutor.dispatchLog.length, 1);
+
+  // resume_goal MUST refuse on error goal
+  await assert.rejects(
+    () => runner.resume_goal(goal.id),
+    /Cannot resume goal in status 'error'/
+  );
+  assert.equal(xExecutor.dispatchLog.length, 1, 'Must NOT dispatch X');
+
+  const afterCheck = storage.getGoal(goal.id);
+  assert.equal(afterCheck.status, 'error');
+  assert.equal(afterCheck.steps[0].status, 'error');
+  assert.equal(afterCheck.steps[1].status, 'pending');
+});
+
+await test('F4. MCP tool review_queue_resolve supports action: reject', async () => {
+  const storagePath = freshStoragePath();
+  const storage = new GoalStorage({ storagePath });
+  const xExecutor = makeMockXExecutor();
+  const runner = new GoalRunner({ storage, xExecutor });
+
+  const goal = await runner.create_goal({
+    title: 'MCP Reject Goal',
+    objective: 'Test MCP tool call with action=reject',
+    workspace: testWorkspace,
+    steps: [{ id: 's1', title: 'Step 1', description: '', route: 'x', xTask: validXTask('MCP-REJ-1') }],
+  });
+
+  const req1 = `goal:${goal.id}:step:s1`;
+  xExecutor.statuses.set(req1, {
+    found: true, queue_status: 'terminal', terminal_status: 'needs_review',
+    result: { version: 'x-result-v1', result_id: 'mcp-rej-1', task_id: 'MCP-REJ-1' },
+  });
+
+  await runner.run_goal(goal.id);
+  const item = storage.getGoal(goal.id).reviewQueue[0];
+
+  const tools = new Map();
+  const fakeServer = { registerTool: (name, config, handler) => tools.set(name, { config, handler }) };
+  registerWorkspaceTools(fakeServer, {
+    workspace: testWorkspace,
+    permissions: {},
+    reviewQueueTransport: {
+      list: async ({ goalId } = {}) => ({ items: runner.list_review_queue(goalId ? { goalId } : {}) }),
+      acknowledge: async ({ goalId, reviewItemId, actor, note } = {}) => runner.acknowledge_review(goalId, reviewItemId, { actor, note }),
+      resolve: async ({ goalId, reviewItemId, action, note } = {}) => runner.resolve_review(goalId, reviewItemId, { action, note }),
+    },
+  });
+
+  // Call review_queue_resolve tool with action: 'reject'
+  const resolveRes = JSON.parse((await tools.get('review_queue_resolve').handler({
+    goal_id: goal.id,
+    review_item_id: item.id,
+    action: 'reject',
+    note: 'Rejected via MCP tool',
+  })).content[0].text);
+
+  assert.equal(resolveRes.item.lifecycle, 'resolved');
+  assert.equal(resolveRes.item.resolution, 'rejected');
+  assert.equal(resolveRes.item.note, 'Rejected via MCP tool');
+
+  const finalGoal = storage.getGoal(goal.id);
+  assert.equal(finalGoal.steps[0].status, 'error');
+  assert.notEqual(finalGoal.steps[0].status, 'completed');
+  assert.equal(finalGoal.status, 'error');
+  assert.notEqual(finalGoal.status, 'completed');
+  assert.equal(xExecutor.dispatchLog.length, 1, 'Zero extra X dispatch');
+});
+
+await test('F5. Invalid action fails closed via runner and MCP tool schema', async () => {
+  const storagePath = freshStoragePath();
+  const storage = new GoalStorage({ storagePath });
+  const xExecutor = makeMockXExecutor();
+  const runner = new GoalRunner({ storage, xExecutor });
+
+  const goal = await runner.create_goal({
+    title: 'Invalid Action Goal',
+    objective: 'Test invalid action error handling',
+    workspace: testWorkspace,
+    steps: [{ id: 's1', title: 'Step 1', description: '', route: 'x', xTask: validXTask('INV-1') }],
+  });
+
+  const req1 = `goal:${goal.id}:step:s1`;
+  xExecutor.statuses.set(req1, {
+    found: true, queue_status: 'terminal', terminal_status: 'needs_review',
+    result: { version: 'x-result-v1', result_id: 'inv-1', task_id: 'INV-1' },
+  });
+
+  await runner.run_goal(goal.id);
+  const item = storage.getGoal(goal.id).reviewQueue[0];
+
+  // Invalid action on runner
+  await assert.rejects(
+    () => runner.resolve_review(goal.id, item.id, { action: 'retry' }),
+    /Slice 1 only supports action: 'accept' or 'reject'/
+  );
+
+  // Review item remains open
+  assert.equal(storage.getGoal(goal.id).reviewQueue[0].lifecycle, 'open');
 });
 
 console.log(`\nResults: ${passed} passed, ${failed} failed out of ${passed + failed} tests\n`);

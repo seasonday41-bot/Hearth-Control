@@ -15,7 +15,7 @@ import { runTaskWithRepair } from '../mcp/x/repair-loop.mjs';
 import { executeXTask } from '../mcp/x/execute-x-task.mjs';
 
 const roots = [];
-function fixture({ validation } = {}) {
+function fixture({ validation, allowed_tools, overrides } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hearth-x-cancel-'));
   roots.push(root);
   fs.mkdirSync(path.join(root, 'src'));
@@ -29,7 +29,7 @@ function fixture({ validation } = {}) {
     observed_behavior: 'No whole-run signal existed.', why_this_matters: 'Lease loss must stop stale execution.',
     known_evidence: [], suspected_area: [], workspace: { repo: 'Hearth-Control', root },
     scope: { allowed_paths: ['src'], preferred_files: [], forbidden_paths: [] },
-    constraints: { preserve: [], do_not: [] }, allowed_tools: ['repo_read'],
+    constraints: { preserve: [], do_not: [] }, allowed_tools: allowed_tools ?? ['repo_read'],
     acceptance_criteria: ['Cancellation is propagated outside the Result Gate.'],
     validation: validation ?? { required: ['node --test scripts/test-pass.mjs'], optional: [] },
     verification: null, done_criteria: ['No new work begins after abort.'], teaching_notes: [],
@@ -37,6 +37,7 @@ function fixture({ validation } = {}) {
     repair_budget: { initial_attempts: 1, max_repairs: 2, max_total_rounds: 3 },
     timing: { estimated_minutes: 5, first_check_after_minutes: 1, soft_deadline_minutes: 3, hard_timeout_minutes: 10 },
     commit_policy: { mode: 'never' },
+    ...overrides,
   });
   return { root, task };
 }
@@ -114,7 +115,7 @@ test('real ModelAdapter relays abort to the provider; normalized provider error 
 });
 
 test('abort before the first edit action prevents mutation', async () => {
-  const { root, task } = fixture();
+  const { root, task } = fixture({ allowed_tools: ['repo_read', 'repo_edit'] });
   const controller = new AbortController();
   const adapter = { generate: async () => { controller.abort(); return response([create('first.js')]); } };
   await assert.rejects(executeTask(task, adapter, { signal: controller.signal }), aborted);
@@ -122,7 +123,7 @@ test('abort before the first edit action prevents mutation', async () => {
 });
 
 test('abort between multiple actions preserves the first edit and prevents the next', async () => {
-  const { root, task } = fixture();
+  const { root, task } = fixture({ allowed_tools: ['repo_read', 'repo_edit'] });
   const controller = new AbortController();
   let writerCalls = 0;
   // The writer reads limits once per action. This controlled caller-owned
@@ -178,7 +179,10 @@ test('already-aborted writer signal blocks create, replace, and patch', async ()
 });
 
 test('abort after a successful edit but before validation prevents a validation spawn', async () => {
-  const { root, task } = fixture({ validation: { required: ['node --test scripts/test-marker.mjs'], optional: [] } });
+  const { root, task } = fixture({
+    validation: { required: ['node --test scripts/test-marker.mjs'], optional: [] },
+    allowed_tools: ['repo_read', 'repo_edit'],
+  });
   const controller = new AbortController();
   fs.writeFileSync(path.join(root, 'scripts', 'test-marker.mjs'), "import fs from 'node:fs';\nfs.writeFileSync('validation-ran', 'yes');\n");
   const taskWithValidationBoundary = new Proxy(task, { get(target, key) {
@@ -260,7 +264,7 @@ test('abort while preparing a repair task prevents the next model round', async 
 });
 
 test('normal no-signal Core X composition remains completed', async () => {
-  const { root, task } = fixture();
+  const { root, task } = fixture({ allowed_tools: ['repo_read', 'repo_edit'] });
   const result = await executeXTask(task, { generate: async () => response([create('normal.js')]) });
   assert.equal(result.gateResult.gate_status, 'COMPLETED');
   assert.equal(result.xResult.task_id, task.task_id);

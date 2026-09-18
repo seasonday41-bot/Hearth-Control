@@ -21,7 +21,7 @@ afterEach(() => {
   for (const root of workspaces.splice(0)) fs.rmSync(root, { recursive: true, force: true });
 });
 
-function taskFor(root) {
+function taskFor(root, overrides = {}) {
   return parseXTask({
     version: X_TASK_VERSION,
     task_id: 'TASK-EXECUTE-1',
@@ -49,6 +49,7 @@ function taskFor(root) {
     repair_budget: { initial_attempts: 1, max_repairs: 2, max_total_rounds: 3 },
     timing: { estimated_minutes: 5, first_check_after_minutes: 1, soft_deadline_minutes: 3, hard_timeout_minutes: 10 },
     commit_policy: { mode: 'never' },
+    ...overrides,
   });
 }
 
@@ -68,7 +69,7 @@ function modelWith(action) {
 
 test('validated execution composes the real gate and result, forwards adapter/options, and preserves task', async () => {
   const root = workspace();
-  const task = taskFor(root);
+  const task = taskFor(root, { allowed_tools: ['repo_read', 'repo_edit'] });
   const before = structuredClone(task);
   const adapter = modelWith({ type: 'create', path: 'src/ok.js', content: 'export const ok = true;\n' });
   const modelOptions = { temperature: 0.25 };
@@ -91,7 +92,7 @@ test('validated execution composes the real gate and result, forwards adapter/op
 
 test('protected path retains existing NEEDS_REVIEW semantics without writing', async () => {
   const root = workspace();
-  const task = taskFor(root);
+  const task = taskFor(root, { allowed_tools: ['repo_read', 'repo_edit'] });
   const result = await executeXTask(task, modelWith({ type: 'create', path: 'src/.env', content: 'FAKE=1' }));
 
   assert.equal(result.repairOutcome.status, 'escalation_required');
@@ -106,7 +107,7 @@ test('protected path retains existing NEEDS_REVIEW semantics without writing', a
 
 test('out-of-scope write retains existing FAILED semantics without writing', async () => {
   const root = workspace();
-  const task = taskFor(root);
+  const task = taskFor(root, { allowed_tools: ['repo_read', 'repo_edit'] });
   const result = await executeXTask(task, modelWith({ type: 'create', path: 'other/new.js', content: 'x' }));
 
   assert.equal(result.repairOutcome.status, 'escalation_required');
@@ -117,4 +118,19 @@ test('out-of-scope write retains existing FAILED semantics without writing', asy
   assert.equal(result.xResult.reason_code, result.gateResult.reason_code);
   assert.equal(result.xResult.task_id, task.task_id);
   assert.equal(fs.existsSync(path.join(root, 'other/new.js')), false);
+});
+
+test('read-only task denies write action before execution with PERMISSION_DENIED', async () => {
+  const root = workspace();
+  const task = taskFor(root); // allowed_tools: ['repo_read']
+  const result = await executeXTask(task, modelWith({ type: 'create', path: 'src/ok.js', content: 'export const ok = true;\n' }));
+
+  assert.equal(result.repairOutcome.status, 'escalation_required');
+  assert.equal(result.gateResult.gate_status, 'FAILED');
+  assert.equal(result.gateResult.hearth_outcome, 'error');
+  assert.equal(result.gateResult.reason_code, 'structural_execution_failure');
+  assert.equal(result.xResult.gate_status, 'FAILED');
+  assert.equal(result.xResult.reason_code, 'structural_execution_failure');
+  assert.equal(result.repairOutcome.rounds[0].executor.blockers[0].code, 'PERMISSION_DENIED');
+  assert.equal(fs.existsSync(path.join(root, 'src/ok.js')), false);
 });

@@ -105,7 +105,7 @@ test('escalation_required: unrecognized top-level blocker reason -> NEEDS_REVIEW
   assert.equal(result.waiting_reason, 'supervisor_review');
 });
 
-for (const code of ['PATH_REJECTED', 'INVALID_SCOPE', 'WRITE_FAILED', 'UNREADABLE_TARGET']) {
+for (const code of ['PERMISSION_DENIED', 'PATH_REJECTED', 'INVALID_SCOPE', 'WRITE_FAILED', 'UNREADABLE_TARGET']) {
   test(`escalation_required: execution blocker ${code} -> FAILED/structural_execution_failure, raw code preserved in evidence`, () => {
     const rounds = [executionRound(1, 'blocked', 'write_failed', 'escalate', code)];
     const result = evaluateResultGate(outcome('escalation_required', rounds));
