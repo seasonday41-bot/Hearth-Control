@@ -164,7 +164,10 @@ function spawnValidation(executable, args, cwd, limits, signal) {
     const stdout = { chunks: [], bytes: 0, truncated: false };
     const stderr = { chunks: [], bytes: 0, truncated: false };
     const env = Object.fromEntries(['PATH', 'HOME', 'TMPDIR', 'LANG'].filter((key) => typeof process.env[key] === 'string').map((key) => [key, process.env[key]]));
-    if (process.versions.electron) env.ELECTRON_RUN_AS_NODE = '1';
+    if (process.versions.electron) {
+      env.ELECTRON_RUN_AS_NODE = '1';
+      env.ELECTRON_NO_ASAR = '1';
+    }
     const started = Date.now();
     let child;
     try {

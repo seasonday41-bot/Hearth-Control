@@ -267,3 +267,65 @@ test('VR17 task input is not mutated', async () => {
   await runRequiredValidation(task);
   assert.equal(JSON.stringify(task), before);
 });
+
+// ---------------------------------------------------------------------------
+// Runtime environment isolation & allowlist safety
+// ---------------------------------------------------------------------------
+
+test('VR18 Electron runtime validation environment sets ELECTRON_RUN_AS_NODE=1 and ELECTRON_NO_ASAR=1', async () => {
+  const root = tmpWorkspace();
+  writeFixture(root, 'test-electron-env.mjs', [
+    "import test from 'node:test';",
+    "import assert from 'node:assert/strict';",
+    "test('check electron env vars', () => {",
+    "  assert.equal(process.env.ELECTRON_RUN_AS_NODE, '1');",
+    "  assert.equal(process.env.ELECTRON_NO_ASAR, '1');",
+    '});',
+  ].join('\n'));
+  const origElectron = process.versions.electron;
+  try {
+    process.versions.electron = '44.3.0';
+    const task = validTask(root, { validation: { required: ['node --test scripts/test-electron-env.mjs'], optional: [] } });
+    const results = await runRequiredValidation(task);
+    assert.equal(results.length, 1);
+    assert.equal(results[0].status, 'passed');
+    assert.equal(results[0].exitCode, 0);
+  } finally {
+    if (origElectron === undefined) delete process.versions.electron;
+    else process.versions.electron = origElectron;
+  }
+});
+
+test('VR19 normal Node runtime validation environment does NOT set Electron env vars', async () => {
+  const root = tmpWorkspace();
+  writeFixture(root, 'test-node-env.mjs', [
+    "import test from 'node:test';",
+    "import assert from 'node:assert/strict';",
+    "test('check node env vars', () => {",
+    "  assert.equal(process.env.ELECTRON_RUN_AS_NODE, undefined);",
+    "  assert.equal(process.env.ELECTRON_NO_ASAR, undefined);",
+    '});',
+  ].join('\n'));
+  const origElectron = process.versions.electron;
+  try {
+    delete process.versions.electron;
+    const task = validTask(root, { validation: { required: ['node --test scripts/test-node-env.mjs'], optional: [] } });
+    const results = await runRequiredValidation(task);
+    assert.equal(results.length, 1);
+    assert.equal(results[0].status, 'passed');
+    assert.equal(results[0].exitCode, 0);
+  } finally {
+    if (origElectron !== undefined) process.versions.electron = origElectron;
+  }
+});
+
+test('VR20 validation command allowlist rejects npm commands (such as npm run test:updater)', async () => {
+  const root = tmpWorkspace();
+  const task = validTask(root, { validation: { required: ['npm run test:updater'], optional: [] } });
+  const results = await runRequiredValidation(task);
+  assert.equal(results.length, 1);
+  assert.equal(results[0].status, 'invalid_command');
+  assert.equal(results[0].pid, null);
+  assert.equal(results[0].exitCode, null);
+  assert.ok(results[0].summary.includes("command does not match the allowlisted 'node --test scripts/test-*.mjs' shape"));
+});
