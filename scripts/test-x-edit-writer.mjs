@@ -192,14 +192,100 @@ test('W11 an ordinary (non-symlink) parent directory behaves normally', async ()
   assert.equal(fs.readFileSync(path.join(root, 'src/nested/new.js'), 'utf8'), 'ok');
 });
 
-test('W12 an exact-file scope grant cannot be widened to place a temp sibling artifact', async () => {
+// ---------------------------------------------------------------------------
+// Exact-file scope & atomic temp writes (Regression coverage)
+// ---------------------------------------------------------------------------
+
+test('W12a exact-file grant permits atomic CREATE of that exact target without parent-directory scope', async () => {
+  const root = tmpWorkspace();
+  fs.mkdirSync(path.join(root, 'scripts', 'fixtures'), { recursive: true });
+  const task = validTask(root, {
+    scope: {
+      allowed_paths: ['scripts/fixtures/x-write-smoke-target.mjs', 'scripts/test-x-write-smoke.mjs'],
+      preferred_files: [],
+      forbidden_paths: [],
+    },
+  });
+  const result = await createFile(task, 'scripts/fixtures/x-write-smoke-target.mjs', 'export function addOne(v) { return v + 1; }\n');
+  assert.equal(result.status, 'ok');
+  assert.equal(result.operation, 'create');
+  assert.equal(result.path, 'scripts/fixtures/x-write-smoke-target.mjs');
+  assert.equal(result.created, true);
+  assert.equal(fs.readFileSync(path.join(root, 'scripts/fixtures/x-write-smoke-target.mjs'), 'utf8'), 'export function addOne(v) { return v + 1; }\n');
+  // Temp file is cleaned up; only the target file exists in the directory
+  assert.deepEqual(fs.readdirSync(path.join(root, 'scripts/fixtures')), ['x-write-smoke-target.mjs']);
+});
+
+test('W12b exact-file grant permits atomic REPLACE of that exact target', async () => {
   const root = tmpWorkspace();
   writeFile(root, 'src/app.js', 'original-content');
   const task = validTask(root, { scope: { allowed_paths: ['src/app.js'], preferred_files: [], forbidden_paths: [] } });
-  const result = await replaceFile(task, 'src/app.js', 'updated', { expectedContent: 'original-content' });
+  const result = await replaceFile(task, 'src/app.js', 'updated-content', { expectedContent: 'original-content' });
+  assert.equal(result.status, 'ok');
+  assert.equal(result.operation, 'replace');
+  assert.equal(result.changed, true);
+  assert.equal(fs.readFileSync(path.join(root, 'src/app.js'), 'utf8'), 'updated-content');
+  assert.deepEqual(fs.readdirSync(path.join(root, 'src')), ['app.js']);
+});
+
+test('W12c arbitrary sibling target remains PATH_REJECTED under exact-file grant', async () => {
+  const root = tmpWorkspace();
+  writeFile(root, 'src/app.js', 'original-content');
+  writeFile(root, 'src/other.js', 'other-content');
+  const task = validTask(root, { scope: { allowed_paths: ['src/app.js'], preferred_files: [], forbidden_paths: [] } });
+
+  const createResult = await createFile(task, 'src/sibling-new.js', 'malicious');
+  assert.equal(createResult.status, 'error');
+  assert.equal(createResult.code, 'PATH_REJECTED');
+  assert.equal(fs.existsSync(path.join(root, 'src/sibling-new.js')), false);
+
+  const replaceResult = await replaceFile(task, 'src/other.js', 'malicious', { expectedContent: 'other-content' });
+  assert.equal(replaceResult.status, 'error');
+  assert.equal(replaceResult.code, 'PATH_REJECTED');
+  assert.equal(fs.readFileSync(path.join(root, 'src/other.js'), 'utf8'), 'other-content');
+
+  const patchResult = await applyEdits(task, 'src/other.js', [{ old_string: 'other', new_string: 'hacked', replace_all: false }], { expectedContent: 'other-content' });
+  assert.equal(patchResult.status, 'error');
+  assert.equal(patchResult.code, 'PATH_REJECTED');
+  assert.equal(fs.readFileSync(path.join(root, 'src/other.js'), 'utf8'), 'other-content');
+});
+
+test('W12d parent-directory scope is NOT required for exact-file target in deeply nested directory', async () => {
+  const root = tmpWorkspace();
+  fs.mkdirSync(path.join(root, 'nested', 'deep'), { recursive: true });
+  const task = validTask(root, { scope: { allowed_paths: ['nested/deep/file.js'], preferred_files: [], forbidden_paths: [] } });
+  const result = await createFile(task, 'nested/deep/file.js', 'nested content');
+  assert.equal(result.status, 'ok');
+  assert.equal(fs.readFileSync(path.join(root, 'nested/deep/file.js'), 'utf8'), 'nested content');
+  assert.deepEqual(fs.readdirSync(path.join(root, 'nested/deep')), ['file.js']);
+});
+
+test('W12e symlink and workspace escape protections still pass with exact-file grant', async () => {
+  const root = tmpWorkspace();
+  const outsideDir = tmpWorkspace();
+  const outsideFile = path.join(outsideDir, 'secret.txt');
+  fs.writeFileSync(outsideFile, 'outside-original');
+  fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+  fs.symlinkSync(outsideFile, path.join(root, 'src', 'link.js'));
+
+  const task = validTask(root, { scope: { allowed_paths: ['src/link.js'], preferred_files: [], forbidden_paths: [] } });
+  const result = await replaceFile(task, 'src/link.js', 'malicious', { expectedContent: 'outside-original' });
   assert.equal(result.status, 'error');
-  assert.equal(result.code, 'PATH_REJECTED');
+  assert.ok(['SYMLINK_ESCAPE', 'PATH_REJECTED'].includes(result.code), JSON.stringify(result));
+  assert.equal(fs.readFileSync(outsideFile, 'utf8'), 'outside-original');
+});
+
+test('W12f failed atomic write leaves no unauthorized temp file on disk', async () => {
+  const root = tmpWorkspace();
+  writeFile(root, 'src/app.js', 'original-content');
+  const task = validTask(root, { scope: { allowed_paths: ['src/app.js'], preferred_files: [], forbidden_paths: [] } });
+
+  // Precondition mismatch triggers failure during publish
+  const result = await replaceFile(task, 'src/app.js', 'updated', { expectedContent: 'stale-wrong-content' });
+  assert.equal(result.status, 'error');
+  assert.equal(result.code, 'PRECONDITION_FAILED');
   assert.equal(fs.readFileSync(path.join(root, 'src/app.js'), 'utf8'), 'original-content');
+  // No leftover temp files in directory
   assert.deepEqual(fs.readdirSync(path.join(root, 'src')), ['app.js']);
 });
 

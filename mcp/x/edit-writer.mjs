@@ -258,24 +258,40 @@ async function resolveWriteTarget(scope, workspaceRoot, rawPath) {
 }
 
 /**
- * Proves the target's containing directory -- where a sibling temp file
- * would be placed for atomic publish -- is itself authorized by scope, not
- * merely that the target file is. An exact-file-only grant (e.g.
- * `allowed_paths: ['src/app.js']`) does NOT authorize `src/`, so this
- * rejects rather than silently placing a temp file under a directory scope
- * never granted.
+ * Authorizes the target's containing directory for placing an internally
+ * generated sibling temporary file required for atomic publication of that
+ * authorized target.
+ *
+ * An exact-file grant (e.g. `allowed_paths: ['src/app.js']`) explicitly
+ * authorizes writing to `src/app.js`. For atomic create/replace/patch,
+ * edit-writer derives and places ONLY its own internal sibling temporary file
+ * directly inside the authorized target's containing directory. The directory
+ * itself is not granted as an independent write target to the model (arbitrary
+ * sibling writes remain PATH_REJECTED by resolveWriteTarget).
  */
 function authorizeTempDirectory(scope, targetRelative) {
   const dirRelative = path.posix.dirname(targetRelative);
-  if (!dirRelative || dirRelative === '.') {
-    return { ok: false, detail: 'target has no scope-authorized containing directory for atomic-write mechanics' };
+  if (!dirRelative || dirRelative === '..' || dirRelative.startsWith('../') || path.posix.isAbsolute(dirRelative)) {
+    return { ok: false, detail: 'target has no valid containing directory inside the workspace for atomic-write mechanics' };
   }
-  const check = scopeCheck(dirRelative, scope);
-  if (!check.ok) {
-    return { ok: false, detail: `containing directory '${dirRelative}' is not itself authorized by scope.allowed_paths; an exact-file grant does not authorize its directory` };
+  if (dirRelative !== '.' && isProtectedPath(dirRelative)) {
+    return { ok: false, detail: `containing directory '${dirRelative}' is a protected path` };
   }
-  if (isProtectedPath(dirRelative)) return { ok: false, detail: `containing directory '${dirRelative}' is a protected path` };
-  return { ok: true, dirRelative };
+  if (dirRelative !== '.' && Array.isArray(scope.forbidden_paths) && scope.forbidden_paths.some((p) => dirRelative === p || dirRelative.startsWith(`${p}/`))) {
+    return { ok: false, detail: `containing directory '${dirRelative}' is inside forbidden_paths` };
+  }
+
+  // Permitted if the directory itself is authorized by scope.allowed_paths (directory-level grant):
+  if (dirRelative !== '.' && scopeCheck(dirRelative, scope).ok) {
+    return { ok: true, dirRelative };
+  }
+
+  // Permitted if the target file itself is authorized by scope.allowed_paths (exact-file grant):
+  if (scopeCheck(targetRelative, scope).ok) {
+    return { ok: true, dirRelative };
+  }
+
+  return { ok: false, detail: `containing directory '${dirRelative}' is not authorized for atomic-write mechanics` };
 }
 
 /** Reads the current raw (unformatted, untruncated) content + mode of an already-authorized existing target, for hashing/patching/mode-preservation. Bounded by the same hard write ceiling, since a file too large to safely write back is also too large to safely patch here. */
