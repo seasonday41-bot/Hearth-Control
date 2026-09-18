@@ -97,6 +97,30 @@ test('RL1 round 1 completes and required validation passes -> validated, one rou
   assert.equal(fs.readFileSync(path.join(root, 'src/new.js'), 'utf8'), 'hello');
 });
 
+test('RL1b read-only task: a non-empty/malformed model actions array is discarded, execution completes, and required validation still runs and passes', async () => {
+  const root = tmpWorkspace();
+  fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+  writeFile(root, 'scripts/test-pass.mjs', "import test from 'node:test';\ntest('ok', () => {});\n");
+  const task = validTask(root, { validation: { required: ['node --test scripts/test-pass.mjs'], optional: [] } });
+  // A malformed action (no `type` at all -- the exact shape observed in the
+  // real P2D failure) from a read-only task must never reach validateIntent
+  // or executeOneAction; it must be discarded before either.
+  const adapter = queueAdapter([{ actions: [{ note: 'the model tried to propose something anyway' }] }]);
+
+  const result = await runTaskWithRepair(task, adapter);
+
+  assert.equal(result.status, 'validated');
+  assert.equal(result.total_rounds, 1);
+  assert.equal(adapter.calls.length, 1);
+  assert.equal(result.rounds[0].kind, 'validation');
+  assert.equal(result.rounds[0].executor.status, 'completed');
+  assert.equal(result.rounds[0].executor.actions_requested, 0);
+  assert.equal(result.rounds[0].executor.read_only_actions_discarded, 1);
+  assert.deepEqual(result.rounds[0].executor.files_changed, []);
+  assert.equal(result.rounds[0].validation.required[0].status, 'passed');
+  assert.deepEqual(fs.readdirSync(path.join(root, 'src')), []);
+});
+
 test('RL2/RL7/RL8 a required-validation failure repairs, the newly-created file becomes visible in round 2, and is successfully patched there', async () => {
   const root = tmpWorkspace();
   fs.mkdirSync(path.join(root, 'src'), { recursive: true });

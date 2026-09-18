@@ -329,7 +329,7 @@ test('F. Read-only task: repo_read only -> empty actions -> COMPLETED without wr
   assert.deepEqual([...xResult.files_changed], []);
 });
 
-test('G. Read-only task: unauthorized create attempt fails closed with PERMISSION_DENIED', async () => {
+test('G. Read-only task: unauthorized create attempt is discarded by the read-only authority boundary before it can reach mutation, execution completes and validation still runs', async () => {
   const root = tmpWorkspace();
   writeFile(root, 'scripts/test-pass.mjs', "import test from 'node:test';\ntest('ok', () => {});\n");
   const adapter = queueAdapter([{ actions: [{ type: 'create', path: 'src/bad.js', content: 'no\n' }] }]);
@@ -343,10 +343,17 @@ test('G. Read-only task: unauthorized create attempt fails closed with PERMISSIO
     adapter,
   );
 
+  // The read-only authority boundary (mcp/x/local-executor.mjs's
+  // enforceReadOnlyActionBoundary) discards this action BEFORE it ever
+  // reaches validateIntent or Phase 5B's PERMISSION_DENIED check -- no
+  // filesystem mutation is even attempted, and execution proceeds to
+  // required validation exactly as a correctly-behaved read-only response
+  // (actions: []) would.
   assert.equal(fs.existsSync(path.join(root, 'src/bad.js')), false);
-  assert.equal(repairOutcome.status, 'escalation_required');
-  assert.equal(gateResult.gate_status, 'FAILED');
-  assert.equal(gateResult.reason_code, 'structural_execution_failure');
-  assert.equal(gateResult.evidence.blocker.code, 'PERMISSION_DENIED');
-  assert.equal(xResult.gate_status, 'FAILED');
+  assert.equal(repairOutcome.status, 'validated');
+  assert.equal(repairOutcome.rounds[0].executor.read_only_actions_discarded, 1);
+  assert.equal(gateResult.gate_status, 'COMPLETED');
+  assert.equal(gateResult.reason_code, 'validated');
+  assert.equal(xResult.gate_status, 'COMPLETED');
+  assert.deepEqual(xResult.files_changed, []);
 });

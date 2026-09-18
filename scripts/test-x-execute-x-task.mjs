@@ -120,17 +120,23 @@ test('out-of-scope write retains existing FAILED semantics without writing', asy
   assert.equal(fs.existsSync(path.join(root, 'other/new.js')), false);
 });
 
-test('read-only task denies write action before execution with PERMISSION_DENIED', async () => {
+test('read-only task: a write action from the model is discarded by the read-only authority boundary before execution, never reaching PERMISSION_DENIED', async () => {
   const root = workspace();
   const task = taskFor(root); // allowed_tools: ['repo_read']
   const result = await executeXTask(task, modelWith({ type: 'create', path: 'src/ok.js', content: 'export const ok = true;\n' }));
 
-  assert.equal(result.repairOutcome.status, 'escalation_required');
-  assert.equal(result.gateResult.gate_status, 'FAILED');
-  assert.equal(result.gateResult.hearth_outcome, 'error');
-  assert.equal(result.gateResult.reason_code, 'structural_execution_failure');
-  assert.equal(result.xResult.gate_status, 'FAILED');
-  assert.equal(result.xResult.reason_code, 'structural_execution_failure');
-  assert.equal(result.repairOutcome.rounds[0].executor.blockers[0].code, 'PERMISSION_DENIED');
+  // mcp/x/local-executor.mjs's enforceReadOnlyActionBoundary discards this
+  // action BEFORE validateIntent or Phase 5B ever see it, so this now
+  // completes and validates cleanly, exactly as a correctly-behaved
+  // read-only response (actions: []) would -- the action never even
+  // reaches the PERMISSION_DENIED check.
+  assert.equal(result.repairOutcome.status, 'validated');
+  assert.equal(result.gateResult.gate_status, 'COMPLETED');
+  assert.equal(result.gateResult.hearth_outcome, 'completed');
+  assert.equal(result.gateResult.reason_code, 'validated');
+  assert.equal(result.xResult.gate_status, 'COMPLETED');
+  assert.equal(result.xResult.reason_code, 'validated');
+  assert.equal(result.repairOutcome.rounds[0].executor.read_only_actions_discarded, 1);
+  assert.deepEqual(result.repairOutcome.rounds[0].executor.blockers, []);
   assert.equal(fs.existsSync(path.join(root, 'src/ok.js')), false);
 });

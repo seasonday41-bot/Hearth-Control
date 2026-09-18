@@ -145,29 +145,32 @@ test('E5 malformed model JSON is rejected, zero mutation', async () => {
   assert.deepEqual(result.changes, []);
 });
 
-test('E6 unsupported action type is rejected', async () => {
+test('E6 unsupported action type is rejected (write-authorized task)', async () => {
   const root = tmpWorkspace();
   fs.mkdirSync(path.join(root, 'src'), { recursive: true });
-  const task = validTask(root);
+  // write-authorized: the read-only authority boundary (see R2-R4) only
+  // ever discards actions for a task WITHOUT repo_edit, so this must use
+  // writeTask() to actually exercise validateIntent's own schema check.
+  const task = writeTask(root);
   const result = await executeTask(task, jsonAdapter({ actions: [{ type: 'delete', path: 'src/app.js' }] }));
   assert.equal(result.status, 'blocked');
   assert.equal(result.blockers[0].reason, 'unsupported_action');
   assert.equal(fs.existsSync(path.join(root, 'src/app.js')), false);
 });
 
-test('E7 a missing required field is rejected', async () => {
+test('E7 a missing required field is rejected (write-authorized task)', async () => {
   const root = tmpWorkspace();
   fs.mkdirSync(path.join(root, 'src'), { recursive: true });
-  const task = validTask(root);
+  const task = writeTask(root);
   const result = await executeTask(task, jsonAdapter({ actions: [{ type: 'create', content: 'x' }] })); // no path
   assert.equal(result.status, 'blocked');
   assert.equal(result.blockers[0].reason, 'missing_field');
 });
 
-test('E8 too many actions is rejected', async () => {
+test('E8 too many actions is rejected (write-authorized task)', async () => {
   const root = tmpWorkspace();
   fs.mkdirSync(path.join(root, 'src'), { recursive: true });
-  const task = validTask(root);
+  const task = writeTask(root);
   const actions = Array.from({ length: 11 }, (_, i) => ({ type: 'create', path: `src/f${i}.js`, content: 'x' }));
   const result = await executeTask(task, jsonAdapter({ actions }));
   assert.equal(result.status, 'blocked');
@@ -290,7 +293,7 @@ test('E16b a ModelAdapter that returns ok:false is handled safely', async () => 
 test('E17 the model cannot supply or override expected_hash/expected_content on replace', async () => {
   const root = tmpWorkspace();
   writeFile(root, 'src/app.js', 'original');
-  const task = validTask(root, { scope: { allowed_paths: ['src'], preferred_files: ['src/app.js'], forbidden_paths: [] } });
+  const task = writeTask(root, { scope: { allowed_paths: ['src'], preferred_files: ['src/app.js'], forbidden_paths: [] } });
   const result = await executeTask(task, jsonAdapter({
     actions: [{ type: 'replace', path: 'src/app.js', content: 'malicious', expected_hash: sha256('original') }],
   }));
@@ -361,7 +364,7 @@ test('E21 patch target only truncated/redacted in context is blocked', async () 
 test('E22 a model-supplied patch expected_hash is rejected as an unknown field', async () => {
   const root = tmpWorkspace();
   writeFile(root, 'src/app.js', 'const x = 1;');
-  const task = validTask(root, { scope: { allowed_paths: ['src'], preferred_files: ['src/app.js'], forbidden_paths: [] } });
+  const task = writeTask(root, { scope: { allowed_paths: ['src'], preferred_files: ['src/app.js'], forbidden_paths: [] } });
   const result = await executeTask(task, jsonAdapter({
     actions: [{ type: 'patch', path: 'src/app.js', edits: [{ old_string: 'const x = 1;', new_string: 'const x = 2;' }], expected_hash: sha256('const x = 1;') }],
   }));
@@ -622,7 +625,7 @@ test('E35 LocalExecutor generation request carries bounded increased output budg
 test('E36 existing unknown-field strictness remains unchanged', async () => {
   const root = tmpWorkspace();
   fs.mkdirSync(path.join(root, 'src'), { recursive: true });
-  const task = validTask(root);
+  const task = writeTask(root);
   const result = await executeTask(task, jsonAdapter({
     actions: [{ type: 'create', path: 'src/new.js', content: 'x', extra_field: 'invalid' }],
   }));
@@ -723,11 +726,13 @@ test('R1 READ-ONLY SCHEMA: allowed_tools: ["repo_read"] produces actions: { type
   assert.deepEqual(schema.required, ['actions']);
   assert.equal(schema.properties.actions.type, 'array');
   assert.equal(schema.properties.actions.maxItems, 0);
-  assert.equal(schema.properties.actions.items, undefined);
+  // Defense-in-depth: even if a model backend lets an element through
+  // despite maxItems:0, `items` bounds its shape to an empty object.
+  assert.deepEqual(schema.properties.actions.items, { type: 'object', additionalProperties: false });
   assert.equal(schema.properties.actions.anyOf, undefined);
 });
 
-test('R2 READ-ONLY CREATE BYPASS: hand-crafted create with repo_read only fails PERMISSION_DENIED with zero mutation and no temp drift', async () => {
+test('R2 READ-ONLY CREATE BYPASS: hand-crafted create with repo_read only is discarded by the read-only authority boundary before it can reach mutation, zero mutation and no temp drift', async () => {
   const root = tmpWorkspace();
   fs.mkdirSync(path.join(root, 'scripts'), { recursive: true });
   const task = validTask(root, {
@@ -744,20 +749,23 @@ test('R2 READ-ONLY CREATE BYPASS: hand-crafted create with repo_read only fails 
     ],
   });
   const result = await executeTask(task, adapter);
-  assert.equal(result.status, 'failed');
-  assert.equal(result.actions_requested, 1);
+  // The read-only authority boundary discards the action BEFORE
+  // validateIntent or Phase 5B ever see it -- the action never reaches
+  // executeOneAction at all, so this is now a normal, zero-action
+  // 'completed' result rather than a per-action PERMISSION_DENIED failure.
+  assert.equal(result.status, 'completed');
+  assert.equal(result.actions_requested, 0);
   assert.equal(result.actions_completed, 0);
   assert.deepEqual(result.files_changed, []);
-  assert.equal(result.changes.length, 1);
-  assert.equal(result.changes[0].code, 'PERMISSION_DENIED');
-  assert.equal(result.blockers.length, 1);
-  assert.equal(result.blockers[0].code, 'PERMISSION_DENIED');
+  assert.deepEqual(result.changes, []);
+  assert.deepEqual(result.blockers, []);
+  assert.equal(result.read_only_actions_discarded, 1);
   assert.equal(fs.existsSync(path.join(root, 'scripts/should-not-exist.mjs')), false);
   const entries = fs.readdirSync(path.join(root, 'scripts'));
   assert.deepEqual(entries, []);
 });
 
-test('R3 READ-ONLY REPLACE BYPASS: hand-crafted replace with repo_read only fails PERMISSION_DENIED and leaves original file unchanged', async () => {
+test('R3 READ-ONLY REPLACE BYPASS: hand-crafted replace with repo_read only is discarded by the read-only authority boundary and leaves original file unchanged', async () => {
   const root = tmpWorkspace();
   writeFile(root, 'src/app.js', 'original content');
   const task = validTask(root, {
@@ -774,14 +782,15 @@ test('R3 READ-ONLY REPLACE BYPASS: hand-crafted replace with repo_read only fail
     ],
   });
   const result = await executeTask(task, adapter);
-  assert.equal(result.status, 'failed');
+  assert.equal(result.status, 'completed');
   assert.deepEqual(result.files_changed, []);
-  assert.equal(result.changes[0].code, 'PERMISSION_DENIED');
-  assert.equal(result.blockers[0].code, 'PERMISSION_DENIED');
+  assert.deepEqual(result.changes, []);
+  assert.deepEqual(result.blockers, []);
+  assert.equal(result.read_only_actions_discarded, 1);
   assert.equal(fs.readFileSync(path.join(root, 'src/app.js'), 'utf8'), 'original content');
 });
 
-test('R4 READ-ONLY PATCH BYPASS: hand-crafted patch with repo_read only fails PERMISSION_DENIED and leaves original file unchanged', async () => {
+test('R4 READ-ONLY PATCH BYPASS: hand-crafted patch with repo_read only is discarded by the read-only authority boundary and leaves original file unchanged', async () => {
   const root = tmpWorkspace();
   writeFile(root, 'src/app.js', 'const x = 1;\n');
   const task = validTask(root, {
@@ -798,11 +807,62 @@ test('R4 READ-ONLY PATCH BYPASS: hand-crafted patch with repo_read only fails PE
     ],
   });
   const result = await executeTask(task, adapter);
-  assert.equal(result.status, 'failed');
+  assert.equal(result.status, 'completed');
   assert.deepEqual(result.files_changed, []);
-  assert.equal(result.changes[0].code, 'PERMISSION_DENIED');
-  assert.equal(result.blockers[0].code, 'PERMISSION_DENIED');
+  assert.deepEqual(result.changes, []);
+  assert.deepEqual(result.blockers, []);
+  assert.equal(result.read_only_actions_discarded, 1);
   assert.equal(fs.readFileSync(path.join(root, 'src/app.js'), 'utf8'), 'const x = 1;\n');
+});
+
+test('R4b READ-ONLY: actions: [] from the model is unaffected by the boundary and remains []', async () => {
+  const root = tmpWorkspace();
+  const task = validTask(root, { allowed_tools: ['repo_read'] });
+  const result = await executeTask(task, jsonAdapter({ actions: [], explanation: 'nothing to change', confidence: 0.9 }));
+  assert.equal(result.status, 'completed');
+  assert.equal(result.actions_requested, 0);
+  assert.equal(result.read_only_actions_discarded, 0);
+  assert.deepEqual(result.files_changed, []);
+  assert.equal(result.model_metadata.explanation, 'nothing to change');
+  assert.equal(result.model_metadata.confidence, 0.9);
+});
+
+test('R4c READ-ONLY: a malformed action (missing type entirely -- the exact shape observed in the real P2D failure) is discarded before validateIntent ever sees it, never surfaces unsupported_action, and analysis fields are preserved', async () => {
+  const root = tmpWorkspace();
+  const task = validTask(root, { allowed_tools: ['repo_read'] });
+  const result = await executeTask(task, jsonAdapter({
+    actions: [{ note: 'no type key at all' }],
+    explanation: 'read-only audit summary',
+    confidence: 0.5,
+  }));
+  assert.equal(result.status, 'completed');
+  assert.notEqual(result.status, 'blocked');
+  assert.equal(result.blockers.length, 0, 'must never surface unsupported_action for a read-only task');
+  assert.equal(result.read_only_actions_discarded, 1);
+  assert.deepEqual(result.files_changed, []);
+  assert.deepEqual(result.changes, []);
+  // Non-action analysis/result fields survive the normalization untouched.
+  assert.equal(result.model_metadata.explanation, 'read-only audit summary');
+  assert.equal(result.model_metadata.confidence, 0.5);
+});
+
+test('R4d READ-ONLY: multiple mixed actions (a well-formed write attempt plus a malformed one) are all discarded together, none partially executed', async () => {
+  const root = tmpWorkspace();
+  writeFile(root, 'src/app.js', 'untouched');
+  const task = validTask(root, {
+    allowed_tools: ['repo_read'],
+    scope: { allowed_paths: ['src'], preferred_files: ['src/app.js'], forbidden_paths: [] },
+  });
+  const result = await executeTask(task, jsonAdapter({
+    actions: [
+      { type: 'replace', path: 'src/app.js', content: 'malicious' },
+      { note: 'malformed, no type' },
+    ],
+  }));
+  assert.equal(result.status, 'completed');
+  assert.equal(result.read_only_actions_discarded, 2);
+  assert.deepEqual(result.changes, []);
+  assert.equal(fs.readFileSync(path.join(root, 'src/app.js'), 'utf8'), 'untouched');
 });
 
 test('R5 WRITE-AUTHORIZED CREATE: allowed_tools: ["repo_read", "repo_edit"] performs valid in-scope create', async () => {
@@ -819,6 +879,8 @@ test('R5 WRITE-AUTHORIZED CREATE: allowed_tools: ["repo_read", "repo_edit"] perf
   assert.equal(result.status, 'completed');
   assert.deepEqual(result.files_changed, ['scripts/valid.mjs']);
   assert.equal(fs.readFileSync(path.join(root, 'scripts/valid.mjs'), 'utf8'), 'console.log("ok");\n');
+  // The read-only authority boundary never engages for a write-authorized task.
+  assert.equal(result.read_only_actions_discarded, 0);
 });
 
 test('R6 WRITE-AUTHORIZED REPLACE: repo_edit present performs valid complete-context replace', async () => {
@@ -906,8 +968,12 @@ test('R10 SKILL METADATA CANNOT GRANT WRITE: skill metadata cannot grant write a
     actions: [{ type: 'create', path: 'scripts/skill-test.mjs', content: 'bad' }],
   });
   const result = await executeTask(task, adapter);
-  assert.equal(result.status, 'failed');
-  assert.equal(result.blockers[0].code, 'PERMISSION_DENIED');
+  // Skill metadata still cannot grant write authority: the read-only
+  // authority boundary discards the action before it ever reaches Phase 5B.
+  assert.equal(result.status, 'completed');
+  assert.deepEqual(result.changes, []);
+  assert.deepEqual(result.blockers, []);
+  assert.equal(result.read_only_actions_discarded, 1);
   assert.equal(fs.existsSync(path.join(root, 'scripts/skill-test.mjs')), false);
 });
 

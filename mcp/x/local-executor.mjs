@@ -307,6 +307,21 @@ export function buildLocalExecutorResponseSchema(task, context) {
         actions: Object.freeze({
           type: 'array',
           maxItems: 0,
+          // Defense-in-depth only, not the safety boundary itself: `items`
+          // bounds the SHAPE of any element the model backend's structured-
+          // output grammar lets through despite maxItems:0 (verified against
+          // the current Ollama/qwen3.5 backend to accept this keyword
+          // without error; `maxItems` was itself observed to be honored in
+          // direct probes, but is not something this module can verify on
+          // every future model/backend, so a slipped-through element is at
+          // least constrained to an empty object rather than an arbitrary
+          // shape). Plain object/additionalProperties is used rather than a
+          // boolean subschema (e.g. `items:false`) because the latter's
+          // enforcement by the backend's schema-to-grammar conversion is
+          // unverified. This can never be the sole safety mechanism --
+          // enforceReadOnlyActionBoundary() below is the actual, always-on,
+          // deterministic Node-side authority boundary.
+          items: Object.freeze({ type: 'object', additionalProperties: false }),
         }),
         explanation: Object.freeze({ type: 'string' }),
         confidence: Object.freeze({ type: 'number' }),
@@ -441,6 +456,42 @@ const FIELDS_BY_ACTION_TYPE = Object.freeze({
 });
 const KNOWN_TOP_FIELDS = new Set(['actions', 'explanation', 'confidence']);
 const KNOWN_EDIT_FIELDS = new Set(['old_string', 'new_string', 'replace_all']);
+
+/**
+ * The read-only authority boundary. A task without `repo_edit` must never
+ * have a model-produced action reach mutation execution -- not because the
+ * response schema's `maxItems: 0` says so (a model backend may or may not
+ * actually enforce that constraint; see buildLocalExecutorResponseSchema's
+ * `items` comment), but because this deterministic, always-on Node-side
+ * check runs unconditionally for every read-only task, before
+ * `validateIntent` ever inspects a single `action.type`.
+ *
+ * A read-only task whose `parsed.actions` is a non-empty array is
+ * normalized to an empty one here -- the actions are discarded, never
+ * executed, and never even reach `validateIntent`'s per-action shape
+ * checks (so a malformed action, e.g. one missing `type`, can no longer
+ * surface as an `unsupported_action` failure for a read-only task: the
+ * task never needed an action in the first place). Every other field
+ * (`explanation`, `confidence`, and any top-level field this function does
+ * not itself recognize) is passed through untouched, so `validateIntent`'s
+ * own unrelated checks (unknown top-level fields, non-array `actions`,
+ * etc.) still apply exactly as before.
+ *
+ * A write-authorized task (`hasWriteAuthority(task) === true`) is entirely
+ * unaffected -- this function returns the input unchanged, preserving the
+ * existing action validation/execution semantics for that path exactly.
+ *
+ * @param {object} task
+ * @param {object} parsed already-JSON-parsed model response (not yet shape-validated)
+ * @returns {{ parsed: object, discardedActionCount: number }}
+ */
+function enforceReadOnlyActionBoundary(task, parsed) {
+  if (hasWriteAuthority(task)) return { parsed, discardedActionCount: 0 };
+  if (!isPlainObject(parsed) || !Array.isArray(parsed.actions) || parsed.actions.length === 0) {
+    return { parsed, discardedActionCount: 0 };
+  }
+  return { parsed: { ...parsed, actions: [] }, discardedActionCount: parsed.actions.length };
+}
 
 /**
  * Deterministically validates one parsed model response against the fixed
@@ -633,7 +684,7 @@ const modelMetadataFrom = (modelResult, explanation = null, confidence = null) =
   confidence,
 } : null);
 
-const blockedResult = (taskId, reason, detail, modelMetadata = null) => Object.freeze({
+const blockedResult = (taskId, reason, detail, modelMetadata = null, discardedActionCount = 0) => Object.freeze({
   task_id: taskId,
   status: 'blocked',
   actions_requested: 0,
@@ -643,6 +694,7 @@ const blockedResult = (taskId, reason, detail, modelMetadata = null) => Object.f
   model_metadata: Object.freeze(modelMetadata),
   blockers: Object.freeze([{ reason, detail: detail || null }]),
   remaining_work: Object.freeze([]),
+  read_only_actions_discarded: discardedActionCount,
 });
 
 /**
@@ -697,9 +749,16 @@ export async function executeTask(task, modelAdapter, options = {}) {
     return blockedResult(taskId, parsedOutcome.reason, parsedOutcome.detail, modelMetadataFrom(modelResult));
   }
 
-  const intentOutcome = validateIntent(parsedOutcome.parsed, limits);
+  // Read-only authority boundary: runs BEFORE validateIntent ever inspects
+  // action.type, so a read-only task's model-produced actions (malformed or
+  // not) are discarded here regardless of what the response schema's own
+  // maxItems:0 constraint did or did not enforce upstream. See
+  // enforceReadOnlyActionBoundary's own doc comment.
+  const { parsed: boundedParsed, discardedActionCount } = enforceReadOnlyActionBoundary(task, parsedOutcome.parsed);
+
+  const intentOutcome = validateIntent(boundedParsed, limits);
   if (!intentOutcome.ok) {
-    return blockedResult(taskId, intentOutcome.reason, intentOutcome.detail, modelMetadataFrom(modelResult));
+    return blockedResult(taskId, intentOutcome.reason, intentOutcome.detail, modelMetadataFrom(modelResult), discardedActionCount);
   }
   const { actions, explanation, confidence } = intentOutcome.value;
 
@@ -732,5 +791,11 @@ export async function executeTask(task, modelAdapter, options = {}) {
       ? [{ reason: 'write_failed', operation: failedChange.operation, path: failedChange.path, code: failedChange.code, detail: failedChange.detail }]
       : []),
     remaining_work: Object.freeze(remainingWork),
+    // Non-zero only for a read-only task whose model response proposed one
+    // or more actions -- those actions were discarded by
+    // enforceReadOnlyActionBoundary and never reached execution. Zero for
+    // every write-authorized task and for a read-only task that correctly
+    // returned actions: [].
+    read_only_actions_discarded: discardedActionCount,
   });
 }

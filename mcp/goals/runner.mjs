@@ -68,6 +68,27 @@ function getXRequestId(goal, step) {
     : `goal:${goal.id}:step:${step.id}`;
 }
 
+/**
+ * Composes a human-readable review/failure reason from an x-result-v1
+ * object without changing anything about its stable taxonomy: `reason_code`
+ * (or `waiting_reason` when supplied) is always kept as the first, stable
+ * segment, and the specific underlying blocker -- already computed by
+ * Phase 6/8 but previously dropped at this exact boundary -- is appended
+ * when present. Returns null when the result carries neither, so callers
+ * can fall back to their own default text unchanged.
+ * @param {object|null} result xStatus.result (x-result-v1) or null/undefined
+ * @param {string|null} [primaryCode] reason_code or waiting_reason, whichever the caller prefers as the stable lead segment
+ */
+function describeXResultFailure(result, primaryCode) {
+  const code = primaryCode || result?.reason_code || null;
+  const blocker = Array.isArray(result?.blockers) ? result.blockers[0] : null;
+  const segments = [];
+  if (code) segments.push(code);
+  if (blocker?.reason && blocker.reason !== code) segments.push(blocker.reason);
+  if (blocker?.detail) segments.push(blocker.detail);
+  return segments.length > 0 ? segments.join(': ') : null;
+}
+
 export class GoalRunner {
   /**
    * @param {{
@@ -728,8 +749,13 @@ export class GoalRunner {
         // x-result-v1 always carries reason_code, and waiting_reason
         // specifically when hearth_outcome is 'waiting' (needs_review's own
         // outcome) -- a concise, structured "why", preferred over dumping
-        // the full result JSON as the review reason.
-        const reviewReason = xStatus.error || xStatus.result?.waiting_reason || xStatus.result?.reason_code || 'X step needs review';
+        // the full result JSON as the review reason. The specific
+        // underlying blocker (e.g. a safety-boundary block) that Phase 8
+        // already attached to this same result is appended rather than
+        // dropped -- see describeXResultFailure.
+        const reviewReason = xStatus.error
+          || describeXResultFailure(xStatus.result, xStatus.result?.waiting_reason)
+          || 'X step needs review';
         return {
           status: 'waiting',
           result: xStatus.error || xResultText(xStatus.result) || 'X step needs review',
@@ -754,8 +780,12 @@ export class GoalRunner {
           interruptedRecovery: true,
         };
       }
-      // 'failed' (or any unrecognized terminal status): fail closed.
-      const failureReason = xStatus.error || xStatus.result?.reason_code || 'X step failed';
+      // 'failed' (or any unrecognized terminal status): fail closed. The
+      // stable reason_code remains the lead segment; the specific blocker
+      // reason/detail Phase 6/8 already computed (e.g. 'unsupported_action'
+      // / "action 0: unsupported type 'undefined'") is appended so a human
+      // reviewing this step sees more than the generic reason_code alone.
+      const failureReason = xStatus.error || describeXResultFailure(xStatus.result) || 'X step failed';
       return {
         status: 'error',
         error: xStatus.error || 'X step failed',

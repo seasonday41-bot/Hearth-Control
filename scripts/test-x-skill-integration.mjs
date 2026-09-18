@@ -198,13 +198,20 @@ test('XS5: Skill metadata cannot grant repo_edit or any authority absent from ta
   ]);
   const result = await executeXTask(task, adapter);
 
-  // Even though bug-fix mode is workspace-write, task authority must prevail
-  assert.equal(result.repairOutcome.status, 'escalation_required');
-  assert.equal(result.gateResult.gate_status, 'FAILED');
-  assert.equal(result.gateResult.hearth_outcome, 'error');
-  assert.equal(result.gateResult.reason_code, 'structural_execution_failure');
-  assert.equal(result.xResult.gate_status, 'FAILED');
-  assert.equal(result.repairOutcome.rounds[0].executor.blockers[0].code, 'PERMISSION_DENIED');
+  // Even though bug-fix mode is workspace-write, task authority must prevail.
+  // The read-only authority boundary (mcp/x/local-executor.mjs's
+  // enforceReadOnlyActionBoundary) now discards this action BEFORE
+  // validateIntent or Phase 5B's PERMISSION_DENIED check ever see it, so
+  // execution completes and validates cleanly rather than failing --
+  // the security property (no write without repo_edit) is unchanged and
+  // proven the same way: zero file mutation.
+  assert.equal(result.repairOutcome.status, 'validated');
+  assert.equal(result.gateResult.gate_status, 'COMPLETED');
+  assert.equal(result.gateResult.hearth_outcome, 'completed');
+  assert.equal(result.gateResult.reason_code, 'validated');
+  assert.equal(result.xResult.gate_status, 'COMPLETED');
+  assert.equal(result.repairOutcome.rounds[0].executor.read_only_actions_discarded, 1);
+  assert.deepEqual(result.repairOutcome.rounds[0].executor.blockers, []);
   assert.equal(fs.existsSync(path.join(root, 'src/calc.js')), false, 'no file write permitted without repo_edit');
 });
 

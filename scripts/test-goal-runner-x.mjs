@@ -373,6 +373,85 @@ await test('12. FAILED stops dependent continuation', async () => {
   assert.equal(antigravityCalls.length, 0);
 });
 
+// ── 12b. FAILED result with no top-level error surfaces reason_code + blocker reason/detail ──
+await test('12b. FAILED (structural_execution_failure) with no top-level error surfaces the stable reason_code AND the specific blocker reason/detail in the Review Queue', async () => {
+  const storage = new GoalStorage({ storagePath: freshStoragePath() });
+  const xExecutor = makeMockXExecutor();
+  const runner = new GoalRunner({ storage, xExecutor });
+
+  const goal = await runner.create_goal({
+    title: 'Structural Failure Goal',
+    objective: 'Reproduce the real P2D structural_execution_failure',
+    workspace: testWorkspace,
+    steps: [{ id: 's1', title: 'X step', description: '', route: 'x', xTask: validXTask(), required: true }],
+  });
+
+  const requestId = `goal:${goal.id}:step:s1`;
+  // Mirrors the actual persisted x-result-v1 for run_id
+  // c749980f-edfe-4314-8708-d08bcd5ab00e: no top-level queue error string,
+  // only the result's reason_code + blockers[0].
+  xExecutor.statuses.set(requestId, {
+    found: true,
+    queue_status: 'terminal',
+    terminal_status: 'failed',
+    error: null,
+    result: {
+      reason_code: 'structural_execution_failure',
+      blockers: [{ reason: 'unsupported_action', detail: "action 0: unsupported type 'undefined'" }],
+    },
+  });
+
+  const finished = await runner.run_goal(goal.id);
+
+  assert.equal(finished.status, 'error');
+  const item = finished.reviewQueue[0];
+  assert.ok(item, 'a Review Queue item must be recorded');
+  // The stable reason_code must still be present, unchanged.
+  assert.match(item.reason, /structural_execution_failure/);
+  // The specific underlying blocker must now also be surfaced, not dropped.
+  assert.match(item.reason, /unsupported_action/);
+  assert.match(item.reason, /action 0: unsupported type 'undefined'/);
+  // No duplicate dispatch: exactly one X dispatch for this run.
+  assert.equal(xExecutor.dispatchLog.filter((d) => d.requestId === requestId).length, 1);
+});
+
+// ── 11b. NEEDS_REVIEW result with no top-level error surfaces waiting_reason + blocker reason/detail ──
+await test('11b. NEEDS_REVIEW (safety_boundary_review) with no top-level error surfaces waiting_reason AND blocker reason/detail in the Review Queue', async () => {
+  const storage = new GoalStorage({ storagePath: freshStoragePath() });
+  const xExecutor = makeMockXExecutor();
+  const runner = new GoalRunner({ storage, xExecutor });
+
+  const goal = await runner.create_goal({
+    title: 'Safety Boundary Review Goal',
+    objective: 'A safety-boundary block should still show its specific blocker',
+    workspace: testWorkspace,
+    steps: [{ id: 's1', title: 'X step', description: '', route: 'x', xTask: validXTask(), required: true }],
+  });
+
+  const requestId = `goal:${goal.id}:step:s1`;
+  xExecutor.statuses.set(requestId, {
+    found: true,
+    queue_status: 'terminal',
+    terminal_status: 'needs_review',
+    error: null,
+    result: {
+      reason_code: 'safety_boundary_review',
+      waiting_reason: 'supervisor_review',
+      blockers: [{ reason: 'PROTECTED_PATH', detail: 'attempted write to a protected path' }],
+    },
+  });
+
+  const finished = await runner.run_goal(goal.id);
+
+  assert.equal(finished.status, 'waiting');
+  const item = finished.reviewQueue[0];
+  assert.ok(item, 'a Review Queue item must be recorded');
+  assert.match(item.reason, /supervisor_review/);
+  assert.match(item.reason, /PROTECTED_PATH/);
+  assert.match(item.reason, /attempted write to a protected path/);
+  assert.equal(xExecutor.dispatchLog.filter((d) => d.requestId === requestId).length, 1);
+});
+
 // ── 13. INTERRUPTED remains recoverable (Slice 2: new generation + new requestId) ──
 await test('13. INTERRUPTED remains recoverable/waiting (Slice 2: allocates new generation, resumes with :exec:2)', async () => {
   const storage = new GoalStorage({ storagePath: freshStoragePath() });

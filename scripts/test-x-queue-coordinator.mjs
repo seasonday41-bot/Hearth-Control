@@ -44,7 +44,7 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
 
-function taskFor(item, taskId = 'task-1') {
+function taskFor(item, taskId = 'task-1', { allowedTools = ['repo_read'] } = {}) {
   return {
     version: X_TASK_VERSION, task_id: taskId, parent_task_id: null,
     revision: 1, attempt: 1, based_on_result_id: null,
@@ -55,7 +55,7 @@ function taskFor(item, taskId = 'task-1') {
     why_this_matters: 'The coordinator must never author or edit task content.',
     known_evidence: [], suspected_area: [], workspace: { repo: 'Hearth-Control', root: item.root },
     scope: { allowed_paths: ['src'], preferred_files: [], forbidden_paths: [] },
-    constraints: { preserve: [], do_not: [] }, allowed_tools: ['repo_read'],
+    constraints: { preserve: [], do_not: [] }, allowed_tools: allowedTools,
     acceptance_criteria: ['The run is fenced.'],
     validation: { required: ['node --test scripts/test-pass.mjs'], optional: [] },
     verification: null, done_criteria: ['Required validation passes.'], teaching_notes: [],
@@ -321,7 +321,11 @@ test('7 NEEDS_REVIEW records review before pruning, and still dispatches the nex
   const model = twoStageControllableModel([create('src/.env')]);
   const coordinator = coordinatorFor(item, { modelAdapter: model });
 
-  coordinator.enqueue(taskFor(item, 'task-review'));
+  // Write authority is required here: a read-only task's actions are
+  // discarded by the read-only authority boundary before this deliberately
+  // protected-path action could ever reach PROTECTED_PATH/NEEDS_REVIEW --
+  // see mcp/x/local-executor.mjs's enforceReadOnlyActionBoundary.
+  coordinator.enqueue(taskFor(item, 'task-review', { allowedTools: ['repo_read', 'repo_edit'] }));
   await model.firstEntered;
   await waitUntil(() => item.queueStore.listDispatched().length === 1, { label: 'task-review to reach dispatched' });
 
@@ -347,7 +351,10 @@ test('8 FAILED records review before pruning, and still dispatches the next task
   const model = twoStageControllableModel([create('outside/no.js')]);
   const coordinator = coordinatorFor(item, { modelAdapter: model });
 
-  coordinator.enqueue(taskFor(item, 'task-failed'));
+  // Write authority required so this deliberately out-of-scope action
+  // actually reaches PATH_REJECTED instead of being discarded by the
+  // read-only authority boundary.
+  coordinator.enqueue(taskFor(item, 'task-failed', { allowedTools: ['repo_read', 'repo_edit'] }));
   await model.firstEntered;
   await waitUntil(() => item.queueStore.listDispatched().length === 1, { label: 'task-failed to reach dispatched' });
 
@@ -373,7 +380,10 @@ test('9 duplicate terminal event for the same runId does not dispatch twice or r
   const item = fixture();
   const controlled = controllableModel([create('src/.env')]);
   const coordinator = coordinatorFor(item, { modelAdapter: controlled });
-  coordinator.enqueue(taskFor(item, 'task-1'));
+  // Write authority required so this deliberately protected-path action
+  // actually reaches PROTECTED_PATH/NEEDS_REVIEW instead of being discarded
+  // by the read-only authority boundary.
+  coordinator.enqueue(taskFor(item, 'task-1', { allowedTools: ['repo_read', 'repo_edit'] }));
   await controlled.entered;
   await waitUntil(() => item.queueStore.listDispatched().length === 1, { label: 'the entry to reach dispatched' });
   const runId = item.queueStore.listDispatched()[0].runId;
@@ -424,9 +434,11 @@ test('11 a real, terminal X run this coordinator never dispatched is untracked -
   // of the real, unmodified runXTask), proving the B1 invariant against a
   // genuinely real, persisted terminal run -- not merely a nonexistent
   // runId -- that this coordinator simply never tracked.
-  const externalAdmitted = await runXTask(taskFor(item, 'external-task'), fastModel([create('outside/no.js')]), {
-    claimStore: item.claimStore, runStore: item.runStore, ownerId: 'external-owner-not-this-coordinator',
-  });
+  const externalAdmitted = await runXTask(
+    taskFor(item, 'external-task', { allowedTools: ['repo_read', 'repo_edit'] }),
+    fastModel([create('outside/no.js')]),
+    { claimStore: item.claimStore, runStore: item.runStore, ownerId: 'external-owner-not-this-coordinator' },
+  );
   assert.equal(externalAdmitted.accepted, true);
 
   const externalOutcome = await externalAdmitted.done;
@@ -623,7 +635,10 @@ test('20 a wrong event.taskId is ignored -- the persisted run\'s taskId is what 
   const item = fixture();
   const controlled = controllableModel([create('src/.env')]);
   const coordinator = coordinatorFor(item, { modelAdapter: controlled });
-  const entry = coordinator.enqueue(taskFor(item, 'task-real'));
+  // Write authority required so this deliberately protected-path action
+  // actually reaches PROTECTED_PATH/NEEDS_REVIEW instead of being discarded
+  // by the read-only authority boundary.
+  const entry = coordinator.enqueue(taskFor(item, 'task-real', { allowedTools: ['repo_read', 'repo_edit'] }));
   await controlled.entered;
   await waitUntil(() => item.queueStore.listDispatched().length === 1, { label: 'task-real queue entry to reach dispatched' });
   const runId = item.queueStore.listDispatched()[0].runId;

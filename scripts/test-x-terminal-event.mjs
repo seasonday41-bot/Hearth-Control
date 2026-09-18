@@ -67,7 +67,7 @@ function registerFor(item, overrides = {}) {
   return { server, claimStore, runStore, ownerId };
 }
 
-function taskFor(item, taskId = 'task-x-1') {
+function taskFor(item, taskId = 'task-x-1', { allowedTools = ['repo_read'] } = {}) {
   return {
     version: X_TASK_VERSION, task_id: taskId, parent_task_id: null,
     revision: 1, attempt: 1, based_on_result_id: null,
@@ -77,7 +77,7 @@ function taskFor(item, taskId = 'task-x-1') {
     why_this_matters: 'A transport adapter must not add a second orchestration layer.',
     known_evidence: [], suspected_area: [], workspace: { repo: 'Hearth-Control', root: item.root },
     scope: { allowed_paths: ['src'], preferred_files: [], forbidden_paths: [] },
-    constraints: { preserve: [], do_not: [] }, allowed_tools: ['repo_read'],
+    constraints: { preserve: [], do_not: [] }, allowed_tools: allowedTools,
     acceptance_criteria: ['The run is fenced.'],
     validation: { required: ['node --test scripts/test-pass.mjs'], optional: [] },
     verification: null, done_criteria: ['Required validation passes.'], teaching_notes: [],
@@ -228,7 +228,11 @@ test('EVT2 NEEDS_REVIEW emits exactly once, matching the persisted run', async (
   const calls = [];
   await withMockedProcessSend((msg) => calls.push(msg), async () => {
     const { server, runStore } = registerFor(item, { modelAdapter: model([create('src/.env')]) });
-    const started = jsonOf(await server.tools.get('x_start').handler({ task: taskFor(item) }));
+    // Write authority required so this deliberately protected-path action
+    // actually reaches PROTECTED_PATH/NEEDS_REVIEW instead of being
+    // discarded by the read-only authority boundary.
+    const task = taskFor(item, 'task-x-1', { allowedTools: ['repo_read', 'repo_edit'] });
+    const started = jsonOf(await server.tools.get('x_start').handler({ task }));
     const final = await pollUntilTerminal(server, started.run_id);
     assert.equal(final.status, 'needs_review');
 
@@ -250,7 +254,11 @@ test('EVT3 FAILED emits exactly once, matching the persisted run', async () => {
   const calls = [];
   await withMockedProcessSend((msg) => calls.push(msg), async () => {
     const { server, runStore } = registerFor(item, { modelAdapter: model([create('outside/no.js')]) });
-    const started = jsonOf(await server.tools.get('x_start').handler({ task: taskFor(item) }));
+    // Write authority required so this deliberately out-of-scope action
+    // actually reaches PATH_REJECTED instead of being discarded by the
+    // read-only authority boundary.
+    const task = taskFor(item, 'task-x-1', { allowedTools: ['repo_read', 'repo_edit'] });
+    const started = jsonOf(await server.tools.get('x_start').handler({ task }));
     const final = await pollUntilTerminal(server, started.run_id);
     assert.equal(final.status, 'failed');
 
@@ -477,7 +485,11 @@ test('EVT10 notification failure never changes persisted x_runs truth', async ()
   const item = fixture();
   await withMockedProcessSend(() => { throw new Error('IPC channel broken'); }, async () => {
     const { server, runStore } = registerFor(item, { modelAdapter: model([create('src/.env')]) });
-    const started = jsonOf(await server.tools.get('x_start').handler({ task: taskFor(item) }));
+    // Write authority required so this deliberately protected-path action
+    // actually reaches PROTECTED_PATH/NEEDS_REVIEW instead of being
+    // discarded by the read-only authority boundary.
+    const task = taskFor(item, 'task-x-1', { allowedTools: ['repo_read', 'repo_edit'] });
+    const started = jsonOf(await server.tools.get('x_start').handler({ task }));
     await pollUntilTerminal(server, started.run_id);
     const persisted = runStore.getRun(started.run_id);
     assert.equal(persisted.status, 'needs_review');

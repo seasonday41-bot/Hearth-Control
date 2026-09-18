@@ -81,7 +81,7 @@ test('queue tools forward only through the injected HTTP transport', async () =>
   assert.equal(calls[0].workspace, item.root);
 });
 
-function taskFor(item, taskId = 'task-x-1') {
+function taskFor(item, taskId = 'task-x-1', { allowedTools = ['repo_read'] } = {}) {
   return {
     version: X_TASK_VERSION, task_id: taskId, parent_task_id: null,
     revision: 1, attempt: 1, based_on_result_id: null,
@@ -91,7 +91,7 @@ function taskFor(item, taskId = 'task-x-1') {
     why_this_matters: 'A transport adapter must not add a second orchestration layer.',
     known_evidence: [], suspected_area: [], workspace: { repo: 'Hearth-Control', root: item.root },
     scope: { allowed_paths: ['src'], preferred_files: [], forbidden_paths: [] },
-    constraints: { preserve: [], do_not: [] }, allowed_tools: ['repo_read'],
+    constraints: { preserve: [], do_not: [] }, allowed_tools: allowedTools,
     acceptance_criteria: ['The run is fenced.'],
     validation: { required: ['node --test scripts/test-pass.mjs'], optional: [] },
     verification: null, done_criteria: ['Required validation passes.'], teaching_notes: [],
@@ -204,7 +204,11 @@ test('T5 x_task later sees COMPLETED with the full persisted x-result-v1', async
 test('T6 x_task sees NEEDS_REVIEW for a safety-boundary outcome', async () => {
   const item = fixture();
   const { server } = registerFor(item, { modelAdapter: model([create('src/.env')]) });
-  const started = jsonOf(await server.tools.get('x_start').handler({ task: taskFor(item) }));
+  // Write authority required so this deliberately protected-path action
+  // actually reaches PROTECTED_PATH/NEEDS_REVIEW instead of being discarded
+  // by the read-only authority boundary (mcp/x/local-executor.mjs).
+  const task = taskFor(item, 'task-x-1', { allowedTools: ['repo_read', 'repo_edit'] });
+  const started = jsonOf(await server.tools.get('x_start').handler({ task }));
   const final = await pollUntilTerminal(server, started.run_id);
   assert.equal(final.status, 'needs_review');
   assert.equal(final.gate_status, 'NEEDS_REVIEW');
@@ -214,7 +218,11 @@ test('T6 x_task sees NEEDS_REVIEW for a safety-boundary outcome', async () => {
 test('T7 x_task sees a real Result Gate FAILED for a structural failure', async () => {
   const item = fixture();
   const { server } = registerFor(item, { modelAdapter: model([create('outside/no.js')]) });
-  const started = jsonOf(await server.tools.get('x_start').handler({ task: taskFor(item) }));
+  // Write authority required so this deliberately out-of-scope action
+  // actually reaches PATH_REJECTED instead of being discarded by the
+  // read-only authority boundary.
+  const task = taskFor(item, 'task-x-1', { allowedTools: ['repo_read', 'repo_edit'] });
+  const started = jsonOf(await server.tools.get('x_start').handler({ task }));
   const final = await pollUntilTerminal(server, started.run_id);
   assert.equal(final.status, 'failed');
   assert.equal(final.gate_status, 'FAILED');
