@@ -61,6 +61,14 @@ test('MODEL3c a caller may still override the default format', async () => {
   assert.equal(request.format, 'a-future-schema');
 });
 
+test('MODEL3d ModelAdapter forwards structured-output object format to provider', async () => {
+  let request;
+  const schema = { type: 'object', properties: { actions: { type: 'array' } } };
+  const adapter = createModelAdapter({ provider: { chat: async (value) => { request = value; return { ok: true, provider: 'local', response: '{}' }; } } });
+  await adapter.generate({ messages: [{ role: 'user', content: 'write' }], format: schema });
+  assert.equal(request.format, schema);
+});
+
 test('MODEL4 messages are forwarded unchanged', async () => {
   let request;
   const messages = [{ role: 'system', content: 'bounded context' }, { role: 'user', content: 'inspect' }];

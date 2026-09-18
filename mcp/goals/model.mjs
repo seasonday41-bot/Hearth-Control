@@ -219,7 +219,9 @@ export const validateGoal = (goal) => {
   const rawSteps = Array.isArray(goal.steps) ? goal.steps : [];
   const steps = rawSteps.map(validateStep);
 
-  const currentStepId = typeof goal.currentStepId === 'string' && goal.currentStepId ? goal.currentStepId : (steps[0]?.id || null);
+  const currentStepId = status === 'completed'
+    ? null
+    : (typeof goal.currentStepId === 'string' && goal.currentStepId ? goal.currentStepId : (steps[0]?.id || null));
 
   const checkpoints = Array.isArray(goal.checkpoints) ? goal.checkpoints.map(validateGoalCheckpoint) : [];
   const xApproval = validateXApproval(goal.xApproval);
@@ -361,7 +363,7 @@ export const validateGoalCheckpoint = (cp) => {
 
 export const REVIEW_ITEM_STATUSES = Object.freeze(['needs_review', 'failed']);
 export const REVIEW_ITEM_LIFECYCLES = Object.freeze(['open', 'acknowledged', 'resolved', 'superseded']);
-export const REVIEW_ITEM_RESOLUTIONS = Object.freeze(['accepted']);
+export const REVIEW_ITEM_RESOLUTIONS = Object.freeze(['accepted', 'rejected']);
 
 /**
  * Creates a sanitized Review Queue item: a durable record that a step's

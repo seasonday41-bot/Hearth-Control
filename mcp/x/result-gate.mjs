@@ -70,6 +70,7 @@ const SAFETY_BOUNDARY_CODES = Object.freeze(new Set(['PROTECTED_PATH', 'SYMLINK_
 // x-result-v1's reason_code taxonomy stays stable even if Phase 5B/6 ever
 // add or rename an underlying code.
 const KNOWN_FAILED_EXECUTION_CODES = Object.freeze(new Set([
+  'PERMISSION_DENIED',
   'PATH_REJECTED',
   'INVALID_SCOPE',
   'WRITE_FAILED',

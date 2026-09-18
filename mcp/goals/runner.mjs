@@ -101,6 +101,21 @@ export class GoalRunner {
     // review-queue-sync.mjs) is wired through -- GoalRunner itself knows
     // nothing about Supabase/remote sync.
     this.onReviewItemPersisted = options?.onReviewItemPersisted || null;
+    this.onGoalPersisted = options?.onGoalPersisted || null;
+
+    const rawSaveGoal = this.storage.saveGoal.bind(this.storage);
+    this.storage.saveGoal = (goal) => {
+      const saved = rawSaveGoal(goal);
+      if (typeof this.onGoalPersisted === 'function') {
+        try {
+          this.onGoalPersisted(saved);
+        } catch (err) {
+          console.warn('[GoalRunner] onGoalPersisted callback failed:', err.message);
+        }
+      }
+      return saved;
+    };
+
     /** @type {string | null} */
     this.activeGoalId = null;
     /** @type {Set<string>} */
@@ -989,6 +1004,7 @@ export class GoalRunner {
     goal.status = 'completed';
     goal.finishedAt = now;
     goal.updatedAt = now;
+    goal.currentStepId = null;
 
     if (this.activeGoalId === goalId) {
       this.activeGoalId = null;
@@ -1176,17 +1192,16 @@ export class GoalRunner {
   /**
    * Operation 12: resolve_review
    * Resolves a Review Queue item for a step whose terminal X outcome was NEEDS_REVIEW.
-   * In Slice 1, only action: 'accept' on status: 'needs_review' is supported.
-   * Accepting a NEEDS_REVIEW item marks the step completed, creates a checkpoint,
-   * and makes subsequent authored steps eligible.
+   * Supports action: 'accept' (marks step completed, creates checkpoint, unblocks next steps)
+   * or action: 'reject' (marks step and Goal as error, unblocks review without retrying or continuing).
    */
   async resolve_review(goalId, reviewItemId, options = {}) {
     if (!goalId || typeof goalId !== 'string') throw new Error('goalId is required');
     if (!reviewItemId || typeof reviewItemId !== 'string') throw new Error('reviewItemId is required');
 
     const action = options.action || 'accept';
-    if (action !== 'accept') {
-      throw new Error(`Cannot resolve review with action '${action}'. Slice 1 only supports action: 'accept' for needs_review items.`);
+    if (action !== 'accept' && action !== 'reject') {
+      throw new Error(`Cannot resolve review with action '${action}'. Slice 1 only supports action: 'accept' or 'reject' for needs_review items.`);
     }
 
     const goal = this.storage.getGoal(goalId);
@@ -1195,9 +1210,11 @@ export class GoalRunner {
     const item = (goal.reviewQueue || []).find((it) => it.id === reviewItemId || it.idempotencyKey === reviewItemId);
     if (!item) throw new Error(`Review queue item '${reviewItemId}' not found in goal '${goalId}'`);
 
+    const expectedResolution = action === 'reject' ? 'rejected' : 'accepted';
+
     // Double resolve idempotency
     if (item.lifecycle === 'resolved') {
-      if (item.resolution === 'accepted') {
+      if (item.resolution === expectedResolution) {
         return { goal, item, alreadyResolved: true };
       }
       throw new Error(`Review item '${reviewItemId}' is already resolved with conflicting resolution '${item.resolution}'`);
@@ -1219,45 +1236,72 @@ export class GoalRunner {
 
     const now = new Date().toISOString();
     item.lifecycle = 'resolved';
-    item.resolution = 'accepted';
+    item.resolution = expectedResolution;
     item.resolvedAt = now;
     if (options.note) item.note = redactSecrets(options.note).slice(0, 2000);
     item.updatedAt = now;
 
-    step.status = 'completed';
-    step.finishedAt = now;
-
-    const completedCount = goal.steps.filter((s) => s.status === 'completed').length;
-    const nextStepObj = goal.steps.slice(stepIndex + 1).find((s) => s.status === 'pending');
-
-    this.checkpoint_goal(goal.id, step.id, {
-      summary: `Review resolved: step '${step.title}' accepted by supervisor${options.note ? ': ' + redactSecrets(options.note) : ''}`,
-      completedSteps: completedCount,
-      evidence: step.evidence,
-      nextStep: nextStepObj ? nextStepObj.id : null,
-      route: step.route,
-    }, goal);
-
-    if (nextStepObj) {
-      goal.currentStepId = nextStepObj.id;
-      goal.status = 'ready';
-    } else {
-      const requiredIncomplete = goal.steps.filter((s) => s.required && s.status !== 'completed');
-      if (requiredIncomplete.length === 0) {
-        goal.status = 'completed';
-        goal.finishedAt = now;
-        goal.currentStepId = null;
+    if (action === 'reject') {
+      step.status = 'error';
+      step.finishedAt = now;
+      if (!step.result && options.note) {
+        step.result = redactSecrets(options.note).slice(0, 2000);
       }
+
+      const completedCount = goal.steps.filter((s) => s.status === 'completed').length;
+      this.checkpoint_goal(goal.id, step.id, {
+        summary: `Review resolved: step '${step.title}' rejected by supervisor${options.note ? ': ' + redactSecrets(options.note) : ''}`,
+        completedSteps: completedCount,
+        evidence: step.evidence,
+        nextStep: null,
+        route: step.route,
+      }, goal);
+
+      goal.status = 'error';
+      goal.error = `Review resolved: step '${step.title}' rejected by supervisor${options.note ? ': ' + redactSecrets(options.note) : ''}`;
+      goal.finishedAt = now;
+      goal.updatedAt = now;
+
+      if (this.activeGoalId === goal.id) {
+        this.activeGoalId = null;
+      }
+    } else {
+      step.status = 'completed';
+      step.finishedAt = now;
+
+      const completedCount = goal.steps.filter((s) => s.status === 'completed').length;
+      const nextStepObj = goal.steps.slice(stepIndex + 1).find((s) => s.status === 'pending');
+
+      this.checkpoint_goal(goal.id, step.id, {
+        summary: `Review resolved: step '${step.title}' accepted by supervisor${options.note ? ': ' + redactSecrets(options.note) : ''}`,
+        completedSteps: completedCount,
+        evidence: step.evidence,
+        nextStep: nextStepObj ? nextStepObj.id : null,
+        route: step.route,
+      }, goal);
+
+      if (nextStepObj) {
+        goal.currentStepId = nextStepObj.id;
+        goal.status = 'ready';
+      } else {
+        const requiredIncomplete = goal.steps.filter((s) => s.required && s.status !== 'completed');
+        if (requiredIncomplete.length === 0) {
+          goal.status = 'completed';
+          goal.finishedAt = now;
+          goal.currentStepId = null;
+        }
+      }
+
+      goal.updatedAt = now;
     }
 
-    goal.updatedAt = now;
     this.storage.saveGoal(goal);
 
     if (this.onReviewItemPersisted) {
       try { this.onReviewItemPersisted(item, goal); } catch {}
     }
 
-    if (options.autoRun && nextStepObj) {
+    if (action === 'accept' && options.autoRun && nextStepObj) {
       return this.run_goal(goal.id, options);
     }
 

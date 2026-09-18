@@ -111,7 +111,10 @@ test('A. Straight success: safe edit + passing required validation -> COMPLETED 
 
   const { task, repairOutcome, gateResult, xResult } = await runPipeline(
     root,
-    { validation: { required: ['node --test scripts/test-pass.mjs'], optional: [] } },
+    {
+      allowed_tools: ['repo_read', 'repo_edit'],
+      validation: { required: ['node --test scripts/test-pass.mjs'], optional: [] },
+    },
     adapter,
   );
 
@@ -158,7 +161,10 @@ test('B. Repair success: round 2 sees the round-1 file, final validation passes 
 
   const { repairOutcome, gateResult, xResult } = await runPipeline(
     root,
-    { validation: { required: ['node --test scripts/test-check-newfile.mjs'], optional: [] } },
+    {
+      allowed_tools: ['repo_read', 'repo_edit'],
+      validation: { required: ['node --test scripts/test-check-newfile.mjs'], optional: [] },
+    },
     adapter,
   );
 
@@ -201,7 +207,10 @@ test('C. Safety boundary: PROTECTED_PATH (src/.env) is refused pre-mutation -> N
 
   const { repairOutcome, gateResult, xResult } = await runPipeline(
     root,
-    { validation: { required: ['node --test scripts/test-pass.mjs'], optional: [] } },
+    {
+      allowed_tools: ['repo_read', 'repo_edit'],
+      validation: { required: ['node --test scripts/test-pass.mjs'], optional: [] },
+    },
     adapter,
   );
 
@@ -236,7 +245,10 @@ test('D. Structural failure: out-of-scope write (PATH_REJECTED) -> FAILED/struct
 
   const { repairOutcome, gateResult, xResult } = await runPipeline(
     root,
-    { validation: { required: ['node --test scripts/test-pass.mjs'], optional: [] } },
+    {
+      allowed_tools: ['repo_read', 'repo_edit'],
+      validation: { required: ['node --test scripts/test-pass.mjs'], optional: [] },
+    },
     adapter,
   );
 
@@ -271,6 +283,7 @@ test('E. Secret containment: a fake secret in known_evidence never reaches the m
   const { task, repairOutcome, gateResult, xResult } = await runPipeline(
     root,
     {
+      allowed_tools: ['repo_read', 'repo_edit'],
       known_evidence: [`leaked in logs: ${fakeSecret}`],
       validation: { required: ['node --test scripts/test-pass.mjs'], optional: [] },
     },
@@ -295,4 +308,45 @@ test('E. Secret containment: a fake secret in known_evidence never reaches the m
   // into x-result-v1: it is absent from the entire serialized result.
   const serialized = JSON.stringify(xResult);
   assert.ok(!serialized.includes(fakeSecret));
+});
+
+test('F. Read-only task: repo_read only -> empty actions -> COMPLETED without writes', async () => {
+  const root = tmpWorkspace();
+  writeFile(root, 'scripts/test-pass.mjs', "import test from 'node:test';\ntest('ok', () => {});\n");
+  const adapter = queueAdapter([{ actions: [] }]);
+
+  const { task, repairOutcome, gateResult, xResult } = await runPipeline(
+    root,
+    {
+      allowed_tools: ['repo_read'],
+      validation: { required: ['node --test scripts/test-pass.mjs'], optional: [] },
+    },
+    adapter,
+  );
+
+  assert.equal(repairOutcome.status, 'validated');
+  assert.equal(gateResult.gate_status, 'COMPLETED');
+  assert.deepEqual([...xResult.files_changed], []);
+});
+
+test('G. Read-only task: unauthorized create attempt fails closed with PERMISSION_DENIED', async () => {
+  const root = tmpWorkspace();
+  writeFile(root, 'scripts/test-pass.mjs', "import test from 'node:test';\ntest('ok', () => {});\n");
+  const adapter = queueAdapter([{ actions: [{ type: 'create', path: 'src/bad.js', content: 'no\n' }] }]);
+
+  const { repairOutcome, gateResult, xResult } = await runPipeline(
+    root,
+    {
+      allowed_tools: ['repo_read'],
+      validation: { required: ['node --test scripts/test-pass.mjs'], optional: [] },
+    },
+    adapter,
+  );
+
+  assert.equal(fs.existsSync(path.join(root, 'src/bad.js')), false);
+  assert.equal(repairOutcome.status, 'escalation_required');
+  assert.equal(gateResult.gate_status, 'FAILED');
+  assert.equal(gateResult.reason_code, 'structural_execution_failure');
+  assert.equal(gateResult.evidence.blocker.code, 'PERMISSION_DENIED');
+  assert.equal(xResult.gate_status, 'FAILED');
 });

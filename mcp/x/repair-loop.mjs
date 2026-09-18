@@ -66,6 +66,7 @@ export const FAILURE_CLASSIFICATION = Object.freeze({
   UNREADABLE_TARGET: 'escalate',
   WRITE_FAILED: 'escalate',
   INVALID_SCOPE: 'escalate',
+  PERMISSION_DENIED: 'escalate',
   context_load_failed: 'escalate',
   schema_invalid: 'escalate',
   unsupported_action: 'escalate',

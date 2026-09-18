@@ -541,12 +541,12 @@ export const registerWorkspaceTools = (server, options) => {
   });
 
   server.registerTool('review_queue_resolve', {
-    title: 'Resolve durable Goal Review Queue item (Accept NEEDS_REVIEW)',
-    description: 'Resolves a durable Review Queue item with status needs_review by accepting the result (lifecycle: open/acknowledged -> resolved, resolution: accepted). Marks the blocked step completed, records a checkpoint, and makes subsequent authored steps eligible. Zero X dispatch directly. Rejects status=failed. Pass goal_id and review_item_id, plus optional note.',
+    title: 'Resolve durable Goal Review Queue item (Accept or Reject NEEDS_REVIEW)',
+    description: 'Resolves a durable Review Queue item with status needs_review by either accepting (action="accept") or rejecting (action="reject") the result. Accepting marks the blocked step completed, records a checkpoint, and makes subsequent authored steps eligible. Rejecting marks the step and Goal as error without retrying, dispatching X, or continuing subsequent steps. Zero X dispatch directly. Rejects status=failed. Pass goal_id and review_item_id, plus optional action ("accept" or "reject", default "accept") and optional note.',
     inputSchema: {
       goal_id: z.string().min(1).max(200),
       review_item_id: z.string().min(1).max(300),
-      action: z.enum(['accept']).default('accept'),
+      action: z.enum(['accept', 'reject']).default('accept'),
       note: z.string().min(1).max(2000).optional(),
     },
   }, async ({ goal_id, review_item_id, action = 'accept', note } = {}) => {

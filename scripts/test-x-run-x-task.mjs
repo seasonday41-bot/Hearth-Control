@@ -35,7 +35,7 @@ afterEach(() => {
   }
 });
 
-function taskFor(item, taskId = 'task-x-1') {
+function taskFor(item, taskId = 'task-x-1', overrides = {}) {
   return {
     version: X_TASK_VERSION, task_id: taskId, parent_task_id: null,
     revision: 1, attempt: 1, based_on_result_id: null,
@@ -53,6 +53,7 @@ function taskFor(item, taskId = 'task-x-1') {
     repair_budget: { initial_attempts: 1, max_repairs: 2, max_total_rounds: 3 },
     timing: { estimated_minutes: 5, first_check_after_minutes: 1, soft_deadline_minutes: 3, hard_timeout_minutes: 10 },
     commit_policy: { mode: 'never' },
+    ...overrides,
   };
 }
 
@@ -113,7 +114,7 @@ for (const [name, action, status, gateStatus] of [
 ]) {
   test(`${name} persists real X gate result through a fenced terminal write`, async () => {
     const item = fixture();
-    const before = taskFor(item);
+    const before = taskFor(item, 'task-x-1', { allowed_tools: ['repo_read', 'repo_edit'] });
     const task = structuredClone(before);
     const admitted = await start(item, task, model([action]), { runId: `run-${name}` });
     assert.equal(admitted.accepted, true);
