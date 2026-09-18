@@ -660,6 +660,126 @@ await test('packaged module resolution and dynamic import are independent of pro
   }
 });
 
+// ── 22. Final onProgress on successful completion ──────────────────────────
+await test('run_goal: final onProgress receives completed goal with currentStepId null and finishedAt set', async () => {
+  const storage = new GoalStorage({ storagePath });
+  const runner = new GoalRunner({ storage });
+
+  const goal = await runner.create_goal({
+    title: 'Final Progress Goal',
+    objective: 'Verify terminal onProgress fires',
+    workspace: testWorkspace,
+    steps: [
+      { id: 's1', title: 'Step 1', description: '1', required: true },
+      { id: 's2', title: 'Step 2', description: '2', required: true },
+    ],
+  });
+
+  const progressEvents = [];
+  const result = await runner.run_goal(goal.id, {
+    onProgress: (g) => progressEvents.push({ status: g.status, currentStepId: g.currentStepId, finishedAt: g.finishedAt }),
+    executeStepFn: async (_g, step) => ({ status: 'completed', result: `${step.id} done` }),
+  });
+
+  assert.equal(result.status, 'completed');
+  const finalEvent = progressEvents[progressEvents.length - 1];
+  assert.equal(finalEvent.status, 'completed', 'Last onProgress call must carry the terminal completed status');
+  assert.equal(finalEvent.currentStepId, null, 'Final onProgress goal must have currentStepId cleared');
+  assert.notEqual(finalEvent.finishedAt, null, 'Final onProgress goal must have finishedAt set');
+
+  // Durable state must already reflect completion by the time onProgress fires --
+  // enforced here by re-reading storage from inside the callback itself.
+  let sawCompletedDuringCallback = false;
+  await runner.run_goal(
+    (await runner.create_goal({
+      title: 'Order Check Goal',
+      objective: 'Durable save precedes notification',
+      workspace: testWorkspace,
+      steps: [{ id: 'only', title: 'Only step', description: '1', required: true }],
+    })).id,
+    {
+      onProgress: (g) => {
+        if (g.status === 'completed') {
+          const persisted = storage.getGoal(g.id);
+          sawCompletedDuringCallback = persisted.status === 'completed';
+        }
+      },
+      executeStepFn: async () => ({ status: 'completed', result: 'done' }),
+    }
+  );
+  assert.equal(sawCompletedDuringCallback, true, 'Storage must already show completed when onProgress fires');
+});
+
+// ── 23. Final onProgress on failure ─────────────────────────────────────────
+await test('run_goal: final onProgress receives failed goal when a required step errors', async () => {
+  const storage = new GoalStorage({ storagePath });
+  const runner = new GoalRunner({ storage });
+
+  const goal = await runner.create_goal({
+    title: 'Final Progress Failure Goal',
+    objective: 'Verify terminal onProgress fires on failure',
+    workspace: testWorkspace,
+    steps: [
+      { id: 's1', title: 'Failing required step', description: 'Breaks', required: true },
+      { id: 's2', title: 'Subsequent step', description: 'Should not run', required: true },
+    ],
+  });
+
+  const progressEvents = [];
+  const result = await runner.run_goal(goal.id, {
+    onProgress: (g) => progressEvents.push({ status: g.status, error: g.error, finishedAt: g.finishedAt }),
+    executeStepFn: async () => ({ status: 'error', error: 'Build failed with syntax error' }),
+  });
+
+  assert.equal(result.status, 'error');
+  const finalEvent = progressEvents[progressEvents.length - 1];
+  assert.equal(finalEvent.status, 'error', 'Last onProgress call must carry the terminal failed status');
+  assert.match(finalEvent.error, /Build failed with syntax error/);
+  assert.notEqual(finalEvent.finishedAt, null, 'Final failed onProgress goal must have finishedAt set');
+
+  const persisted = storage.getGoal(goal.id);
+  assert.equal(persisted.status, 'error', 'Durable goal must already be failed when onProgress fires');
+});
+
+// ── 24. resume_goal delivers final completed onProgress ─────────────────────
+await test('resume_goal: final onProgress receives completed goal after resuming a waiting step', async () => {
+  const storage = new GoalStorage({ storagePath });
+  const runner = new GoalRunner({ storage });
+
+  const goal = await runner.create_goal({
+    title: 'Resume Progress Goal',
+    objective: 'Verify resume_goal delivers terminal onProgress',
+    workspace: testWorkspace,
+    steps: [
+      { id: 's1', title: 'Automated step', description: 'Passes', required: true },
+      { id: 's2', title: 'Review step', description: 'Requires review', required: true },
+    ],
+  });
+
+  let s2ShouldWait = true;
+  const executeStepFn = async (_g, step) => {
+    if (step.id === 's1') return { status: 'completed', result: 'Step 1 done' };
+    if (s2ShouldWait) return { status: 'waiting', result: 'Waiting on user approval' };
+    return { status: 'completed', result: 'Step 2 done' };
+  };
+
+  const waitingResult = await runner.run_goal(goal.id, { executeStepFn });
+  assert.equal(waitingResult.status, 'waiting');
+
+  s2ShouldWait = false;
+  const progressEvents = [];
+  const resumed = await runner.resume_goal(goal.id, {
+    onProgress: (g) => progressEvents.push({ status: g.status, currentStepId: g.currentStepId, finishedAt: g.finishedAt }),
+    executeStepFn,
+  });
+
+  assert.equal(resumed.status, 'completed');
+  const finalEvent = progressEvents[progressEvents.length - 1];
+  assert.equal(finalEvent.status, 'completed', 'resume_goal must deliver a final completed onProgress event');
+  assert.equal(finalEvent.currentStepId, null);
+  assert.notEqual(finalEvent.finishedAt, null);
+});
+
 // Cleanup temp fixture
 await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
 

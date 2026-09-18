@@ -485,7 +485,9 @@ export class GoalRunner {
                 try { this.onReviewItemPersisted(errorReviewItem, goal); }
                 catch (err) { console.error('[GoalRunner] onReviewItemPersisted callback failed:', err); }
               }
-              return this.fail_goal(goal.id, `Required step '${step.title}' failed: ${step.result}`);
+              const failedGoal = this.fail_goal(goal.id, `Required step '${step.title}' failed: ${step.result}`);
+              if (options.onProgress) options.onProgress(failedGoal);
+              return failedGoal;
             }
             // Optional step failed, create checkpoint and proceed
             this.storage.saveGoal(goal);
@@ -518,7 +520,9 @@ export class GoalRunner {
               try { this.onReviewItemPersisted(catchReviewItem, goal); }
               catch (callbackErr) { console.error('[GoalRunner] onReviewItemPersisted callback failed:', callbackErr); }
             }
-            return this.fail_goal(goal.id, `Required step '${step.title}' threw error: ${err.message}`);
+            const failedGoal = this.fail_goal(goal.id, `Required step '${step.title}' threw error: ${err.message}`);
+            if (options.onProgress) options.onProgress(failedGoal);
+            return failedGoal;
           }
           this.storage.saveGoal(goal);
           stepIndex++;
@@ -526,7 +530,9 @@ export class GoalRunner {
       }
 
       // All steps processed: verify completion contract
-      return this.complete_goal(goal.id);
+      const completedGoal = this.complete_goal(goal.id);
+      if (options.onProgress) options.onProgress(completedGoal);
+      return completedGoal;
     } finally {
       if (this.activeGoalId === goalId) {
         this.activeGoalId = null;

@@ -393,10 +393,14 @@ await test('15. Resume after INTERRUPTED dispatches with :exec:2 requestId', asy
   const waitingGoal = await runner.run_goal(goal.id);
   assert.equal(waitingGoal.steps[0].executionGeneration, 2);
   xExecutor.statuses.set(gen2Id, { found: true, queue_status: 'terminal', terminal_status: 'completed', result: 'done' });
-  const completed = await runner.resume_goal(goal.id);
+  const progressEvents = [];
+  const completed = await runner.resume_goal(goal.id, {
+    onProgress: (g) => progressEvents.push(g.status),
+  });
   assert.equal(completed.status, 'completed');
   const gen2Dispatches = xExecutor.dispatchLog.filter((d) => d.requestId === gen2Id);
   assert.equal(gen2Dispatches.length, 1, 'gen2 requestId dispatched exactly once');
+  assert.equal(progressEvents[progressEvents.length - 1], 'completed', 'resume_goal must emit a final completed onProgress event');
 });
 
 // 16. Crash/replay: same requestId coalesces
