@@ -11,15 +11,15 @@ This section is the project handoff/source of truth for any new ChatGPT/Codex/AI
 ## CURRENT STATUS
 
 ```text
-PHASE = P3_CONNECTION_REGISTRY_SECURE_CREDENTIAL_STORE — IMPLEMENTED / VALIDATED ON FEATURE BRANCH
-CURRENT_BRANCH = feature/p3-connection-registry-v1
-BASELINE_MAIN = 4f261b2f4ba51722ea18968e22cdde631c28bed0
-P2_VALIDATED_TAG = hearth-p2-validated-0.4.7-20260919
-STATUS = P3_IMPLEMENTED_VALIDATED_AWAITING_CHECKPOINT
-BLOCKED_BY = no technical blocker; P3 checkpoint commit/tag/merge not yet performed
-LAST_COMPLETED_STEP = P3 Connection Registry + Secure Credential Store foundation implemented and regression-validated without modifying frozen X/P2 behavior
-NEXT_PHASE = P3_FINALIZE_CHECKPOINT
-NEXT_EXACT_ACTION = review final git diff/status, then create the P3 checkpoint commit/tag and merge to main only when explicitly authorized; do not start P4 before P3 is checkpointed
+PHASE = P3_CONNECTION_REGISTRY_SECURE_CREDENTIAL_STORE — COMPLETE / VALIDATED / FROZEN
+CURRENT_BRANCH = main
+VALIDATED_MAIN_COMMIT = 474a4f6f3994d13136d467bf6105a2a1486aad6b
+VALIDATED_TAG = hearth-p3-validated-0.4.7-20260919
+STATUS = P3_COMPLETE_VALIDATED
+BLOCKED_BY = none
+LAST_COMPLETED_STEP = P3 Connection Registry + Secure Credential Store validated on main, tagged, and frozen
+NEXT_PHASE = P4_GITHUB_MULTI_CONNECTION
+NEXT_EXACT_ACTION = audit current GitHub integration/auth surfaces and design the smallest P4 implementation for at least two simultaneous GitHub connections using the P3 Connection Registry without changing frozen X/P2/P3 behavior
 DO_NOT_MODIFY_FROZEN = X v0.1 or P2 implementation unless an actual regression, security issue, or explicitly approved new phase requires it
 ```
 
@@ -49,17 +49,16 @@ GitHub / Supabase / Vercel / AI providers
 
 ### Current active branch — validated baseline
 
-P3 is currently implemented on a feature branch created directly from the latest validated P2 main checkpoint:
+`main` is the canonical branch and now contains the validated P3 checkpoint:
 
 ```text
-ACTIVE_BRANCH = feature/p3-connection-registry-v1
-BASELINE_MAIN = 4f261b2f4ba51722ea18968e22cdde631c28bed0
+P3_VALIDATED_IMPLEMENTATION_COMMIT = 474a4f6f3994d13136d467bf6105a2a1486aad6b
+P3_TAG = hearth-p3-validated-0.4.7-20260919
+P3_FINAL_GATE = P3_MAIN_FINAL_GATE_PASS
 P2_TAG = hearth-p2-validated-0.4.7-20260919
-P2_VERSION = 0.4.7
-P2_FINAL_GATE = P2_MAIN_FINAL_GATE_PASS
 ```
 
-P0, P1, X v0.1, and P2 histories are preserved in Git. P2 implementation remains frozen. P3 has not yet been committed, tagged, or merged, so `main` remains the authoritative released/validated baseline until that explicit checkpoint step occurs.
+P0, P1, X v0.1, P2, and P3 histories are preserved in Git. X/P2/P3 are frozen unless a real regression/security issue or an explicitly approved later phase requires a targeted change.
 
 ---
 
@@ -72,7 +71,7 @@ This checklist is the handoff ledger for every future chat/agent. **A phase is n
 - [x] **P0 — Validate and merge Hearth Skill v1**
 - [x] **P1 — Wire Skill Registry into X**
 - [x] **P2 — Remote One-Click Updater** — VALIDATED / FROZEN
-- [ ] **P3 — Connection Registry + Secure Credential Store** — IMPLEMENTED / VALIDATED ON FEATURE BRANCH; CHECKPOINT/MERGE PENDING
+- [x] **P3 — Connection Registry + Secure Credential Store** — VALIDATED / FROZEN
 - [ ] **P4 — GitHub multi-connection (2+)**
 - [ ] **P5 — Supabase multi-project (2+)**
 - [ ] **P6 — Vercel connection**
@@ -146,15 +145,16 @@ This checklist is the handoff ledger for every future chat/agent. **A phase is n
 - [x] X regression group — 616/617 PASS; sole failure `EVT12` is a pre-existing baseline source-regex mismatch (`main` already used `async (message) =>` at `4f261b2`; test regex accepts only non-async shape), not caused by P3
 - [x] `npm run build` — PASS; generated build metadata restored to stable `0.4.7-20260919154331-2d91b9`
 - [x] Final `git diff --check` + final scoped diff/status review — PASS; untracked P3 text files also checked for trailing whitespace/final newline
-- [ ] Create P3 checkpoint commit/tag
-- [ ] Merge validated P3 branch into `main`
+- [x] Create P3 checkpoint commit/tag — `474a4f6f3994d13136d467bf6105a2a1486aad6b` / `hearth-p3-validated-0.4.7-20260919`
+- [x] Merge validated P3 branch into `main` — fast-forward
 
-### P3 validation evidence — 2026-09-19 (feature branch, pre-checkpoint)
+### P3 validation evidence — 2026-09-19 (main Final Gate)
 
 ```text
-BRANCH = feature/p3-connection-registry-v1
-BASELINE_MAIN = 4f261b2f4ba51722ea18968e22cdde631c28bed0
-BASELINE_TAG = hearth-p2-validated-0.4.7-20260919
+BRANCH = main
+VALIDATED_MAIN_COMMIT = 474a4f6f3994d13136d467bf6105a2a1486aad6b
+TAG = hearth-p3-validated-0.4.7-20260919
+FINAL_GATE = P3_MAIN_FINAL_GATE_PASS
 
 npm run test:connections
   PASS = 18/18
@@ -293,6 +293,19 @@ NEXT_PHASE = P3_CONNECTION_REGISTRY_SECURE_CREDENTIAL_STORE
 NEXT_EXACT_ACTION = audit current Hearth connection/credential architecture and design the smallest P3 foundation without modifying frozen X/P2 behavior
 ```
 
+```text
+PHASE_COMPLETED = P3_CONNECTION_REGISTRY_SECURE_CREDENTIAL_STORE
+STATUS = PASS / VALIDATED / FROZEN
+COMPLETED_AT = 2026-09-19
+VALIDATED_MAIN_COMMIT = 474a4f6f3994d13136d467bf6105a2a1486aad6b
+TAG = hearth-p3-validated-0.4.7-20260919
+FINAL_GATE = P3_MAIN_FINAL_GATE_PASS
+VALIDATION = connections 18/18; Project X auth 13/13; Bridge 46/46; Electron/server 98/98; Goal/Review/Remote Goal all executed suites PASS; P2 updater regression 149/149; production build + TypeScript PASS; git diff --check PASS; X regression 616/617 with EVT12 confirmed pre-existing baseline source-regex mismatch
+KNOWN_LIMITATIONS = scripts/test-x-terminal-event.mjs EVT12 remains a pre-existing baseline test-shape mismatch; production handler already used async (message) => before P3
+NEXT_PHASE = P4_GITHUB_MULTI_CONNECTION
+NEXT_EXACT_ACTION = audit GitHub auth/integration surfaces and design the smallest P4 multi-connection implementation on top of the P3 registry
+```
+
 ### Frozen baselines
 
 ```text
@@ -300,10 +313,13 @@ X v0.1 = FROZEN / VALIDATED
 X_TAG = hearth-x-v0.1-validated-20260918
 
 P2 Remote One-Click Updater V1 = FROZEN / VALIDATED
-P2_TAG = hearth-p2-validated-20260919
+P2_TAG = hearth-p2-validated-0.4.7-20260919
+
+P3 Connection Registry + Secure Credential Store V1 = FROZEN / VALIDATED
+P3_TAG = hearth-p3-validated-0.4.7-20260919
 ```
 
-Do not modify frozen X/P2 implementation unless an actual regression, security issue, or explicitly approved new phase requires it.
+Do not modify frozen X/P2/P3 implementation unless an actual regression, security issue, or explicitly approved new phase requires it.
 
 ### Secure MCP / Direct Coder status
 
@@ -476,11 +492,14 @@ TAG = hearth-p2-validated-20260919
 FINAL_GATE = P2_MAIN_FINAL_GATE_PASS
 ```
 
-### P3 — Hearth Connection Registry + Secure Credential Store — IMPLEMENTED / VALIDATED ON FEATURE BRANCH
+### P3 — Hearth Connection Registry + Secure Credential Store — COMPLETE / VALIDATED / FROZEN
 
 ```text
-NEXT_PHASE = P3_FINALIZE_CHECKPOINT
-NEXT_EXACT_ACTION = Review final diff/status and checkpoint the validated P3 feature branch before beginning P4.
+VALIDATED_MAIN_COMMIT = 474a4f6f3994d13136d467bf6105a2a1486aad6b
+TAG = hearth-p3-validated-0.4.7-20260919
+FINAL_GATE = P3_MAIN_FINAL_GATE_PASS
+NEXT_PHASE = P4_GITHUB_MULTI_CONNECTION
+NEXT_EXACT_ACTION = Audit current GitHub integration/auth surfaces and design the smallest P4 implementation for two simultaneous GitHub connections using the P3 registry.
 ```
 
 Connections belong to **Hearth**, not to X. Build one registry that future agents can reuse.
