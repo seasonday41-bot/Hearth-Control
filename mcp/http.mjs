@@ -94,6 +94,26 @@ const githubTransportFor = (response) => {
   };
 };
 
+const vercelTransportFor = (response) => {
+  const roundTrip = createRoundTripTransport(response);
+  return {
+    listProjects: ({ connection, teamId, limit }) =>
+      roundTrip('vercel_projects_list_request', { connection, teamId: teamId || null, limit }),
+    getProject: ({ connection, idOrName, teamId }) =>
+      roundTrip('vercel_project_get_request', { connection, idOrName, teamId: teamId || null }),
+    listDeployments: ({ connection, projectId, teamId, limit, target }) =>
+      roundTrip('vercel_deployments_list_request', {
+        connection,
+        projectId: projectId || null,
+        teamId: teamId || null,
+        limit,
+        target: target || null,
+      }),
+    getDeployment: ({ connection, idOrUrl, teamId }) =>
+      roundTrip('vercel_deployment_get_request', { connection, idOrUrl, teamId: teamId || null }),
+  };
+};
+
 const reviewQueueTransportFor = (response) => {
   const roundTrip = createRoundTripTransport(response);
   return {
@@ -186,6 +206,12 @@ process.on('message', (message) => {
       message.ok ? message.result : { ok: false, error: message.error || 'github_request_failed' },
     );
   }
+  if (typeof message?.type === 'string' && message.type.startsWith('vercel_') && message.type.endsWith('_ack')) {
+    queueReplies.get(message.transportId)?.finish(
+      null,
+      message.ok ? message.result : { ok: false, error: message.error || 'vercel_request_failed' },
+    );
+  }
 });
 process.on('disconnect', () => {
   for (const pending of queueReplies.values()) pending.finish(queueError('transport_unavailable'));
@@ -203,6 +229,7 @@ app.post('/mcp', async (request, response) => {
     queueIngressTransport: queueIngressTransportFor(response),
     reviewQueueTransport: reviewQueueTransportFor(response),
     githubTransport: githubTransportFor(response),
+    vercelTransport: vercelTransportFor(response),
   });
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   response.on('close', () => {

@@ -17,6 +17,8 @@ const { ConnectionService } = require('./connections/connection-service.cjs');
 const { GitHubClient } = require('./github/github-client.cjs');
 const { GitHubConnectionService } = require('./github/github-connection-service.cjs');
 const { SupabaseProjectService } = require('./supabase/supabase-project-service.cjs');
+const { VercelClient } = require('./vercel/vercel-client.cjs');
+const { VercelConnectionService } = require('./vercel/vercel-connection-service.cjs');
 
 const importFromHere = (relativePath) => import(pathToFileURL(path.join(__dirname, relativePath)).href);
 let buildMetadata;
@@ -37,7 +39,7 @@ const defaults = {
   // X's own publishable key (see publicTasksClientInstance below).
   publicTasksSupabaseUrl: 'https://pavrugcmxdgdxrjinzlm.supabase.co',
   publicTasksSupabaseAnonKey: '',
-  permissions: { Files: 'Allow', Git: 'Allow', Terminal: 'Ask', Browser: 'Blocked', Antigravity: 'Ask' },
+  permissions: { Files: 'Allow', Git: 'Allow', Terminal: 'Ask', Browser: 'Blocked', Antigravity: 'Ask', Vercel: 'Ask' },
 };
 let mainWindow;
 let serverProcess;
@@ -49,6 +51,7 @@ let credentialStore = null;
 let connectionService = null;
 let githubConnectionService = null;
 let supabaseProjectService = null;
+let vercelConnectionService = null;
 let jobManager = null;
 let xQueueCoordinator = null;
 let xQueueStore = null;
@@ -352,11 +355,16 @@ const initializeConnectionInfrastructure = async () => {
     registry: connectionRegistry,
     connectionService,
   });
+  vercelConnectionService = new VercelConnectionService({
+    registry: connectionRegistry,
+    connectionService,
+    vercelClient: new VercelClient(),
+  });
 
   // Keep startup health local/non-networked. Provider-specific remote health
   // runs only when connections:refresh is explicitly requested.
   for (const connection of connectionRegistry.list()) {
-    if (connection.provider !== 'github') connectionService.refreshHealth(connection.alias);
+    if (!['github', 'vercel'].includes(connection.provider)) connectionService.refreshHealth(connection.alias);
   }
 };
 
@@ -1169,6 +1177,59 @@ const startServer = async ({ workspace, port }) => {
         }
       }
     }
+    if ([
+      'vercel_projects_list_request',
+      'vercel_project_get_request',
+      'vercel_deployments_list_request',
+      'vercel_deployment_get_request',
+    ].includes(message?.type)) {
+      if (typeof message.transportId !== 'string' || !/^[0-9a-f-]{36}$/i.test(message.transportId)) return;
+      let result = null;
+      let ok = true;
+      let error = null;
+      try {
+        if (!vercelConnectionService) throw Object.assign(new Error('vercel_connection_service_unavailable'), { code: 'vercel_connection_service_unavailable' });
+        if (message.type === 'vercel_projects_list_request') {
+          result = await vercelConnectionService.listProjects(message.connection, {
+            teamId: message.teamId || null,
+            limit: message.limit,
+          });
+        } else if (message.type === 'vercel_project_get_request') {
+          result = await vercelConnectionService.getProject(message.connection, {
+            idOrName: message.idOrName,
+            teamId: message.teamId || null,
+          });
+        } else if (message.type === 'vercel_deployments_list_request') {
+          result = await vercelConnectionService.listDeployments(message.connection, {
+            projectId: message.projectId || null,
+            teamId: message.teamId || null,
+            limit: message.limit,
+            target: message.target || null,
+          });
+        } else if (message.type === 'vercel_deployment_get_request') {
+          result = await vercelConnectionService.getDeployment(message.connection, {
+            idOrUrl: message.idOrUrl,
+            teamId: message.teamId || null,
+          });
+        }
+      } catch (err) {
+        ok = false;
+        error = typeof err?.code === 'string' ? err.code : 'vercel_request_failed';
+      }
+      if (serverProcess === child) {
+        try {
+          child.send({
+            type: message.type.replace(/_request$/, '_ack'),
+            transportId: message.transportId,
+            ok,
+            result,
+            error,
+          });
+        } catch {
+          console.error('[Electron] Vercel request ack failed');
+        }
+      }
+    }
     if (message?.type === 'review_queue_list_request') {
       if (typeof message.transportId !== 'string' || !/^[0-9a-f-]{36}$/i.test(message.transportId)) return;
       // Read-only: calls the SAME live goalRunner.list_review_queue() the
@@ -1769,6 +1830,9 @@ app.whenReady().then(async () => {
       if (connection.provider === 'supabase' && supabaseProjectService) {
         return supabaseProjectService.publicSnapshot(connection.alias);
       }
+      if (connection.provider === 'vercel' && vercelConnectionService) {
+        return vercelConnectionService.publicSnapshot(connection);
+      }
       return connectionService.toPublic(connection);
     });
   };
@@ -1785,6 +1849,10 @@ app.whenReady().then(async () => {
       if (connection.provider === 'supabase') {
         if (!supabaseProjectService) throw new Error('supabase_project_service_unavailable');
         return supabaseProjectService.refreshHealth(connectionAlias);
+      }
+      if (connection.provider === 'vercel') {
+        if (!vercelConnectionService) throw new Error('vercel_connection_service_unavailable');
+        return vercelConnectionService.refresh(connectionAlias);
       }
       return connectionService.refreshHealth(connectionAlias);
     };
@@ -1803,6 +1871,15 @@ app.whenReady().then(async () => {
   ipcMain.handle('github:disconnect', (_event, alias) => {
     if (!githubConnectionService) throw new Error('github_connection_service_unavailable');
     return githubConnectionService.disconnect(alias);
+  });
+  ipcMain.handle('vercel:connect', async (_event, request) => {
+    if (!vercelConnectionService) throw new Error('vercel_connection_service_unavailable');
+    if (!request || typeof request !== 'object') throw new Error('vercel_connect_request_invalid');
+    return vercelConnectionService.connect(request.alias, request.token, { teamId: request.teamId || null });
+  });
+  ipcMain.handle('vercel:disconnect', (_event, alias) => {
+    if (!vercelConnectionService) throw new Error('vercel_connection_service_unavailable');
+    return vercelConnectionService.disconnect(alias);
   });
   ipcMain.handle('settings:save', async (_event, settings) => {
     settings = sanitizeRendererSettingsInput(settings);

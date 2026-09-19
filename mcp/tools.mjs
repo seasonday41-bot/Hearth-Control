@@ -28,6 +28,10 @@ export const toolNames = [
   'github_repository_get',
   'github_pull_requests_list',
   'github_pull_request_create',
+  'vercel_projects_list',
+  'vercel_project_get',
+  'vercel_deployments_list',
+  'vercel_deployment_get',
   'antigravity_status',
   'antigravity_start',
   'antigravity_task',
@@ -470,6 +474,89 @@ export const registerWorkspaceTools = (server, options) => {
       await requirePermission('Git', `Create GitHub PR in ${owner}/${repo} via ${connection}: ${head} -> ${base} · ${title}`);
       const result = await options.githubTransport.createPullRequest({ connection, owner, repo, title, head, base, body, draft });
       if (result?.ok === false) throw new Error(result.error || 'github_request_failed');
+      return text(JSON.stringify(result, null, 2));
+    } catch (error) { return failure(error); }
+  });
+
+  const vercelAlias = z.literal('vercel:main');
+  const vercelTeamId = z.string().regex(/^team_[A-Za-z0-9_-]{3,200}$/).optional();
+
+  server.registerTool('vercel_projects_list', {
+    title: 'List Vercel projects',
+    description: 'Read-only: lists Vercel projects through the explicit Hearth vercel:main connection. Never uses Vercel CLI/global auth and never returns credentials.',
+    inputSchema: {
+      connection: vercelAlias,
+      team_id: vercelTeamId,
+      limit: z.number().int().min(1).max(100).default(20),
+    },
+  }, async ({ connection, team_id, limit }) => {
+    if (!options.vercelTransport?.listProjects) return text(JSON.stringify({ projects: [], reason: 'transport_unavailable' }));
+    try {
+      await requirePermission('Vercel', `Read Vercel projects via ${connection}`);
+      const result = await options.vercelTransport.listProjects({ connection, teamId: team_id, limit });
+      if (result?.ok === false) throw new Error(result.error || 'vercel_request_failed');
+      return text(JSON.stringify(result, null, 2));
+    } catch (error) { return failure(error); }
+  });
+
+  server.registerTool('vercel_project_get', {
+    title: 'Get Vercel project',
+    description: 'Read-only: gets one Vercel project through the explicit Hearth vercel:main connection.',
+    inputSchema: {
+      connection: vercelAlias,
+      id_or_name: z.string().min(1).max(256).regex(/^[^\s/?#]+$/),
+      team_id: vercelTeamId,
+    },
+  }, async ({ connection, id_or_name, team_id }) => {
+    if (!options.vercelTransport?.getProject) return text(JSON.stringify({ project: null, reason: 'transport_unavailable' }));
+    try {
+      await requirePermission('Vercel', `Read Vercel project ${id_or_name} via ${connection}`);
+      const result = await options.vercelTransport.getProject({ connection, idOrName: id_or_name, teamId: team_id });
+      if (result?.ok === false) throw new Error(result.error || 'vercel_request_failed');
+      return text(JSON.stringify(result, null, 2));
+    } catch (error) { return failure(error); }
+  });
+
+  server.registerTool('vercel_deployments_list', {
+    title: 'List Vercel deployments',
+    description: 'Read-only: lists Vercel deployments through the explicit Hearth vercel:main connection. This tool cannot create, promote, rollback, or delete deployments.',
+    inputSchema: {
+      connection: vercelAlias,
+      project_id: z.string().min(1).max(256).regex(/^[^\s/?#]+$/).optional(),
+      team_id: vercelTeamId,
+      target: z.enum(['production', 'preview']).optional(),
+      limit: z.number().int().min(1).max(100).default(20),
+    },
+  }, async ({ connection, project_id, team_id, target, limit }) => {
+    if (!options.vercelTransport?.listDeployments) return text(JSON.stringify({ deployments: [], reason: 'transport_unavailable' }));
+    try {
+      await requirePermission('Vercel', `Read Vercel deployments via ${connection}`);
+      const result = await options.vercelTransport.listDeployments({
+        connection,
+        projectId: project_id,
+        teamId: team_id,
+        target,
+        limit,
+      });
+      if (result?.ok === false) throw new Error(result.error || 'vercel_request_failed');
+      return text(JSON.stringify(result, null, 2));
+    } catch (error) { return failure(error); }
+  });
+
+  server.registerTool('vercel_deployment_get', {
+    title: 'Get Vercel deployment',
+    description: 'Read-only: gets one Vercel deployment through the explicit Hearth vercel:main connection.',
+    inputSchema: {
+      connection: vercelAlias,
+      id_or_url: z.string().min(1).max(512).regex(/^[^\s/?#]+$/),
+      team_id: vercelTeamId,
+    },
+  }, async ({ connection, id_or_url, team_id }) => {
+    if (!options.vercelTransport?.getDeployment) return text(JSON.stringify({ deployment: null, reason: 'transport_unavailable' }));
+    try {
+      await requirePermission('Vercel', `Read Vercel deployment ${id_or_url} via ${connection}`);
+      const result = await options.vercelTransport.getDeployment({ connection, idOrUrl: id_or_url, teamId: team_id });
+      if (result?.ok === false) throw new Error(result.error || 'vercel_request_failed');
       return text(JSON.stringify(result, null, 2));
     } catch (error) { return failure(error); }
   });

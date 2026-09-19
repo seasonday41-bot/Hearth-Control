@@ -178,6 +178,8 @@ interface Window { controlApp: {
   connectionsRefresh: (alias?: string) => Promise<ConnectionSummary[]>;
   githubConnect: (request: { alias: 'github:personal' | 'github:work'; token: string; allowPullRequestCreate?: boolean }) => Promise<ConnectionSummary>;
   githubDisconnect: (alias: 'github:personal' | 'github:work') => Promise<ConnectionSummary>;
+  vercelConnect: (request: { alias: 'vercel:main'; token: string; teamId?: string }) => Promise<ConnectionSummary>;
+  vercelDisconnect: (alias: 'vercel:main') => Promise<ConnectionSummary>;
   localChatStatus: () => Promise<{ health: any; models: any }>;
   localChatContext: (request?: { model?: string; profile?: string; longResponse?: boolean; ollamaAvailable?: boolean }) => Promise<{ runtime: string; capabilities: { available: string[]; unavailable: string[] }; project: string; safety: string; responseStyle: string }>;
   storageAuditScan: () => Promise<any>;

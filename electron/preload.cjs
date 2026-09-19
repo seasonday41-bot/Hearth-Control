@@ -7,6 +7,8 @@ contextBridge.exposeInMainWorld('controlApp', {
   connectionsRefresh: (alias) => ipcRenderer.invoke('connections:refresh', alias),
   githubConnect: (request) => ipcRenderer.invoke('github:connect', request),
   githubDisconnect: (alias) => ipcRenderer.invoke('github:disconnect', alias),
+  vercelConnect: (request) => ipcRenderer.invoke('vercel:connect', request),
+  vercelDisconnect: (alias) => ipcRenderer.invoke('vercel:disconnect', alias),
   localChatStatus: () => ipcRenderer.invoke('local-chat:status'),
   localChatContext: (request) => ipcRenderer.invoke('local-chat:context', request),
   storageAuditScan: () => ipcRenderer.invoke('storage-audit:scan'),

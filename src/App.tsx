@@ -49,6 +49,7 @@ const initialPermissions: Array<{ name: string; detail: string; value: Permissio
   { name: 'Git', detail: 'Inspect status, history and diffs', value: 'Allow' },
   { name: 'Terminal', detail: 'Run local commands after confirmation', value: 'Ask' },
   { name: 'Antigravity', detail: 'Run approved tasks through the secure Antigravity CLI', value: 'Ask' },
+  { name: 'Vercel', detail: 'Read projects and deployments through the connected Vercel account', value: 'Ask' },
   { name: 'Browser', detail: 'No browser tool — not available in this version', value: 'Blocked', disabled: true },
 ];
 

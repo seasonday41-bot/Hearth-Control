@@ -11,20 +11,19 @@ This section is the project handoff/source of truth for any new ChatGPT/Codex/AI
 ## CURRENT STATUS
 
 ```text
-PHASE = P5_SUPABASE_MULTI_PROJECT — COMPLETE / VALIDATED / FROZEN
-CURRENT_BRANCH = main
-VALIDATED_MAIN_COMMIT = 034e34479e0f37866c264a694ba705caee5869d4
-VALIDATED_TAG = hearth-p5-validated-0.4.7-20260920
-FINAL_GATE = P5_MAIN_FINAL_GATE_PASS
-STATUS = P5_COMPLETE_VALIDATED
-BLOCKED_BY = none
-LAST_COMPLETED_STEP = P5 Supabase multi-project V1 validated on main, tagged, and frozen
-NEXT_PHASE = P6_VERCEL_CONNECTION
-NEXT_EXACT_ACTION = audit existing Vercel/deploy/environment integration surfaces and design the smallest P6 connection on the frozen P3 registry while keeping production deploy, domain mutation, and environment-variable writes approval-gated
+PHASE = P6_VERCEL_CONNECTION — IMPLEMENTED / VALIDATED ON FEATURE BRANCH
+CURRENT_BRANCH = feature/p6-vercel-connection-v1
+BASELINE_MAIN = 8c561b7bef66a3d15e9bc26b3e85b731ee1b0e04
+P5_VALIDATED_TAG = hearth-p5-validated-0.4.7-20260920
+STATUS = P6_IMPLEMENTED_VALIDATED_AWAITING_CHECKPOINT
+BLOCKED_BY = no technical blocker; P6 checkpoint/tag/merge not yet performed
+LAST_COMPLETED_STEP = P6 Vercel read-only connection V1 implemented and regression-validated with Hearth-owned token storage, remote identity/health, explicit vercel:main reads, and dedicated Vercel permission gating
+NEXT_PHASE = P6_FINALIZE_CHECKPOINT
+NEXT_EXACT_ACTION = review final diff/status, create P6 implementation checkpoint, fast-forward merge to main, run Main Final Gate, create validated tag, update README checkpoint, and push main + tag
 DO_NOT_MODIFY_FROZEN = X v0.1, P2, P3, P4, or P5 unless an actual regression/security issue or an explicitly approved later phase requires a targeted change
 ```
 
-**Continuation rule:** Git/source is authoritative over chat history. Verify branch, HEAD, tag, and worktree before editing. Do not modify frozen X/P2/P3 behavior unless a regression/security issue or the approved P4 design requires a targeted extension. Continue only `NEXT_EXACT_ACTION`.
+**Continuation rule:** Git/source is authoritative over chat history. Verify branch, HEAD, tag, and worktree before editing. Do not modify frozen X/P2/P3/P4/P5 behavior unless a regression/security issue or the approved current phase requires a targeted extension. Continue only `NEXT_EXACT_ACTION`.
 
 ### Current validated/stable direction
 
@@ -77,7 +76,7 @@ This checklist is the handoff ledger for every future chat/agent. **A phase is n
 - [x] **P3 — Connection Registry + Secure Credential Store** — VALIDATED / FROZEN
 - [x] **P4 — GitHub multi-connection (2+)** — VALIDATED / FROZEN
 - [x] **P5 — Supabase multi-project (2+)** — VALIDATED / FROZEN
-- [ ] **P6 — Vercel connection**
+- [ ] **P6 — Vercel connection** — IMPLEMENTED / VALIDATED ON FEATURE BRANCH; CHECKPOINT/MERGE PENDING
 - [ ] **P7 — Console / connection health / approvals / evidence**
 - [ ] **P8 — Multi-Agent Router + universal `ส่งงาน:` ingress**
 - [ ] **P9 — Full UI redesign LAST**
@@ -283,6 +282,103 @@ SECURITY / ISOLATION =
   sb_secret_ and service_role forbidden
   public connection snapshot does not expose publishable key value or session credential
   runtime auth/client/device operations resolve through alias authority
+```
+
+### P6 detailed checklist — current truth
+
+- [x] Create `feature/p6-vercel-connection-v1` from `main@8c561b7bef66a3d15e9bc26b3e85b731ee1b0e04`
+- [x] Audit Vercel surfaces: no existing Vercel REST client/auth/MCP tools; CLI is installed/authenticated globally but Hearth repo is not `.vercel` linked
+- [x] Lock canonical design: `docs/HEARTH-VERCEL-CONNECTION-V1.md`
+- [x] Reuse P3 alias `vercel:main` + `credential:vercel:main`; do not import Vercel CLI/global token state
+- [x] Fixed REST authority `https://api.vercel.com`; no arbitrary base URL
+- [x] Accept bounded personal/legacy opaque access tokens; reject identifiable app/integration/refresh/API-key token types
+- [x] Validate remote `GET /v2/user` identity before credential persistence
+- [x] Add optional explicit `teamId` metadata with stale-team clearing on personal reconnect
+- [x] Grant default capabilities `project.read` + `deployment.read` only
+- [x] Add local renderer IPC `vercel:connect` / `vercel:disconnect` with no credential getter
+- [x] Dispatch `connections:list/refresh` through Vercel provider snapshot/remote health
+- [x] Add read-only MCP tools: `vercel_projects_list`, `vercel_project_get`, `vercel_deployments_list`, `vercel_deployment_get`
+- [x] Add dedicated Hearth permission `Vercel = Ask`; Ask/Blocked stop requests before provider transport
+- [x] Prove HTTP child -> Electron parent transport carries no token/credential material
+- [x] Keep deployment creation/promote/rollback, domain mutation, env read/write, and project admin tools absent in P6 V1
+- [x] `npm run test:vercel` — 31/31 PASS
+- [x] P3 Connections — 18/18 PASS
+- [x] P4 GitHub — 30/30 PASS
+- [x] P5 Supabase — 28/28 PASS
+- [x] Electron/HTTP + X MCP registry — 119/119 PASS
+- [x] Bridge standalone — 46/46 PASS
+- [x] Goal/Review/Remote Goal — all executed suites PASS
+- [x] P2 updater — 149/149 PASS
+- [x] production build + TypeScript — PASS
+- [x] X full regression — 616/617 PASS; sole failure is pre-existing EVT12 source-regex mismatch
+- [ ] Create P6 implementation checkpoint commit
+- [ ] Fast-forward merge validated P6 branch into `main`
+- [ ] Run P6 Main Final Gate
+- [ ] Create validated P6 tag and push `main` + tag
+
+### P6 validation evidence — 2026-09-20 (feature branch, pre-checkpoint)
+
+```text
+BRANCH = feature/p6-vercel-connection-v1
+BASELINE_MAIN = 8c561b7bef66a3d15e9bc26b3e85b731ee1b0e04
+
+npm run test:vercel
+  PASS = 31/31
+  FAIL = 0
+  includes HTTP child -> parent IPC round-trip with no credential fields
+
+npm run test:connections
+  PASS = 18/18
+  FAIL = 0
+
+npm run test:github
+  PASS = 30/30
+  FAIL = 0
+
+npm run test:supabase
+  PASS = 28/28
+  FAIL = 0
+
+Electron/HTTP + X MCP registry
+  PASS = 119/119
+  FAIL = 0
+
+Bridge standalone
+  PASS = 46/46
+  FAIL = 0
+
+Goal/Review/Remote Goal
+  PASS = all executed suites
+  FAIL = 0
+
+P2 updater
+  PASS = 149/149
+  FAIL = 0
+
+X full regression
+  PASS = 616/617
+  FAIL = 1 PRE-EXISTING BASELINE TEST MISMATCH ONLY
+  PRE_EXISTING = scripts/test-x-terminal-event.mjs EVT12 source-regex expects non-async serverProcess message handler while validated baseline already uses async (message) =>
+
+npm run build
+  PASS
+  TypeScript = PASS
+  Vite production build = PASS
+  stable build metadata restored after validation
+
+SECURITY / AUTHORITY =
+  token storage = P3 SecureCredentialStore only
+  Vercel CLI/global auth import = NONE
+  API origin = fixed https://api.vercel.com
+  alias = explicit vercel:main only
+  teamId = explicit non-secret metadata
+  default capabilities = project.read + deployment.read only
+  Hearth permission = Vercel Ask/Allow/Blocked
+  mutation tools = NONE
+
+LIVE_PROVIDER_SMOKE =
+  not performed through Hearth because no P6 PAT was entered into Hearth;
+  global Vercel CLI credential was deliberately not imported or exposed.
 ```
 
 ### P0 detailed checklist — current truth
@@ -832,11 +928,33 @@ NEXT_PHASE = P6_VERCEL_CONNECTION
 NEXT_EXACT_ACTION = audit existing Vercel/deploy/environment surfaces and design the smallest P6 connection on top of the frozen P3 registry
 ```
 
-### P6 — Vercel connection
+### P6 — Vercel connection — IMPLEMENTED / VALIDATED ON FEATURE BRANCH
 
-Add Vercel to the same Hearth Connection Registry. Start with one stable connection but keep the registry multi-connection capable.
+Canonical design: `docs/HEARTH-VERCEL-CONNECTION-V1.md`.
 
-Separate read/inspect capability from sensitive actions such as production deploy, domain mutation, and environment-variable changes. Sensitive mutations require the existing approval philosophy.
+P6 adds one Hearth-owned Vercel alias:
+
+```text
+vercel:main
+  -> credential:vercel:main
+  -> project.read + deployment.read
+```
+
+Locked P6 V1 rules:
+
+- fixed `https://api.vercel.com` authority;
+- token enters only through local Electron IPC and is stored only in P3 SecureCredentialStore;
+- Vercel CLI/global token state and `.vercel/project.json` are not authority;
+- remote identity is validated before token persistence;
+- every read uses explicit `vercel:main` plus optional explicit `teamId`;
+- Hearth `Vercel` permission defaults to `Ask`;
+- MCP is read-only for projects/deployments;
+- deploy/promote/rollback/domain/env/project-admin mutation is absent from P6 V1;
+- full Connections management UI remains P7.
+
+```text
+NEXT_EXACT_ACTION = finalize P6 checkpoint/tag/merge on main after final scoped diff review
+```
 
 ### P7 — Console / connection health / approvals / evidence
 
