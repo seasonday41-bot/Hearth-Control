@@ -11,19 +11,20 @@ This section is the project handoff/source of truth for any new ChatGPT/Codex/AI
 ## CURRENT STATUS
 
 ```text
-PHASE = P7_OPERATIONAL_CONSOLE — IMPLEMENTED / VALIDATED ON FEATURE BRANCH
-CURRENT_BRANCH = feature/p7-console-v1
-BASELINE_MAIN = bddfb90ec9b12a9eb0a0cd4d1fed33f0a0d726ed
-P6_VALIDATED_TAG = hearth-p6-validated-0.4.7-20260920
-STATUS = P7_IMPLEMENTED_VALIDATED_AWAITING_CHECKPOINT
-BLOCKED_BY = no technical blocker; P7 checkpoint/tag/merge not yet performed
-LAST_COMPLETED_STEP = P7 Operational Console V1 implemented and regression-validated with connection health/management, approval visibility, bounded session evidence, and durable Goal checkpoint evidence without adding backend execution authority
-NEXT_PHASE = P7_FINALIZE_CHECKPOINT
-NEXT_EXACT_ACTION = review final diff/status, create P7 implementation checkpoint, fast-forward merge to main, run Main Final Gate, create validated tag, update README checkpoint, and push main + tag
-DO_NOT_MODIFY_FROZEN = X v0.1, P2, P3, P4, P5, or P6 unless an actual regression/security issue or an explicitly approved later phase requires a targeted change
+PHASE = P7_OPERATIONAL_CONSOLE — COMPLETE / VALIDATED / FROZEN
+CURRENT_BRANCH = main
+VALIDATED_MAIN_COMMIT = 7865119f9e242099db9ba30b9215e0fd5dfd9a8d
+VALIDATED_TAG = hearth-p7-validated-0.4.7-20260920
+FINAL_GATE = P7_MAIN_FINAL_GATE_PASS
+STATUS = P7_COMPLETE_VALIDATED
+BLOCKED_BY = none
+LAST_COMPLETED_STEP = P7 Operational Console V1 validated on main, tagged, and frozen
+NEXT_PHASE = P8_MULTI_AGENT_ROUTER_UNIVERSAL_INGRESS
+NEXT_EXACT_ACTION = audit current task/job/Goal/X/specialist routing and design the smallest generic Hearth job ingress for user-facing `ส่งงาน:` commands while preserving x-task-v1 as X-internal and avoiding a second execution/runtime system
+DO_NOT_MODIFY_FROZEN = X v0.1, P2, P3, P4, P5, P6, or P7 unless an actual regression/security issue or an explicitly approved later phase requires a targeted change
 ```
 
-**Continuation rule:** Git/source is authoritative over chat history. Verify branch, HEAD, tag, and worktree before editing. Do not modify frozen X/P2/P3/P4/P5/P6 behavior unless a regression/security issue or the approved current phase requires a targeted extension. Continue only `NEXT_EXACT_ACTION`.
+**Continuation rule:** Git/source is authoritative over chat history. Verify branch, HEAD, tag, and worktree before editing. Do not modify frozen X/P2/P3/P4/P5/P6/P7 behavior unless a regression/security issue or the approved current phase requires a targeted extension. Continue only `NEXT_EXACT_ACTION`.
 
 ### Current validated/stable direction
 
@@ -49,19 +50,20 @@ GitHub / Supabase / Vercel / AI providers
 
 ### Current active branch — validated baseline
 
-`main` is the canonical branch and now contains the validated P6 implementation checkpoint:
+`main` is the canonical branch and now contains the validated P7 implementation checkpoint:
 
 ```text
-P6_VALIDATED_IMPLEMENTATION_COMMIT = 6fc48dd876ebde72af2d49981dde16c0268b2e02
+P7_VALIDATED_IMPLEMENTATION_COMMIT = 7865119f9e242099db9ba30b9215e0fd5dfd9a8d
+P7_TAG = hearth-p7-validated-0.4.7-20260920
+P7_FINAL_GATE = P7_MAIN_FINAL_GATE_PASS
 P6_TAG = hearth-p6-validated-0.4.7-20260920
-P6_FINAL_GATE = P6_MAIN_FINAL_GATE_PASS
 P5_TAG = hearth-p5-validated-0.4.7-20260920
 P4_TAG = hearth-p4-validated-0.4.7-20260919
 P3_TAG = hearth-p3-validated-0.4.7-20260919
 P2_TAG = hearth-p2-validated-0.4.7-20260919
 ```
 
-P0, P1, X v0.1, P2, P3, P4, P5, and P6 histories are preserved in Git. X/P2/P3/P4/P5/P6 are frozen unless a real regression/security issue or an explicitly approved later phase requires a targeted change.
+P0, P1, X v0.1, P2, P3, P4, P5, P6, and P7 histories are preserved in Git. X/P2/P3/P4/P5/P6/P7 are frozen unless a real regression/security issue or an explicitly approved later phase requires a targeted change.
 
 ---
 
@@ -78,7 +80,7 @@ This checklist is the handoff ledger for every future chat/agent. **A phase is n
 - [x] **P4 — GitHub multi-connection (2+)** — VALIDATED / FROZEN
 - [x] **P5 — Supabase multi-project (2+)** — VALIDATED / FROZEN
 - [x] **P6 — Vercel connection** — VALIDATED / FROZEN
-- [ ] **P7 — Console / connection health / approvals / evidence** — IMPLEMENTED / VALIDATED ON FEATURE BRANCH; CHECKPOINT/MERGE PENDING
+- [x] **P7 — Console / connection health / approvals / evidence** — VALIDATED / FROZEN
 - [ ] **P8 — Multi-Agent Router + universal `ส่งงาน:` ingress**
 - [ ] **P9 — Full UI redesign LAST**
 
@@ -414,16 +416,18 @@ LIVE_PROVIDER_SMOKE =
 - [x] production build + TypeScript — PASS
 - [x] X full regression — 616/617 PASS; sole failure is pre-existing EVT12 source-regex mismatch
 - [x] runtime scope audit + `git diff --check` — PASS
-- [ ] Create P7 implementation checkpoint commit
-- [ ] Fast-forward merge validated P7 branch into `main`
-- [ ] Run P7 Main Final Gate
-- [ ] Create validated P7 tag and push `main` + tag
+- [x] Create P7 implementation checkpoint commit — `7865119f9e242099db9ba30b9215e0fd5dfd9a8d`
+- [x] Fast-forward merge validated P7 branch into `main`
+- [x] Run P7 Main Final Gate — PASS
+- [ ] Create validated P7 tag and push `main` + tag — tag created locally; remote push pending
 
-### P7 validation evidence — 2026-09-20 (feature branch, pre-checkpoint)
+### P7 validation evidence — 2026-09-20 (main Final Gate)
 
 ```text
-BRANCH = feature/p7-console-v1
-BASELINE_MAIN = bddfb90ec9b12a9eb0a0cd4d1fed33f0a0d726ed
+BRANCH = main
+VALIDATED_MAIN_COMMIT = 7865119f9e242099db9ba30b9215e0fd5dfd9a8d
+TAG = hearth-p7-validated-0.4.7-20260920
+FINAL_GATE = P7_MAIN_FINAL_GATE_PASS
 
 npm run test:console
   PASS = 10/10
@@ -753,6 +757,20 @@ NEXT_PHASE = P7_CONSOLE_CONNECTION_HEALTH_APPROVALS_EVIDENCE
 NEXT_EXACT_ACTION = audit current Overview/Permissions/Logs/connection IPC surfaces and design the smallest P7 operational Console without adding provider mutation authority or redesigning frozen runtime/provider behavior
 ```
 
+```text
+PHASE_COMPLETED = P7_OPERATIONAL_CONSOLE
+STATUS = PASS / VALIDATED / FROZEN
+COMPLETED_AT = 2026-09-20
+VALIDATED_MAIN_COMMIT = 7865119f9e242099db9ba30b9215e0fd5dfd9a8d
+TAG = hearth-p7-validated-0.4.7-20260920
+FINAL_GATE = P7_MAIN_FINAL_GATE_PASS
+VALIDATION = P7 focused 10/10; P3 connections 18/18; P4 GitHub 30/30; P5 Supabase 28/28; P6 Vercel 31/31; Electron/HTTP + X MCP registry 119/119; Bridge standalone 46/46; Goal/Review/Remote Goal all executed suites PASS; P2 updater 149/149; production build + TypeScript PASS; git diff --check PASS; X full regression 616/617 with EVT12 confirmed pre-existing baseline source-regex mismatch
+SECURITY = no new backend authority; GitHub/Vercel management reuses existing local IPC; Supabase auth not duplicated; stored secrets never read back into renderer; transient token inputs are password-style and cleared after successful connect; Console cannot decide approvals; no new execution route/provider mutation; evidence lifetime is explicitly labeled
+KNOWN_LIMITATIONS = approval/log evidence is current-session only unless already durable Goal checkpoint evidence. EVT12 remains the pre-existing X test-shape mismatch. Full visual redesign remains P9.
+NEXT_PHASE = P8_MULTI_AGENT_ROUTER_UNIVERSAL_INGRESS
+NEXT_EXACT_ACTION = audit existing task/job/Goal/X/specialist routing and design the smallest generic Hearth job contract + user-facing ส่งงาน: ingress while preserving x-task-v1 as an X-internal adapter target
+```
+
 ### Frozen baselines
 
 ```text
@@ -773,9 +791,12 @@ P5_TAG = hearth-p5-validated-0.4.7-20260920
 
 P6 Vercel Connection V1 = FROZEN / VALIDATED
 P6_TAG = hearth-p6-validated-0.4.7-20260920
+
+P7 Operational Console V1 = FROZEN / VALIDATED
+P7_TAG = hearth-p7-validated-0.4.7-20260920
 ```
 
-Do not modify frozen X/P2/P3/P4/P5/P6 implementation unless an actual regression, security issue, or explicitly approved new phase requires it.
+Do not modify frozen X/P2/P3/P4/P5/P6/P7 implementation unless an actual regression, security issue, or explicitly approved new phase requires it.
 
 ### Secure MCP / Direct Coder status
 
@@ -795,7 +816,7 @@ For a new session:
 1. Read this README canonical checkpoint first.
 2. Verify current branch, HEAD, validated tag, and `git status`.
 3. Treat Git/source as truth over chat history.
-4. Do not modify frozen X/P2/P3/P4/P5/P6 unless a regression or security issue is proven.
+4. Do not modify frozen X/P2/P3/P4/P5/P6/P7 unless a regression or security issue is proven.
 5. Continue `NEXT_EXACT_ACTION` only.
 
 ### Session handoff checklist — update before changing chats
@@ -1080,7 +1101,7 @@ NEXT_PHASE = P7_CONSOLE_CONNECTION_HEALTH_APPROVALS_EVIDENCE
 NEXT_EXACT_ACTION = audit current Overview/Permissions/Logs/connection surfaces and design the smallest P7 operational Console without expanding provider execution authority
 ```
 
-### P7 — Console / connection health / approvals / evidence — IMPLEMENTED / VALIDATED ON FEATURE BRANCH
+### P7 — Console / connection health / approvals / evidence — COMPLETE / VALIDATED / FROZEN
 
 Canonical design: `docs/HEARTH-OPERATIONAL-CONSOLE-V1.md`.
 
@@ -1112,7 +1133,11 @@ Locked P7 V1 rules:
 - P9 full visual redesign remains deferred.
 
 ```text
-NEXT_EXACT_ACTION = finalize P7 checkpoint/tag/merge on main after final scoped diff review
+VALIDATED_MAIN_COMMIT = 7865119f9e242099db9ba30b9215e0fd5dfd9a8d
+TAG = hearth-p7-validated-0.4.7-20260920
+FINAL_GATE = P7_MAIN_FINAL_GATE_PASS
+NEXT_PHASE = P8_MULTI_AGENT_ROUTER_UNIVERSAL_INGRESS
+NEXT_EXACT_ACTION = audit current task/job/Goal/X/specialist routing and design the smallest generic Hearth job ingress for user-facing ส่งงาน: commands without exposing x-task-v1 as the permanent user contract
 ```
 
 ### P8 — Multi-Agent Router + universal ingress
