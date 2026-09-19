@@ -11,16 +11,15 @@ This section is the project handoff/source of truth for any new ChatGPT/Codex/AI
 ## CURRENT STATUS
 
 ```text
-PHASE = P2_REMOTE_ONE_CLICK_UPDATER — COMPLETE / VALIDATED
-CURRENT_BRANCH = main
-VALIDATED_MAIN_COMMIT = 301e64fa216e10bb9a29566e3e3dff29a5620b91
-VALIDATED_TAG = hearth-p2-validated-20260919
-FINAL_GATE = P2_MAIN_FINAL_GATE_PASS
-STATUS = P2_COMPLETE_VALIDATED
-BLOCKED_BY = none
-LAST_COMPLETED_STEP = P2 Remote One-Click Updater V1 validated, checkpointed, fast-forwarded to main, and Final Gate passed on main
-NEXT_PHASE = P3_CONNECTION_REGISTRY_SECURE_CREDENTIAL_STORE
-NEXT_EXACT_ACTION = Audit current Hearth connection/credential architecture and design the smallest P3 foundation for provider connections and secure credential storage without modifying frozen X/P2 behavior.
+PHASE = P3_CONNECTION_REGISTRY_SECURE_CREDENTIAL_STORE — IMPLEMENTED / VALIDATED ON FEATURE BRANCH
+CURRENT_BRANCH = feature/p3-connection-registry-v1
+BASELINE_MAIN = 4f261b2f4ba51722ea18968e22cdde631c28bed0
+P2_VALIDATED_TAG = hearth-p2-validated-0.4.7-20260919
+STATUS = P3_IMPLEMENTED_VALIDATED_AWAITING_CHECKPOINT
+BLOCKED_BY = no technical blocker; P3 checkpoint commit/tag/merge not yet performed
+LAST_COMPLETED_STEP = P3 Connection Registry + Secure Credential Store foundation implemented and regression-validated without modifying frozen X/P2 behavior
+NEXT_PHASE = P3_FINALIZE_CHECKPOINT
+NEXT_EXACT_ACTION = review final git diff/status, then create the P3 checkpoint commit/tag and merge to main only when explicitly authorized; do not start P4 before P3 is checkpointed
 DO_NOT_MODIFY_FROZEN = X v0.1 or P2 implementation unless an actual regression, security issue, or explicitly approved new phase requires it
 ```
 
@@ -50,15 +49,17 @@ GitHub / Supabase / Vercel / AI providers
 
 ### Current active branch — validated baseline
 
-`main` is the canonical branch and currently points at the validated P2 checkpoint:
+P3 is currently implemented on a feature branch created directly from the latest validated P2 main checkpoint:
 
 ```text
-MAIN_HEAD = 301e64fa216e10bb9a29566e3e3dff29a5620b91
-P2_TAG = hearth-p2-validated-20260919
+ACTIVE_BRANCH = feature/p3-connection-registry-v1
+BASELINE_MAIN = 4f261b2f4ba51722ea18968e22cdde631c28bed0
+P2_TAG = hearth-p2-validated-0.4.7-20260919
+P2_VERSION = 0.4.7
 P2_FINAL_GATE = P2_MAIN_FINAL_GATE_PASS
 ```
 
-P0, P1, X v0.1, and P2 histories are preserved in Git. P2 implementation is frozen unless a real regression/security issue or explicitly approved later phase requires a targeted change.
+P0, P1, X v0.1, and P2 histories are preserved in Git. P2 implementation remains frozen. P3 has not yet been committed, tagged, or merged, so `main` remains the authoritative released/validated baseline until that explicit checkpoint step occurs.
 
 ---
 
@@ -71,7 +72,7 @@ This checklist is the handoff ledger for every future chat/agent. **A phase is n
 - [x] **P0 — Validate and merge Hearth Skill v1**
 - [x] **P1 — Wire Skill Registry into X**
 - [x] **P2 — Remote One-Click Updater** — VALIDATED / FROZEN
-- [ ] **P3 — Connection Registry + Secure Credential Store** ← NEXT
+- [ ] **P3 — Connection Registry + Secure Credential Store** — IMPLEMENTED / VALIDATED ON FEATURE BRANCH; CHECKPOINT/MERGE PENDING
 - [ ] **P4 — GitHub multi-connection (2+)**
 - [ ] **P5 — Supabase multi-project (2+)**
 - [ ] **P6 — Vercel connection**
@@ -119,6 +120,84 @@ This checklist is the handoff ledger for every future chat/agent. **A phase is n
 - [x] Post-install smoke 007 PASS (zero mutation, validation pass, automatic Supabase sync)
 - [x] Freeze baseline commit `66489b9134de02f0482671cb8b8ce1c18e169a4d` with tag `hearth-p1-validated-20260918`
 - [x] Merge `feature/x-skill-integration-v1` into `main`
+
+### P3 detailed checklist — current truth
+
+- [x] Create `feature/p3-connection-registry-v1` from `main@4f261b2f4ba51722ea18968e22cdde631c28bed0`
+- [x] Author canonical design: `docs/HEARTH-CONNECTION-REGISTRY-V1.md`
+- [x] Add durable non-secret Connection Registry under `mcp/connections/`
+- [x] Seed stable aliases: `github:personal`, `github:work`, `supabase:hearth`, `supabase:xgen`, `vercel:main`
+- [x] Preserve future provider target/capability metadata when built-in aliases are re-seeded
+- [x] Add Electron-main `SecureCredentialStore` backed by `safeStorage`, atomic writes, owner-only file mode, fail-closed behavior
+- [x] Add `ConnectionService` with trusted credential resolution and renderer-safe public snapshots
+- [x] Keep `supabase:hearth` and `supabase:xgen` credential/session namespaces strictly isolated
+- [x] Migrate `bridgeSessionEncrypted`, `publicTasksSessionEncrypted`, and `bridgePairingEncrypted` out of `settings.json` using verify-before-delete migration
+- [x] Preserve legacy encrypted settings if secure migration cannot be verified
+- [x] Stop all new session/pairing writes to legacy encrypted settings fields
+- [x] Harden `settings:get` to strip every `*Encrypted` field and allowlist renderer `settings:save` keys
+- [x] Add read-only renderer IPC: `connections:list`, `connections:refresh`
+- [x] Add connection states: `UNKNOWN`, `CONNECTED`, `DISCONNECTED`, `EXPIRED`, `NEEDS_REAUTH`, `ERROR`
+- [x] Add `npm run test:connections` — 18/18 PASS
+- [x] Project X auth boundary regression — 13/13 PASS
+- [x] Bridge regression — 46/46 PASS
+- [x] Electron/main/preload/server integration regression — 98/98 PASS
+- [x] Goal/Review/Remote Goal regressions — PASS (all executed suites)
+- [x] P2 updater/final-gate regression group — 149/149 PASS
+- [x] X regression group — 616/617 PASS; sole failure `EVT12` is a pre-existing baseline source-regex mismatch (`main` already used `async (message) =>` at `4f261b2`; test regex accepts only non-async shape), not caused by P3
+- [x] `npm run build` — PASS; generated build metadata restored to stable `0.4.7-20260919154331-2d91b9`
+- [x] Final `git diff --check` + final scoped diff/status review — PASS; untracked P3 text files also checked for trailing whitespace/final newline
+- [ ] Create P3 checkpoint commit/tag
+- [ ] Merge validated P3 branch into `main`
+
+### P3 validation evidence — 2026-09-19 (feature branch, pre-checkpoint)
+
+```text
+BRANCH = feature/p3-connection-registry-v1
+BASELINE_MAIN = 4f261b2f4ba51722ea18968e22cdde631c28bed0
+BASELINE_TAG = hearth-p2-validated-0.4.7-20260919
+
+npm run test:connections
+  PASS = 18/18
+  FAIL = 0
+
+node --test scripts/test-electron-public-x-auth.mjs
+  PASS = 13/13
+  FAIL = 0
+
+node --test scripts/test-bridge.mjs
+  PASS = 46/46
+  FAIL = 0
+
+Electron/main/preload/server integration regression group
+  PASS = 98/98
+  FAIL = 0
+
+Goal/Review/Remote Goal regression group
+  PASS = all executed suites
+  FAIL = 0
+
+P2 updater/final-gate regression group
+  PASS = 149/149
+  FAIL = 0
+
+X regression group
+  PASS = 616/617
+  FAIL = 1 PRE-EXISTING BASELINE TEST MISMATCH ONLY
+  PRE_EXISTING = scripts/test-x-terminal-event.mjs EVT12 expects non-async serverProcess message handler, while baseline main@4f261b2 already uses async (message) =>
+
+npm run build
+  PASS
+  TypeScript project build = PASS
+  Vite production build = PASS
+  generated electron/build-meta.json restored to stable metadata after validation
+
+SECURITY_BOUNDARY =
+  credentials.json stores only safeStorage ciphertext
+  connections.json stores non-secret metadata only
+  renderer receives no credentialRef/token/password/private key/ciphertext
+  settings.json receives no new encrypted session/pairing fields
+  renderer settings writes are allowlisted
+```
 
 ### P0 validation evidence — 2026-09-17
 
@@ -397,11 +476,11 @@ TAG = hearth-p2-validated-20260919
 FINAL_GATE = P2_MAIN_FINAL_GATE_PASS
 ```
 
-### P3 — Hearth Connection Registry + Secure Credential Store — NEXT
+### P3 — Hearth Connection Registry + Secure Credential Store — IMPLEMENTED / VALIDATED ON FEATURE BRANCH
 
 ```text
-NEXT_PHASE = P3_CONNECTION_REGISTRY_SECURE_CREDENTIAL_STORE
-NEXT_EXACT_ACTION = Audit current Hearth connection/credential architecture and design the smallest P3 foundation for provider connections and secure credential storage without modifying frozen X/P2 behavior.
+NEXT_PHASE = P3_FINALIZE_CHECKPOINT
+NEXT_EXACT_ACTION = Review final diff/status and checkpoint the validated P3 feature branch before beginning P4.
 ```
 
 Connections belong to **Hearth**, not to X. Build one registry that future agents can reuse.

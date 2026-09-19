@@ -2,9 +2,9 @@
 // getPublicTasksState, persistPublicTasksSession/clearPublicTasksSession,
 // supabasePublicTasksAuthRequest, applyPublicTasksSession, and
 // ensurePublicTasksSession -- proving this session is a SEPARATE namespace
-// from the legacy bridge's (never reuses bridgeSession/bridgeSessionEncrypted,
-// never a service_role key, always via the same safeStorage-backed
-// encrypt/decrypt helpers). Executed against the EXACT committed source via
+// from the legacy bridge's and is persisted through P3 ConnectionService,
+// never settings.json, never a service_role key. Executed against the EXACT
+// committed source via
 // the same extraction technique already used throughout this suite.
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -32,11 +32,14 @@ function buildAuthHarness({ settings = {}, fetchImpl } = {}) {
     ...settings,
   };
   const readSettings = () => settingsState;
-  // A trivial in-memory stand-in for safeStorage -- encode/decode round-trips
-  // exactly, which is all these tests need (safeStorage itself is not being
-  // tested here; production still uses the real macOS Keychain-backed one).
-  const encryptLocalSecret = (value) => (value ? JSON.stringify(value) : null);
-  const decryptLocalSecret = (encoded) => { try { return encoded ? JSON.parse(encoded) : null; } catch { return null; } };
+  const credentialState = new Map();
+  const PUBLIC_TASKS_CONNECTION_ALIAS = 'supabase:xgen';
+  const connectionService = {
+    getCredential(alias) { return credentialState.get(alias) || null; },
+    setCredential(alias, value) { credentialState.set(alias, structuredClone(value)); },
+    clearCredential(alias) { return credentialState.delete(alias); },
+  };
+  const readConnectionCredential = (alias) => connectionService.getCredential(alias);
   let publicTasksClientInstance = { accessToken: null, ownerId: null, supabaseAnonKey: '', setSession(s) { this.accessToken = s.accessToken; this.ownerId = s.ownerId; } };
   // Same Supabase project/owner, a different table (see main.cjs's own
   // declaration comment) -- injected the same way publicTasksClientInstance
@@ -49,6 +52,7 @@ function buildAuthHarness({ settings = {}, fetchImpl } = {}) {
   // a ReferenceError in this sandbox.
   let goalRequestsClientInstance = { accessToken: null, ownerId: null, setSession(s) { this.accessToken = s.accessToken; this.ownerId = s.ownerId; } };
   const factorySource = `
+    const PUBLIC_TASKS_CONNECTION_ALIAS = 'supabase:xgen';
     let bridgeSession = null;
     let publicTasksSession = null;
     ${sessionSource}
@@ -59,20 +63,30 @@ function buildAuthHarness({ settings = {}, fetchImpl } = {}) {
       getSession: () => publicTasksSession,
     };
   `;
-  const factory = new Function('decryptLocalSecret', 'readSettings', 'saveSettings', 'encryptLocalSecret', 'sendEvent', 'publicTasksClientInstance', 'reviewItemsClientInstance', 'goalRequestsClientInstance', 'fetch', factorySource);
-  const api = factory(decryptLocalSecret, readSettings, saveSettings, encryptLocalSecret, () => {}, publicTasksClientInstance, reviewItemsClientInstance, goalRequestsClientInstance,
+  const factory = new Function('readSettings', 'saveSettings', 'sendEvent', 'publicTasksClientInstance', 'reviewItemsClientInstance', 'goalRequestsClientInstance', 'connectionService', 'readConnectionCredential', 'fetch', factorySource);
+  const api = factory(readSettings, saveSettings, () => {}, publicTasksClientInstance, reviewItemsClientInstance, goalRequestsClientInstance, connectionService, readConnectionCredential,
     fetchImpl || (async () => { throw new Error('fetch must not be called in this test'); }));
-  return { ...api, settingsState, savedSettings, publicTasksClientInstance, reviewItemsClientInstance, goalRequestsClientInstance };
+  return {
+    ...api,
+    settingsState,
+    savedSettings,
+    publicTasksClientInstance,
+    reviewItemsClientInstance,
+    goalRequestsClientInstance,
+    getStoredCredential: () => connectionService.getCredential(PUBLIC_TASKS_CONNECTION_ALIAS),
+  };
 }
 
 // ── namespace isolation ─────────────────────────────────────────────────
 
-test('Project X session is a SEPARATE settings key/namespace from the legacy bridge session', () => {
+test('Project X session is stored through its own ConnectionService alias and never written to settings.json', () => {
   const h = buildAuthHarness();
   h.persistPublicTasksSession({ accessToken: 'x-token', refreshToken: 'x-refresh', ownerId: 'owner-x', email: 'x@example.com', expiresAt: Date.now() + 3600000 });
-  assert.ok(h.settingsState.publicTasksSessionEncrypted, 'publicTasksSessionEncrypted must be written');
+  assert.equal(h.getStoredCredential().accessToken, 'x-token');
+  assert.equal(h.settingsState.publicTasksSessionEncrypted, null, 'P3 must not write Project X session ciphertext to settings.json');
   assert.equal(h.settingsState.bridgeSessionEncrypted, null, 'the legacy bridgeSessionEncrypted must never be touched');
-  assert.equal(h.savedSettings.some((s) => 'bridgeEnabled' in s), false, 'saving a Project X session must never touch bridgeEnabled');
+  assert.equal(h.savedSettings.some((entry) => 'publicTasksSessionEncrypted' in entry), false);
+  assert.equal(h.savedSettings.some((entry) => 'bridgeEnabled' in entry), false, 'saving a Project X session must never touch bridgeEnabled');
 });
 
 test('getPublicTasksState reflects configured (anon key present) and signedIn independently, and never leaks the token', () => {
@@ -96,6 +110,7 @@ test('clearPublicTasksSession clears the session but never disables/touches brid
   h.clearPublicTasksSession();
   assert.equal(h.getSession(), null);
   assert.equal(h.settingsState.publicTasksSessionEncrypted, null);
+  assert.equal(h.getStoredCredential(), null);
   assert.equal(h.getPublicTasksState().signedIn, false);
 });
 

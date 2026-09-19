@@ -12,6 +12,8 @@ const remoteUpdateStager = require('./remote-update-stager.cjs');
 const remoteUpdateState = require('./remote-update-state.cjs');
 const updateTrust = require('./update-trust-config.cjs');
 const { createTaskNotifier } = require('./task-notifications.cjs');
+const { SecureCredentialStore } = require('./security/secure-credential-store.cjs');
+const { ConnectionService } = require('./connections/connection-service.cjs');
 
 const importFromHere = (relativePath) => import(pathToFileURL(path.join(__dirname, relativePath)).href);
 let buildMetadata;
@@ -39,6 +41,9 @@ let serverProcess;
 let serverState = { running: false, port: 3001, pid: null };
 let goalRunner = null;
 let taskStore = null;
+let connectionRegistry = null;
+let credentialStore = null;
+let connectionService = null;
 let jobManager = null;
 let xQueueCoordinator = null;
 let xQueueStore = null;
@@ -59,6 +64,9 @@ let continuationRecoveryTimer = null;
 let updaterInstallInProgress = false;
 let remoteUpdateSession = null;
 const localApprovals = new Map();
+const BRIDGE_CONNECTION_ALIAS = 'supabase:hearth';
+const PUBLIC_TASKS_CONNECTION_ALIAS = 'supabase:xgen';
+const BRIDGE_PAIRING_CREDENTIAL_REF = 'credential:bridge:pairing';
 let bridgeClientInstance = null;
 let bridgeSession = null;
 let bridgePairingSecret = null;
@@ -176,52 +184,118 @@ const readSettings = () => {
     return { ...defaults, ...saved, updateDirectory: saved.updateDirectory || defaultUpdateDirectory(), permissions: { ...defaults.permissions, ...saved.permissions } };
   } catch { return { ...defaults, updateDirectory: defaultUpdateDirectory(), permissions: { ...defaults.permissions } }; }
 };
-const saveSettings = (next) => {
-  const settings = { ...readSettings(), ...next };
+const writeSettingsDocument = (settings) => {
   fs.mkdirSync(path.dirname(settingsPath()), { recursive: true });
   fs.writeFileSync(settingsPath(), JSON.stringify(settings, null, 2));
   return settings;
 };
-const encryptLocalSecret = (value) => {
-  if (!value || !safeStorage.isEncryptionAvailable()) return null;
-  return safeStorage.encryptString(JSON.stringify(value)).toString('base64');
+const saveSettings = (next) => {
+  if (Object.keys(next || {}).some((key) => /Encrypted$/.test(key))) {
+    throw new Error('secret_settings_write_forbidden');
+  }
+  return writeSettingsDocument({ ...readSettings(), ...next });
 };
+const removeSettingsKeys = (keys) => {
+  const settings = readSettings();
+  for (const key of keys) delete settings[key];
+  return writeSettingsDocument(settings);
+};
+const publicSettingsSnapshot = () => {
+  const settings = { ...readSettings() };
+  for (const key of Object.keys(settings)) {
+    if (/Encrypted$/.test(key)) delete settings[key];
+  }
+  return settings;
+};
+const sanitizeRendererSettingsInput = (settings = {}) => {
+  const allowed = {};
+  for (const key of ['workspace', 'port', 'theme', 'permissions']) {
+    if (Object.hasOwn(settings, key)) allowed[key] = settings[key];
+  }
+  return allowed;
+};
+// Legacy decrypt-only helper used exclusively by the verified P3 migration.
+// New credential writes never go back to settings.json.
 const decryptLocalSecret = (encoded) => {
   if (!encoded || !safeStorage.isEncryptionAvailable()) return null;
   try {
     return JSON.parse(safeStorage.decryptString(Buffer.from(encoded, 'base64')));
   } catch { return null; }
 };
-const loadBridgeSecrets = () => {
+const migrateLegacyCredentialSetting = ({ settingKey, credentialRef }) => {
+  if (!credentialStore) return false;
   const settings = readSettings();
-  bridgeSession = decryptLocalSecret(settings.bridgeSessionEncrypted);
-  const pairing = decryptLocalSecret(settings.bridgePairingEncrypted);
+  const encoded = settings[settingKey];
+  if (!encoded) return false;
+  try {
+    if (!credentialStore.hasSecret(credentialRef)) {
+      const decoded = decryptLocalSecret(encoded);
+      if (!decoded) return false;
+      credentialStore.setSecret(credentialRef, decoded);
+    }
+    if (!credentialStore.hasSecret(credentialRef)) return false;
+    removeSettingsKeys([settingKey]);
+    return true;
+  } catch (error) {
+    console.warn(`[Connections] Legacy credential migration skipped for ${settingKey}: ${error.message}`);
+    return false;
+  }
+};
+const migrateLegacyCredentials = () => {
+  migrateLegacyCredentialSetting({
+    settingKey: 'bridgeSessionEncrypted',
+    credentialRef: 'credential:supabase:hearth',
+  });
+  migrateLegacyCredentialSetting({
+    settingKey: 'publicTasksSessionEncrypted',
+    credentialRef: 'credential:supabase:xgen',
+  });
+  migrateLegacyCredentialSetting({
+    settingKey: 'bridgePairingEncrypted',
+    credentialRef: BRIDGE_PAIRING_CREDENTIAL_REF,
+  });
+};
+const readConnectionCredential = (alias) => {
+  if (!connectionService) return null;
+  try { return connectionService.getCredential(alias); }
+  catch (error) {
+    console.warn(`[Connections] Could not load credential for ${alias}: ${error.message}`);
+    return null;
+  }
+};
+const loadBridgeSecrets = () => {
+  bridgeSession = readConnectionCredential(BRIDGE_CONNECTION_ALIAS);
+  let pairing = null;
+  try { pairing = credentialStore?.getSecret(BRIDGE_PAIRING_CREDENTIAL_REF) || null; }
+  catch (error) { console.warn(`[Connections] Could not load bridge pairing secret: ${error.message}`); }
   bridgePairingSecret = typeof pairing?.secret === 'string' ? pairing.secret : null;
 };
 // A SEPARATE encrypted-at-rest session for Project X -- never derived from,
-// or falls back to, bridgeSession (see supabasePublicTasksAuthRequest /
-// applyPublicTasksSession / ensurePublicTasksSession below, and the
-// publicTasks:sign-in/-up/-out IPC handlers, which are Project X's OWN
-// sign-in flow, deliberately isolated from the legacy bridge's).
+// or falls back to, bridgeSession. P3 moves storage behind the canonical
+// Connection Service while preserving this strict auth-domain isolation.
 const loadPublicTasksSecrets = () => {
-  const settings = readSettings();
-  publicTasksSession = decryptLocalSecret(settings.publicTasksSessionEncrypted);
+  publicTasksSession = readConnectionCredential(PUBLIC_TASKS_CONNECTION_ALIAS);
 };
 const persistBridgeSession = (session) => {
+  if (!connectionService) throw new Error('connection_service_unavailable');
   bridgeSession = session;
-  saveSettings({ bridgeSessionEncrypted: encryptLocalSecret(session) });
+  connectionService.setCredential(BRIDGE_CONNECTION_ALIAS, session);
 };
 const clearBridgeSession = () => {
   bridgeSession = null;
-  saveSettings({ bridgeSessionEncrypted: null, bridgeEnabled: false });
+  saveSettings({ bridgeEnabled: false });
+  if (!connectionService) throw new Error('connection_service_unavailable');
+  connectionService.clearCredential(BRIDGE_CONNECTION_ALIAS);
 };
 const persistPublicTasksSession = (session) => {
+  if (!connectionService) throw new Error('connection_service_unavailable');
   publicTasksSession = session;
-  saveSettings({ publicTasksSessionEncrypted: encryptLocalSecret(session) });
+  connectionService.setCredential(PUBLIC_TASKS_CONNECTION_ALIAS, session);
 };
 const clearPublicTasksSession = () => {
   publicTasksSession = null;
-  saveSettings({ publicTasksSessionEncrypted: null });
+  if (!connectionService) throw new Error('connection_service_unavailable');
+  connectionService.clearCredential(PUBLIC_TASKS_CONNECTION_ALIAS);
 };
 /** Small, renderer-facing snapshot -- never includes the access/refresh token itself. */
 const getPublicTasksState = () => ({
@@ -231,6 +305,30 @@ const getPublicTasksState = () => ({
 });
 const sendPublicTasksState = () => sendEvent({ type: 'publicTasks:state', state: getPublicTasksState() });
 const sendEvent = (event) => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('server:event', event); };
+
+const initializeConnectionInfrastructure = async () => {
+  const { ConnectionRegistry } = await importFromHere('../mcp/connections/registry.mjs');
+  const { builtinConnectionDefinitions } = await importFromHere('../mcp/connections/model.mjs');
+  const userDataPath = app.getPath('userData');
+
+  connectionRegistry = new ConnectionRegistry({
+    storagePath: path.join(userDataPath, 'connections.json'),
+  });
+  connectionRegistry.load();
+  connectionRegistry.ensure(builtinConnectionDefinitions(readSettings()));
+
+  credentialStore = new SecureCredentialStore({
+    storagePath: path.join(userDataPath, 'credentials.json'),
+    safeStorage,
+  });
+  connectionService = new ConnectionService({
+    registry: connectionRegistry,
+    secureStore: credentialStore,
+  });
+
+  migrateLegacyCredentials();
+  connectionService.refreshAllHealth();
+};
 
 let canonicalJson = null;
 let canonicalizeXTask = null;
@@ -1375,6 +1473,12 @@ app.on('second-instance', () => {
 });
 app.whenReady().then(async () => {
   try {
+    await initializeConnectionInfrastructure();
+  } catch (err) {
+    console.error('[Connections] Failed to initialize secure connection infrastructure:', err.message);
+  }
+
+  try {
     const { TaskStore } = await importFromHere('../mcp/executors/task-store.mjs');
     const { setTaskStore } = await importFromHere('../mcp/executors/antigravity.mjs');
     const tasksPath = path.join(app.getPath('userData'), 'tasks.json');
@@ -1568,11 +1672,18 @@ app.whenReady().then(async () => {
     };
   }
 
-  ipcMain.handle('settings:get', () => {
-    const { bridgeSessionEncrypted, bridgePairingEncrypted, ...publicSettings } = readSettings();
-    return publicSettings;
+  ipcMain.handle('settings:get', () => publicSettingsSnapshot());
+  ipcMain.handle('connections:list', () => {
+    if (!connectionService) return [];
+    return connectionService.listPublic();
+  });
+  ipcMain.handle('connections:refresh', (_event, alias) => {
+    if (!connectionService) throw new Error('connection_service_unavailable');
+    if (alias) return [connectionService.refreshHealth(alias)];
+    return connectionService.refreshAllHealth();
   });
   ipcMain.handle('settings:save', async (_event, settings) => {
+    settings = sanitizeRendererSettingsInput(settings);
     if (settings.workspace && settings.workspace !== readSettings().workspace && hasLiveXQueueEntries()) throw xQueueError('workspace_locked_by_x_queue');
     const { hasRunningTask } = await importFromHere('../mcp/executors/antigravity.mjs');
     if (settings.workspace && (goalRunner?.is_goal_active() || (hasRunningTask && hasRunningTask()))) {
@@ -2356,7 +2467,8 @@ app.whenReady().then(async () => {
       if (!bridgePairingSecret) {
         const pairing = generatePairingSecret();
         bridgePairingSecret = pairing.secret;
-        saveSettings({ bridgePairingEncrypted: encryptLocalSecret({ secret: pairing.secret }) });
+        if (!credentialStore) throw new Error('credential_store_unavailable');
+        credentialStore.setSecret(BRIDGE_PAIRING_CREDENTIAL_REF, { secret: pairing.secret });
       }
       const { hashPairingSecret } = await importFromHere('../mcp/bridge/identity.mjs');
       const currentSettings = readSettings();

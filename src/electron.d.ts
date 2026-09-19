@@ -1,5 +1,22 @@
 type PermissionValue = 'Allow' | 'Ask' | 'Blocked';
 interface ControlSettings { workspace: string; port: number; theme: 'light' | 'dark'; permissions: Record<string, PermissionValue>; }
+
+type ConnectionStatus = 'UNKNOWN' | 'CONNECTED' | 'DISCONNECTED' | 'EXPIRED' | 'NEEDS_REAUTH' | 'ERROR';
+interface ConnectionSummary {
+  id: string;
+  alias: string;
+  provider: 'github' | 'supabase' | 'vercel';
+  label: string;
+  target: Record<string, unknown>;
+  capabilities: string[];
+  status: ConnectionStatus;
+  account: string | null;
+  lastCheckedAt: string | null;
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 interface ServerState { running: boolean; port: number; pid: number | null; }
 interface ServerEvent { type: 'state' | 'log' | 'approval' | 'approval:resolved' | 'bridge:state' | 'publicTasks:state' | 'goals:updated'; state?: ServerState | BridgeState | PublicTasksState; goal?: Goal; source?: string; tone?: string; message?: string; requestId?: string; permission?: string; action?: string; allowed?: boolean; reason?: 'user' | 'timeout' | 'aborted' | 'shutdown'; }
 
@@ -157,6 +174,8 @@ interface Window { controlApp: {
   platform: string;
   getSettings: () => Promise<ControlSettings>;
   saveSettings: (settings: Partial<ControlSettings>) => Promise<ControlSettings>;
+  connectionsList: () => Promise<ConnectionSummary[]>;
+  connectionsRefresh: (alias?: string) => Promise<ConnectionSummary[]>;
   localChatStatus: () => Promise<{ health: any; models: any }>;
   localChatContext: (request?: { model?: string; profile?: string; longResponse?: boolean; ollamaAvailable?: boolean }) => Promise<{ runtime: string; capabilities: { available: string[]; unavailable: string[] }; project: string; safety: string; responseStyle: string }>;
   storageAuditScan: () => Promise<any>;

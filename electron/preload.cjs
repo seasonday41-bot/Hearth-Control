@@ -3,6 +3,8 @@ contextBridge.exposeInMainWorld('controlApp', {
   platform: process.platform,
   getSettings: () => ipcRenderer.invoke('settings:get'),
   saveSettings: (settings) => ipcRenderer.invoke('settings:save', settings),
+  connectionsList: () => ipcRenderer.invoke('connections:list'),
+  connectionsRefresh: (alias) => ipcRenderer.invoke('connections:refresh', alias),
   localChatStatus: () => ipcRenderer.invoke('local-chat:status'),
   localChatContext: (request) => ipcRenderer.invoke('local-chat:context', request),
   storageAuditScan: () => ipcRenderer.invoke('storage-audit:scan'),
