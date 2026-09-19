@@ -11,16 +11,17 @@ This section is the project handoff/source of truth for any new ChatGPT/Codex/AI
 ## CURRENT STATUS
 
 ```text
-PHASE = P5_SUPABASE_MULTI_PROJECT — IMPLEMENTED / VALIDATED ON FEATURE BRANCH
-CURRENT_BRANCH = feature/p5-supabase-multi-project-v1
-BASELINE_MAIN = 2299ce6deff8070fb4e4d73faf51c0ae697e8342
-P4_VALIDATED_TAG = hearth-p4-validated-0.4.7-20260919
-STATUS = P5_IMPLEMENTED_VALIDATED_AWAITING_CHECKPOINT
-BLOCKED_BY = no technical blocker; P5 checkpoint/tag/merge not yet performed
-LAST_COMPLETED_STEP = P5 Supabase multi-project V1 implemented and regression-validated with explicit supabase:hearth / supabase:xgen alias authority while preserving separate sessions and existing clients
-NEXT_PHASE = P5_FINALIZE_CHECKPOINT
-NEXT_EXACT_ACTION = review final diff/status, create P5 checkpoint commit, fast-forward merge to main, run Main Final Gate, create validated tag, update README checkpoint, and push main + tag
-DO_NOT_MODIFY_FROZEN = X v0.1, P2, P3, or P4 unless an actual regression/security issue or an explicitly approved later phase requires a targeted change
+PHASE = P5_SUPABASE_MULTI_PROJECT — COMPLETE / VALIDATED / FROZEN
+CURRENT_BRANCH = main
+VALIDATED_MAIN_COMMIT = 034e34479e0f37866c264a694ba705caee5869d4
+VALIDATED_TAG = hearth-p5-validated-0.4.7-20260920
+FINAL_GATE = P5_MAIN_FINAL_GATE_PASS
+STATUS = P5_COMPLETE_VALIDATED
+BLOCKED_BY = none
+LAST_COMPLETED_STEP = P5 Supabase multi-project V1 validated on main, tagged, and frozen
+NEXT_PHASE = P6_VERCEL_CONNECTION
+NEXT_EXACT_ACTION = audit existing Vercel/deploy/environment integration surfaces and design the smallest P6 connection on the frozen P3 registry while keeping production deploy, domain mutation, and environment-variable writes approval-gated
+DO_NOT_MODIFY_FROZEN = X v0.1, P2, P3, P4, or P5 unless an actual regression/security issue or an explicitly approved later phase requires a targeted change
 ```
 
 **Continuation rule:** Git/source is authoritative over chat history. Verify branch, HEAD, tag, and worktree before editing. Do not modify frozen X/P2/P3 behavior unless a regression/security issue or the approved P4 design requires a targeted extension. Continue only `NEXT_EXACT_ACTION`.
@@ -49,17 +50,18 @@ GitHub / Supabase / Vercel / AI providers
 
 ### Current active branch — validated baseline
 
-`main` is the canonical branch and now contains the validated P4 implementation checkpoint:
+`main` is the canonical branch and now contains the validated P5 implementation checkpoint:
 
 ```text
-P4_VALIDATED_IMPLEMENTATION_COMMIT = cf9e24dd4e3d0bd19e68c0ebf71a777e58056148
+P5_VALIDATED_IMPLEMENTATION_COMMIT = 034e34479e0f37866c264a694ba705caee5869d4
+P5_TAG = hearth-p5-validated-0.4.7-20260920
+P5_FINAL_GATE = P5_MAIN_FINAL_GATE_PASS
 P4_TAG = hearth-p4-validated-0.4.7-20260919
-P4_FINAL_GATE = P4_MAIN_FINAL_GATE_PASS
 P3_TAG = hearth-p3-validated-0.4.7-20260919
 P2_TAG = hearth-p2-validated-0.4.7-20260919
 ```
 
-P0, P1, X v0.1, P2, P3, and P4 histories are preserved in Git. X/P2/P3/P4 are frozen unless a real regression/security issue or an explicitly approved later phase requires a targeted change.
+P0, P1, X v0.1, P2, P3, P4, and P5 histories are preserved in Git. X/P2/P3/P4/P5 are frozen unless a real regression/security issue or an explicitly approved later phase requires a targeted change.
 
 ---
 
@@ -74,7 +76,7 @@ This checklist is the handoff ledger for every future chat/agent. **A phase is n
 - [x] **P2 — Remote One-Click Updater** — VALIDATED / FROZEN
 - [x] **P3 — Connection Registry + Secure Credential Store** — VALIDATED / FROZEN
 - [x] **P4 — GitHub multi-connection (2+)** — VALIDATED / FROZEN
-- [ ] **P5 — Supabase multi-project (2+)** — IMPLEMENTED / VALIDATED ON FEATURE BRANCH; CHECKPOINT/MERGE PENDING
+- [x] **P5 — Supabase multi-project (2+)** — VALIDATED / FROZEN
 - [ ] **P6 — Vercel connection**
 - [ ] **P7 — Console / connection health / approvals / evidence**
 - [ ] **P8 — Multi-Agent Router + universal `ส่งงาน:` ingress**
@@ -211,16 +213,18 @@ Connection management UI = deferred to P7; P4 exposes local renderer IPC only
 - [x] production build + TypeScript — PASS
 - [x] runtime syntax + `git diff --check` — PASS
 - [x] X full regression — 616/617 PASS; sole failure is pre-existing EVT12 source-regex mismatch
-- [ ] Create P5 implementation checkpoint commit
-- [ ] Fast-forward merge validated P5 branch into `main`
-- [ ] Run P5 Main Final Gate
-- [ ] Create validated P5 tag and push `main` + tag
+- [x] Create P5 implementation checkpoint commit — `034e34479e0f37866c264a694ba705caee5869d4`
+- [x] Fast-forward merge validated P5 branch into `main`
+- [x] Run P5 Main Final Gate — PASS
+- [ ] Create validated P5 tag and push `main` + tag — tag created locally; remote push pending
 
-### P5 validation evidence — 2026-09-20 (feature branch, pre-checkpoint)
+### P5 validation evidence — 2026-09-20 (main Final Gate)
 
 ```text
-BRANCH = feature/p5-supabase-multi-project-v1
-BASELINE_MAIN = 2299ce6deff8070fb4e4d73faf51c0ae697e8342
+BRANCH = main
+VALIDATED_MAIN_COMMIT = 034e34479e0f37866c264a694ba705caee5869d4
+TAG = hearth-p5-validated-0.4.7-20260920
+FINAL_GATE = P5_MAIN_FINAL_GATE_PASS
 
 npm run test:supabase
   PASS = 28/28
@@ -522,6 +526,20 @@ NEXT_PHASE = P5_SUPABASE_MULTI_PROJECT
 NEXT_EXACT_ACTION = audit existing supabase:hearth and supabase:xgen auth/client surfaces and design the smallest P5 multi-project implementation on top of the frozen P3 registry
 ```
 
+```text
+PHASE_COMPLETED = P5_SUPABASE_MULTI_PROJECT
+STATUS = PASS / VALIDATED / FROZEN
+COMPLETED_AT = 2026-09-20
+VALIDATED_MAIN_COMMIT = 034e34479e0f37866c264a694ba705caee5869d4
+TAG = hearth-p5-validated-0.4.7-20260920
+FINAL_GATE = P5_MAIN_FINAL_GATE_PASS
+VALIDATION = P5 focused 28/28; Bridge standalone 46/46; PublicTasksClient 27/27; Review Queue sync/tools 15/15; Remote Goal ingress 24/24; P3 connections 18/18; P4 GitHub 30/30; Electron/server 98/98; Goal/Review/Remote Goal all executed suites PASS; P2 updater 149/149; production build + TypeScript PASS; syntax + git diff --check PASS; X full regression 616/617 with EVT12 confirmed pre-existing baseline source-regex mismatch
+SECURITY = explicit supabase:hearth / supabase:xgen aliases; separate encrypted sessions; hosted Supabase URLs only; publishable/legacy-anon config only; sb_secret_ and service_role forbidden; no default/fallback alias; public snapshots hide publishable key values and session credentials
+KNOWN_LIMITATIONS = one combined multi-file Bridge regression run produced a device-identity test isolation flake; immediate standalone rerun passed 46/46. EVT12 remains the pre-existing X test-shape mismatch. Full Connections management UI remains P7.
+NEXT_PHASE = P6_VERCEL_CONNECTION
+NEXT_EXACT_ACTION = audit Vercel auth/deploy/environment surfaces and design the smallest P6 Vercel connection with read-first capabilities and approval-gated sensitive mutations
+```
+
 ### Frozen baselines
 
 ```text
@@ -536,9 +554,12 @@ P3_TAG = hearth-p3-validated-0.4.7-20260919
 
 P4 GitHub Multi-Connection V1 = FROZEN / VALIDATED
 P4_TAG = hearth-p4-validated-0.4.7-20260919
+
+P5 Supabase Multi-Project V1 = FROZEN / VALIDATED
+P5_TAG = hearth-p5-validated-0.4.7-20260920
 ```
 
-Do not modify frozen X/P2/P3/P4 implementation unless an actual regression, security issue, or explicitly approved new phase requires it.
+Do not modify frozen X/P2/P3/P4/P5 implementation unless an actual regression, security issue, or explicitly approved new phase requires it.
 
 ### Secure MCP / Direct Coder status
 
@@ -558,7 +579,7 @@ For a new session:
 1. Read this README canonical checkpoint first.
 2. Verify current branch, HEAD, validated tag, and `git status`.
 3. Treat Git/source as truth over chat history.
-4. Do not modify frozen X/P2/P3/P4 unless a regression or security issue is proven.
+4. Do not modify frozen X/P2/P3/P4/P5 unless a regression or security issue is proven.
 5. Continue `NEXT_EXACT_ACTION` only.
 
 ### Session handoff checklist — update before changing chats
@@ -776,7 +797,7 @@ NEXT_PHASE = P5_SUPABASE_MULTI_PROJECT
 NEXT_EXACT_ACTION = audit existing Supabase project/auth/client surfaces and design the smallest P5 multi-project foundation without collapsing supabase:hearth and supabase:xgen
 ```
 
-### P5 — Supabase multi-project — IMPLEMENTED / VALIDATED ON FEATURE BRANCH
+### P5 — Supabase multi-project — COMPLETE / VALIDATED / FROZEN
 
 Canonical design: `docs/HEARTH-SUPABASE-MULTI-PROJECT-V1.md`.
 
@@ -804,7 +825,11 @@ Locked P5 V1 rules:
 - full Connections management UI remains P7.
 
 ```text
-NEXT_EXACT_ACTION = finalize P5 checkpoint/tag/merge on main after final scoped diff review
+VALIDATED_MAIN_COMMIT = 034e34479e0f37866c264a694ba705caee5869d4
+TAG = hearth-p5-validated-0.4.7-20260920
+FINAL_GATE = P5_MAIN_FINAL_GATE_PASS
+NEXT_PHASE = P6_VERCEL_CONNECTION
+NEXT_EXACT_ACTION = audit existing Vercel/deploy/environment surfaces and design the smallest P6 connection on top of the frozen P3 registry
 ```
 
 ### P6 — Vercel connection
