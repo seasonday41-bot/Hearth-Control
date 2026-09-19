@@ -11,19 +11,20 @@ This section is the project handoff/source of truth for any new ChatGPT/Codex/AI
 ## CURRENT STATUS
 
 ```text
-PHASE = P8_MULTI_AGENT_ROUTER_UNIVERSAL_INGRESS — IMPLEMENTED / VALIDATED ON FEATURE BRANCH
-CURRENT_BRANCH = feature/p8-multi-agent-router-v1
-BASELINE_MAIN = d0278c4c6ba0f90fd895164fa268bcf7818a1730
-P7_VALIDATED_TAG = hearth-p7-validated-0.4.7-20260920
-STATUS = P8_IMPLEMENTED_VALIDATED_AWAITING_CHECKPOINT
-BLOCKED_BY = no technical blocker; P8 checkpoint/tag/merge not yet performed
-LAST_COMPLETED_STEP = P8 hearth-job-v1 + deterministic X/Antigravity router + Electron-owned universal submit/status ingress implemented and regression-validated without creating a second runtime/store or direct fresh-job Codex route
-NEXT_PHASE = P8_FINALIZE_CHECKPOINT
-NEXT_EXACT_ACTION = review final diff/status, create P8 implementation checkpoint, fast-forward merge to main, run Main Final Gate, create validated tag, update README checkpoint, and push main + tag
-DO_NOT_MODIFY_FROZEN = X v0.1, P2, P3, P4, P5, P6, or P7 unless an actual regression/security issue or an explicitly approved later phase requires a targeted change
+PHASE = P8_MULTI_AGENT_ROUTER_UNIVERSAL_INGRESS — COMPLETE / VALIDATED / FROZEN
+CURRENT_BRANCH = main
+VALIDATED_MAIN_COMMIT = 016225615855f65e0c11cf048c6f8a654b481a88
+VALIDATED_TAG = hearth-p8-validated-0.4.7-20260920
+FINAL_GATE = P8_MAIN_FINAL_GATE_PASS
+STATUS = P8_COMPLETE_VALIDATED
+BLOCKED_BY = none
+LAST_COMPLETED_STEP = P8 Multi-Agent Router + Universal Ingress V1 validated on main, tagged, and frozen
+NEXT_PHASE = P9_FULL_UI_REDESIGN
+NEXT_EXACT_ACTION = audit the current App/UI information architecture and split the large App/styles into clear pages/components incrementally without changing frozen runtime, routing, permission, provider, Goal, X, updater, or connection behavior
+DO_NOT_MODIFY_FROZEN = X v0.1, P2, P3, P4, P5, P6, P7, or P8 unless an actual regression/security issue or an explicitly approved later phase requires a targeted change
 ```
 
-**Continuation rule:** Git/source is authoritative over chat history. Verify branch, HEAD, tag, and worktree before editing. Do not modify frozen X/P2/P3/P4/P5/P6/P7 behavior unless a regression/security issue or the approved current phase requires a targeted extension. Continue only `NEXT_EXACT_ACTION`.
+**Continuation rule:** Git/source is authoritative over chat history. Verify branch, HEAD, tag, and worktree before editing. Do not modify frozen X/P2/P3/P4/P5/P6/P7/P8 behavior unless a regression/security issue or the approved current phase requires a targeted extension. Continue only `NEXT_EXACT_ACTION`.
 
 ### Current validated/stable direction
 
@@ -49,12 +50,13 @@ GitHub / Supabase / Vercel / AI providers
 
 ### Current active branch — validated baseline
 
-`main` is the canonical branch and now contains the validated P7 implementation checkpoint:
+`main` is the canonical branch and now contains the validated P8 implementation checkpoint:
 
 ```text
-P7_VALIDATED_IMPLEMENTATION_COMMIT = 7865119f9e242099db9ba30b9215e0fd5dfd9a8d
+P8_VALIDATED_IMPLEMENTATION_COMMIT = 016225615855f65e0c11cf048c6f8a654b481a88
+P8_TAG = hearth-p8-validated-0.4.7-20260920
+P8_FINAL_GATE = P8_MAIN_FINAL_GATE_PASS
 P7_TAG = hearth-p7-validated-0.4.7-20260920
-P7_FINAL_GATE = P7_MAIN_FINAL_GATE_PASS
 P6_TAG = hearth-p6-validated-0.4.7-20260920
 P5_TAG = hearth-p5-validated-0.4.7-20260920
 P4_TAG = hearth-p4-validated-0.4.7-20260919
@@ -62,7 +64,7 @@ P3_TAG = hearth-p3-validated-0.4.7-20260919
 P2_TAG = hearth-p2-validated-0.4.7-20260919
 ```
 
-P0, P1, X v0.1, P2, P3, P4, P5, P6, and P7 histories are preserved in Git. X/P2/P3/P4/P5/P6/P7 are frozen unless a real regression/security issue or an explicitly approved later phase requires a targeted change.
+P0, P1, X v0.1, P2, P3, P4, P5, P6, P7, and P8 histories are preserved in Git. X/P2/P3/P4/P5/P6/P7/P8 are frozen unless a real regression/security issue or an explicitly approved later phase requires a targeted change.
 
 ---
 
@@ -80,7 +82,7 @@ This checklist is the handoff ledger for every future chat/agent. **A phase is n
 - [x] **P5 — Supabase multi-project (2+)** — VALIDATED / FROZEN
 - [x] **P6 — Vercel connection** — VALIDATED / FROZEN
 - [x] **P7 — Console / connection health / approvals / evidence** — VALIDATED / FROZEN
-- [ ] **P8 — Multi-Agent Router + universal `ส่งงาน:` ingress** — IMPLEMENTED / VALIDATED ON FEATURE BRANCH; CHECKPOINT/MERGE PENDING
+- [x] **P8 — Multi-Agent Router + universal `ส่งงาน:` ingress** — VALIDATED / FROZEN
 - [ ] **P9 — Full UI redesign LAST**
 
 ### P4 detailed checklist — current truth
@@ -525,16 +527,18 @@ SCOPE / SECURITY =
 - [x] production build + TypeScript — PASS
 - [x] X full regression — 616/617 PASS; sole failure is pre-existing EVT12 source-regex mismatch
 - [x] syntax + `git diff --check` — PASS
-- [ ] Create P8 implementation checkpoint commit
-- [ ] Fast-forward merge validated P8 branch into `main`
-- [ ] Run P8 Main Final Gate
-- [ ] Create validated P8 tag and push `main` + tag
+- [x] Create P8 implementation checkpoint commit — `016225615855f65e0c11cf048c6f8a654b481a88`
+- [x] Fast-forward merge validated P8 branch into `main`
+- [x] Run P8 Main Final Gate — PASS
+- [ ] Create validated P8 tag and push `main` + tag — tag created locally; remote push pending
 
-### P8 validation evidence — 2026-09-20 (feature branch, pre-checkpoint)
+### P8 validation evidence — 2026-09-20 (main Final Gate)
 
 ```text
-BRANCH = feature/p8-multi-agent-router-v1
-BASELINE_MAIN = d0278c4c6ba0f90fd895164fa268bcf7818a1730
+BRANCH = main
+VALIDATED_MAIN_COMMIT = 016225615855f65e0c11cf048c6f8a654b481a88
+TAG = hearth-p8-validated-0.4.7-20260920
+FINAL_GATE = P8_MAIN_FINAL_GATE_PASS
 
 npm run test:router
   PASS = 24/24
@@ -884,6 +888,20 @@ NEXT_PHASE = P8_MULTI_AGENT_ROUTER_UNIVERSAL_INGRESS
 NEXT_EXACT_ACTION = audit existing task/job/Goal/X/specialist routing and design the smallest generic Hearth job contract + user-facing ส่งงาน: ingress while preserving x-task-v1 as an X-internal adapter target
 ```
 
+```text
+PHASE_COMPLETED = P8_MULTI_AGENT_ROUTER_UNIVERSAL_INGRESS
+STATUS = PASS / VALIDATED / FROZEN
+COMPLETED_AT = 2026-09-20
+VALIDATED_MAIN_COMMIT = 016225615855f65e0c11cf048c6f8a654b481a88
+TAG = hearth-p8-validated-0.4.7-20260920
+FINAL_GATE = P8_MAIN_FINAL_GATE_PASS
+VALIDATION = P8 focused 24/24; P3 connections 18/18; P4 GitHub 30/30; P5 Supabase 28/28; P6 Vercel 31/31; P7 Console 10/10; Electron/HTTP + X MCP registry 119/119; Bridge standalone 46/46; Goal/Review/Remote Goal all executed suites PASS; P2 updater 149/149; production build + TypeScript PASS; syntax + git diff --check PASS; X full regression 616/617 with EVT12 confirmed pre-existing baseline source-regex mismatch
+SECURITY = no new executor/runtime/store/status database; semantic kind only; no caller worker/provider/workspace-root/repair-budget authority; generic secret-shaped text redacted before routing; X uses existing ingestXTask/X queue/shared admission; Antigravity uses Electron TaskStore/shared admission; existing permissions preserved; caller disconnect aborts pre-commit approval waiters; Codex remains specialist-only behind the validated handoff/authorization/result lifecycle
+KNOWN_LIMITATIONS = the already-running MCP server process on port 3001 was started before P8 and must restart before that live process advertises hearth_job_submit/hearth_job_status; fresh HTTP child and stdio source discovery validated the new tools. EVT12 remains the pre-existing X test-shape mismatch. Full visual redesign remains P9.
+NEXT_PHASE = P9_FULL_UI_REDESIGN
+NEXT_EXACT_ACTION = audit the current App/UI information architecture and split the large App/styles into clear pages/components incrementally without changing frozen runtime, routing, permission, provider, Goal, X, updater, or connection behavior
+```
+
 ### Frozen baselines
 
 ```text
@@ -907,9 +925,12 @@ P6_TAG = hearth-p6-validated-0.4.7-20260920
 
 P7 Operational Console V1 = FROZEN / VALIDATED
 P7_TAG = hearth-p7-validated-0.4.7-20260920
+
+P8 Multi-Agent Router + Universal Ingress V1 = FROZEN / VALIDATED
+P8_TAG = hearth-p8-validated-0.4.7-20260920
 ```
 
-Do not modify frozen X/P2/P3/P4/P5/P6/P7 implementation unless an actual regression, security issue, or explicitly approved new phase requires it.
+Do not modify frozen X/P2/P3/P4/P5/P6/P7/P8 implementation unless an actual regression, security issue, or explicitly approved new phase requires it.
 
 ### Secure MCP / Direct Coder status
 
@@ -929,7 +950,7 @@ For a new session:
 1. Read this README canonical checkpoint first.
 2. Verify current branch, HEAD, validated tag, and `git status`.
 3. Treat Git/source as truth over chat history.
-4. Do not modify frozen X/P2/P3/P4/P5/P6/P7 unless a regression or security issue is proven.
+4. Do not modify frozen X/P2/P3/P4/P5/P6/P7/P8 unless a regression or security issue is proven.
 5. Continue `NEXT_EXACT_ACTION` only.
 
 ### Session handoff checklist — update before changing chats
@@ -1253,7 +1274,7 @@ NEXT_PHASE = P8_MULTI_AGENT_ROUTER_UNIVERSAL_INGRESS
 NEXT_EXACT_ACTION = audit current task/job/Goal/X/specialist routing and design the smallest generic Hearth job ingress for user-facing ส่งงาน: commands without exposing x-task-v1 as the permanent user contract
 ```
 
-### P8 — Multi-Agent Router + universal ingress — IMPLEMENTED / VALIDATED ON FEATURE BRANCH
+### P8 — Multi-Agent Router + universal ingress — COMPLETE / VALIDATED / FROZEN
 
 Canonical design: `docs/HEARTH-MULTI-AGENT-ROUTER-V1.md`.
 
@@ -1285,7 +1306,11 @@ Locked P8 V1 rules:
 - Future Search/Invest/GVideo workers extend semantic routing later; they do not require replacing this user contract.
 
 ```text
-NEXT_EXACT_ACTION = finalize P8 checkpoint/tag/merge on main after final scoped diff review
+VALIDATED_MAIN_COMMIT = 016225615855f65e0c11cf048c6f8a654b481a88
+TAG = hearth-p8-validated-0.4.7-20260920
+FINAL_GATE = P8_MAIN_FINAL_GATE_PASS
+NEXT_PHASE = P9_FULL_UI_REDESIGN
+NEXT_EXACT_ACTION = audit the current App/UI information architecture and split the large App/styles into clear pages/components incrementally without changing frozen runtime/business behavior
 ```
 
 ### P9 — Full UI redesign **LAST**
