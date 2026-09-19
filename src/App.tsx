@@ -453,8 +453,27 @@ export default function App() {
   const toggleServer = async () => {
     if (busy) return;
     setBusy(true);
-    if (running) await window.controlApp.stopServer();
-    else await window.controlApp.startServer({ workspace, port });
+    try {
+      if (running) {
+        const state = await window.controlApp.stopServer();
+        if (state) {
+          setRunning(state.running);
+          setPort(state.port);
+          setPid(state.pid);
+        }
+      } else {
+        const state = await window.controlApp.startServer({ workspace, port });
+        if (state) {
+          setRunning(state.running);
+          setPort(state.port);
+          setPid(state.pid);
+        }
+      }
+    } catch (error) {
+      flash(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
   };
 
   const rotatePermission = (index: number) => {

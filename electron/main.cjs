@@ -1,6 +1,7 @@
 const { app, BrowserWindow, dialog, ipcMain, safeStorage, Notification, shell } = require('electron');
 const { Worker } = require('node:worker_threads');
 const { fork, spawn } = require('node:child_process');
+const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
@@ -827,42 +828,128 @@ const refreshPublicTasksSessionBestEffort = async () => {
   if (publicTasksSession?.refreshToken) { try { await ensurePublicTasksSession(); } catch {} }
 };
 
-const stopServer = async () => {
-  if (!serverProcess) return serverState;
-  const child = serverProcess;
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => child.kill('SIGKILL'), 2500);
-    child.once('exit', () => { clearTimeout(timer); resolve(serverState); });
-    child.send({ type: 'shutdown' });
+const probeHearthServer = (port = 3001) => new Promise((resolve) => {
+  const req = http.get(`http://127.0.0.1:${port}/health`, { timeout: 800 }, (res) => {
+    let data = '';
+    res.setEncoding('utf8');
+    res.on('data', (chunk) => { data += chunk; });
+    res.on('end', () => {
+      try {
+        const json = JSON.parse(data);
+        if (json?.status === 'ok' && json?.service === 'hearth-control') {
+          resolve({ running: true, pid: typeof json.pid === 'number' ? json.pid : null, workspace: json.workspace || '' });
+          return;
+        }
+      } catch {}
+      resolve({ running: false, error: 'foreign_service' });
+    });
   });
+  req.on('error', (err) => resolve({ running: false, code: err.code }));
+  req.on('timeout', () => { req.destroy(); resolve({ running: false, code: 'ETIMEDOUT' }); });
+});
+
+const stopServer = async () => {
+  if (serverProcess) {
+    const child = serverProcess;
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => child.kill('SIGKILL'), 2500);
+      child.once('exit', () => { clearTimeout(timer); resolve(serverState); });
+      child.send({ type: 'shutdown' });
+    });
+  }
+  if (serverState.running && serverState.pid) {
+    const targetPid = serverState.pid;
+    try { process.kill(targetPid, 'SIGTERM'); } catch {}
+    const deadline = Date.now() + 2500;
+    while (Date.now() < deadline) {
+      const probe = await probeHearthServer(serverState.port);
+      if (!probe.running) break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    const finalProbe = await probeHearthServer(serverState.port);
+    if (finalProbe.running) {
+      try { process.kill(targetPid, 'SIGKILL'); } catch {}
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    serverState = { running: false, port: serverState.port, pid: null };
+    sendEvent({ type: 'state', state: serverState });
+    sendEvent({ type: 'log', source: 'mcp', tone: 'quiet', message: 'Local control server stopped' });
+    return serverState;
+  }
+  return serverState;
 };
 
 const startServer = async ({ workspace, port }) => {
-  if (serverProcess) return serverState;
-  if (hasLiveXQueueEntries() && !xQueueWorkspaceMatches(workspace)) throw xQueueError('workspace_mismatch');
   const selectedPort = Number(port) || 3001;
-  serverProcess = fork(path.join(__dirname, 'server.cjs'), [], {
-    env: {
-      ...process.env,
-      CONTROL_PORT: String(selectedPort),
-      CONTROL_WORKSPACE: workspace || '',
-      CONTROL_PERMISSIONS: JSON.stringify(readSettings().permissions),
-    },
-    stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
-  });
-  const child = serverProcess;
-  const launchWorkspace = workspace || '';
-  serverState = { running: false, port: selectedPort, pid: serverProcess.pid ?? null };
-  sendEvent({ type: 'log', source: 'core', tone: 'quiet', message: `Starting local server process (PID ${serverProcess.pid})` });
-  serverProcess.stdout.on('data', (chunk) => sendEvent({ type: 'log', source: 'server', tone: 'quiet', message: chunk.toString().trim() }));
-  serverProcess.stderr.on('data', (chunk) => sendEvent({ type: 'log', source: 'server', tone: 'error', message: chunk.toString().trim() }));
-  serverProcess.on('message', async (message) => {
-    if (serverProcess !== child) return;
-    if (message?.type === 'ready') {
-      serverState = { running: true, port: selectedPort, pid: serverProcess?.pid ?? null };
-      sendEvent({ type: 'state', state: serverState });
-      sendEvent({ type: 'log', source: 'mcp', tone: 'success', message: `Local control server listening on 127.0.0.1:${selectedPort}` });
-    }
+  if (serverProcess) {
+    serverState = { running: true, port: selectedPort, pid: serverProcess?.pid ?? null };
+    sendEvent({ type: 'state', state: serverState });
+    return serverState;
+  }
+  if (hasLiveXQueueEntries() && !xQueueWorkspaceMatches(workspace)) throw xQueueError('workspace_mismatch');
+
+  const probe = await probeHearthServer(selectedPort);
+  if (probe.running) {
+    serverState = { running: true, port: selectedPort, pid: probe.pid };
+    sendEvent({ type: 'state', state: serverState });
+    sendEvent({ type: 'log', source: 'mcp', tone: 'quiet', message: `Local control server already running on 127.0.0.1:${selectedPort} (PID ${probe.pid})` });
+    return serverState;
+  }
+  if (probe.error === 'foreign_service') {
+    throw new Error(`Port ${selectedPort} is already in use by another application.`);
+  }
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let startTimeout = null;
+    const finishResolve = (val) => {
+      if (settled) return;
+      settled = true;
+      if (startTimeout) clearTimeout(startTimeout);
+      resolve(val);
+    };
+    const finishReject = (err) => {
+      if (settled) return;
+      settled = true;
+      if (startTimeout) clearTimeout(startTimeout);
+      reject(err);
+    };
+    startTimeout = setTimeout(() => {
+      if (!settled) {
+        try { child.kill('SIGKILL'); } catch {}
+        finishReject(new Error('Server start timed out'));
+      }
+    }, 10000);
+    startTimeout.unref();
+
+    serverProcess = fork(path.join(__dirname, 'server.cjs'), [], {
+      env: {
+        ...process.env,
+        CONTROL_PORT: String(selectedPort),
+        CONTROL_WORKSPACE: workspace || '',
+        CONTROL_PERMISSIONS: JSON.stringify(readSettings().permissions),
+      },
+      stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+    });
+    const child = serverProcess;
+    const launchWorkspace = workspace || '';
+    serverState = { running: false, port: selectedPort, pid: serverProcess.pid ?? null };
+    sendEvent({ type: 'log', source: 'core', tone: 'quiet', message: `Starting local server process (PID ${serverProcess.pid})` });
+    let stderrBuffer = '';
+    serverProcess.stdout.on('data', (chunk) => sendEvent({ type: 'log', source: 'server', tone: 'quiet', message: chunk.toString().trim() }));
+    serverProcess.stderr.on('data', (chunk) => {
+      const msg = chunk.toString().trim();
+      stderrBuffer = (stderrBuffer + '\n' + msg).trim();
+      sendEvent({ type: 'log', source: 'server', tone: 'error', message: msg });
+    });
+    serverProcess.on('message', async (message) => {
+      if (serverProcess !== child) return;
+      if (message?.type === 'ready') {
+        serverState = { running: true, port: selectedPort, pid: serverProcess?.pid ?? null };
+        sendEvent({ type: 'state', state: serverState });
+        sendEvent({ type: 'log', source: 'mcp', tone: 'success', message: `Local control server listening on 127.0.0.1:${selectedPort}` });
+        finishResolve(serverState);
+      }
     if (message?.type === 'approval') sendEvent(message);
     // Child-owned (Antigravity/Files/Terminal/Browser) approval lifecycle
     // notification -- a plain relay, exactly like 'approval' above. Main
@@ -1232,15 +1319,24 @@ const startServer = async ({ workspace, port }) => {
       }
     }
   });
-  serverProcess.once('exit', (code, signal) => {
-    cancelXQueueChild(child);
-    serverProcess = undefined;
-    serverState = { running: false, port: selectedPort, pid: null };
-    sendEvent({ type: 'state', state: serverState });
-    sendEvent({ type: 'log', source: 'mcp', tone: code === 0 || signal === 'SIGTERM' ? 'quiet' : 'error', message: code === 0 || signal === 'SIGTERM' ? 'Local server stopped' : `Server exited unexpectedly (${code ?? signal})` });
+    serverProcess.once('exit', (code, signal) => {
+      cancelXQueueChild(child);
+      if (serverProcess === child) serverProcess = undefined;
+      serverState = { running: false, port: selectedPort, pid: null };
+      sendEvent({ type: 'state', state: serverState });
+      sendEvent({ type: 'log', source: 'mcp', tone: code === 0 || signal === 'SIGTERM' ? 'quiet' : 'error', message: code === 0 || signal === 'SIGTERM' ? 'Local server stopped' : `Server exited unexpectedly (${code ?? signal})` });
+      if (!settled) {
+        const lastErr = stderrBuffer ? `: ${stderrBuffer.split('\n').filter(Boolean).pop()}` : ` (exit code ${code ?? signal})`;
+        finishReject(new Error(`Server failed to start${lastErr}`));
+      }
+    });
+    serverProcess.once('error', (error) => {
+      sendEvent({ type: 'log', source: 'server', tone: 'error', message: error.message });
+      if (!settled) {
+        finishReject(new Error(`Server failed to spawn: ${error.message}`));
+      }
+    });
   });
-  serverProcess.once('error', (error) => sendEvent({ type: 'log', source: 'server', tone: 'error', message: error.message }));
-  return serverState;
 };
 
 const createWindow = () => {
@@ -1814,7 +1910,16 @@ app.whenReady().then(async () => {
   ipcMain.handle('goals:is-active', async () => {
     return goalRunner ? goalRunner.is_goal_active() : false;
   });
-  ipcMain.handle('server:get-state', () => serverState);
+  ipcMain.handle('server:get-state', async () => {
+    if (serverProcess) return serverState;
+    const probe = await probeHearthServer(serverState.port);
+    if (probe.running) {
+      serverState = { running: true, port: serverState.port, pid: probe.pid };
+    } else if (serverState.running && !probe.running) {
+      serverState = { running: false, port: serverState.port, pid: null };
+    }
+    return serverState;
+  });
   ipcMain.handle('server:start', (_event, options) => startServer(options));
   ipcMain.handle('server:stop', () => stopServer());
   ipcMain.handle('server:respond-approval', (_event, response) => {
@@ -2963,6 +3068,7 @@ app.on('before-quit', () => {
   for (const controller of localChatStreams.values()) controller.abort();
   if (continuationRecoveryTimer) clearInterval(continuationRecoveryTimer);
   if (serverProcess) serverProcess.kill('SIGTERM');
+  else if (serverState.pid) { try { process.kill(serverState.pid, 'SIGTERM'); } catch {} }
   if (bridgeClientInstance) bridgeClientInstance.stopPolling();
   for (const timer of taskMonitors.values()) clearInterval(timer);
   taskMonitors.clear();
