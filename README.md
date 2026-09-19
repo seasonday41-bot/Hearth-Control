@@ -530,7 +530,7 @@ SCOPE / SECURITY =
 - [x] Create P8 implementation checkpoint commit — `016225615855f65e0c11cf048c6f8a654b481a88`
 - [x] Fast-forward merge validated P8 branch into `main`
 - [x] Run P8 Main Final Gate — PASS
-- [ ] Create validated P8 tag and push `main` + tag — tag created locally; remote push pending
+- [x] Create validated P8 tag and push `main` + tag — remote `main` verified at `311e19dd29ab5ca781a2b5981e78c5f0e2ebdaba`; tag dereferences to `016225615855f65e0c11cf048c6f8a654b481a88`
 
 ### P8 validation evidence — 2026-09-20 (main Final Gate)
 
