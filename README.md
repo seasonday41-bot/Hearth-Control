@@ -11,16 +11,17 @@ This section is the project handoff/source of truth for any new ChatGPT/Codex/AI
 ## CURRENT STATUS
 
 ```text
-PHASE = P6_VERCEL_CONNECTION — IMPLEMENTED / VALIDATED ON FEATURE BRANCH
-CURRENT_BRANCH = feature/p6-vercel-connection-v1
-BASELINE_MAIN = 8c561b7bef66a3d15e9bc26b3e85b731ee1b0e04
-P5_VALIDATED_TAG = hearth-p5-validated-0.4.7-20260920
-STATUS = P6_IMPLEMENTED_VALIDATED_AWAITING_CHECKPOINT
-BLOCKED_BY = no technical blocker; P6 checkpoint/tag/merge not yet performed
-LAST_COMPLETED_STEP = P6 Vercel read-only connection V1 implemented and regression-validated with Hearth-owned token storage, remote identity/health, explicit vercel:main reads, and dedicated Vercel permission gating
-NEXT_PHASE = P6_FINALIZE_CHECKPOINT
-NEXT_EXACT_ACTION = review final diff/status, create P6 implementation checkpoint, fast-forward merge to main, run Main Final Gate, create validated tag, update README checkpoint, and push main + tag
-DO_NOT_MODIFY_FROZEN = X v0.1, P2, P3, P4, or P5 unless an actual regression/security issue or an explicitly approved later phase requires a targeted change
+PHASE = P6_VERCEL_CONNECTION — COMPLETE / VALIDATED / FROZEN
+CURRENT_BRANCH = main
+VALIDATED_MAIN_COMMIT = 6fc48dd876ebde72af2d49981dde16c0268b2e02
+VALIDATED_TAG = hearth-p6-validated-0.4.7-20260920
+FINAL_GATE = P6_MAIN_FINAL_GATE_PASS
+STATUS = P6_COMPLETE_VALIDATED
+BLOCKED_BY = none
+LAST_COMPLETED_STEP = P6 Vercel read-only connection V1 validated on main, tagged, and frozen
+NEXT_PHASE = P7_CONSOLE_CONNECTION_HEALTH_APPROVALS_EVIDENCE
+NEXT_EXACT_ACTION = audit the current Overview/Permissions/Logs/connection IPC surfaces and design the smallest P7 Console that exposes connection health, approval state, and evidence without adding new execution authority or redesigning frozen provider/runtime behavior
+DO_NOT_MODIFY_FROZEN = X v0.1, P2, P3, P4, P5, or P6 unless an actual regression/security issue or an explicitly approved later phase requires a targeted change
 ```
 
 **Continuation rule:** Git/source is authoritative over chat history. Verify branch, HEAD, tag, and worktree before editing. Do not modify frozen X/P2/P3/P4/P5 behavior unless a regression/security issue or the approved current phase requires a targeted extension. Continue only `NEXT_EXACT_ACTION`.
@@ -49,18 +50,19 @@ GitHub / Supabase / Vercel / AI providers
 
 ### Current active branch — validated baseline
 
-`main` is the canonical branch and now contains the validated P5 implementation checkpoint:
+`main` is the canonical branch and now contains the validated P6 implementation checkpoint:
 
 ```text
-P5_VALIDATED_IMPLEMENTATION_COMMIT = 034e34479e0f37866c264a694ba705caee5869d4
+P6_VALIDATED_IMPLEMENTATION_COMMIT = 6fc48dd876ebde72af2d49981dde16c0268b2e02
+P6_TAG = hearth-p6-validated-0.4.7-20260920
+P6_FINAL_GATE = P6_MAIN_FINAL_GATE_PASS
 P5_TAG = hearth-p5-validated-0.4.7-20260920
-P5_FINAL_GATE = P5_MAIN_FINAL_GATE_PASS
 P4_TAG = hearth-p4-validated-0.4.7-20260919
 P3_TAG = hearth-p3-validated-0.4.7-20260919
 P2_TAG = hearth-p2-validated-0.4.7-20260919
 ```
 
-P0, P1, X v0.1, P2, P3, P4, and P5 histories are preserved in Git. X/P2/P3/P4/P5 are frozen unless a real regression/security issue or an explicitly approved later phase requires a targeted change.
+P0, P1, X v0.1, P2, P3, P4, P5, and P6 histories are preserved in Git. X/P2/P3/P4/P5/P6 are frozen unless a real regression/security issue or an explicitly approved later phase requires a targeted change.
 
 ---
 
@@ -76,7 +78,7 @@ This checklist is the handoff ledger for every future chat/agent. **A phase is n
 - [x] **P3 — Connection Registry + Secure Credential Store** — VALIDATED / FROZEN
 - [x] **P4 — GitHub multi-connection (2+)** — VALIDATED / FROZEN
 - [x] **P5 — Supabase multi-project (2+)** — VALIDATED / FROZEN
-- [ ] **P6 — Vercel connection** — IMPLEMENTED / VALIDATED ON FEATURE BRANCH; CHECKPOINT/MERGE PENDING
+- [x] **P6 — Vercel connection** — VALIDATED / FROZEN
 - [ ] **P7 — Console / connection health / approvals / evidence**
 - [ ] **P8 — Multi-Agent Router + universal `ส่งงาน:` ingress**
 - [ ] **P9 — Full UI redesign LAST**
@@ -311,16 +313,18 @@ SECURITY / ISOLATION =
 - [x] P2 updater — 149/149 PASS
 - [x] production build + TypeScript — PASS
 - [x] X full regression — 616/617 PASS; sole failure is pre-existing EVT12 source-regex mismatch
-- [ ] Create P6 implementation checkpoint commit
-- [ ] Fast-forward merge validated P6 branch into `main`
-- [ ] Run P6 Main Final Gate
-- [ ] Create validated P6 tag and push `main` + tag
+- [x] Create P6 implementation checkpoint commit — `6fc48dd876ebde72af2d49981dde16c0268b2e02`
+- [x] Fast-forward merge validated P6 branch into `main`
+- [x] Run P6 Main Final Gate — PASS
+- [ ] Create validated P6 tag and push `main` + tag — tag created locally; remote push pending
 
-### P6 validation evidence — 2026-09-20 (feature branch, pre-checkpoint)
+### P6 validation evidence — 2026-09-20 (main Final Gate)
 
 ```text
-BRANCH = feature/p6-vercel-connection-v1
-BASELINE_MAIN = 8c561b7bef66a3d15e9bc26b3e85b731ee1b0e04
+BRANCH = main
+VALIDATED_MAIN_COMMIT = 6fc48dd876ebde72af2d49981dde16c0268b2e02
+TAG = hearth-p6-validated-0.4.7-20260920
+FINAL_GATE = P6_MAIN_FINAL_GATE_PASS
 
 npm run test:vercel
   PASS = 31/31
@@ -636,6 +640,20 @@ NEXT_PHASE = P6_VERCEL_CONNECTION
 NEXT_EXACT_ACTION = audit Vercel auth/deploy/environment surfaces and design the smallest P6 Vercel connection with read-first capabilities and approval-gated sensitive mutations
 ```
 
+```text
+PHASE_COMPLETED = P6_VERCEL_CONNECTION
+STATUS = PASS / VALIDATED / FROZEN
+COMPLETED_AT = 2026-09-20
+VALIDATED_MAIN_COMMIT = 6fc48dd876ebde72af2d49981dde16c0268b2e02
+TAG = hearth-p6-validated-0.4.7-20260920
+FINAL_GATE = P6_MAIN_FINAL_GATE_PASS
+VALIDATION = P6 focused 31/31; P3 connections 18/18; P4 GitHub 30/30; P5 Supabase 28/28; Electron/HTTP + X MCP registry 119/119; Bridge standalone 46/46; Goal/Review/Remote Goal all executed suites PASS; P2 updater 149/149; production build + TypeScript PASS; syntax + git diff --check PASS; X full regression 616/617 with EVT12 confirmed pre-existing baseline source-regex mismatch
+SECURITY = fixed api.vercel.com; Hearth-owned secure token storage; remote identity-before-persist; explicit vercel:main alias; optional explicit teamId; Vercel permission defaults Ask; project/deployment read only; no CLI/global auth import; no deploy/promote/rollback/domain/env/project-admin mutation tools
+KNOWN_LIMITATIONS = no live provider smoke through Hearth because no P6 PAT has been entered into Hearth and global Vercel CLI credentials were deliberately not imported. EVT12 remains the pre-existing X test-shape mismatch. Full Connections/Approvals/Evidence Console remains P7.
+NEXT_PHASE = P7_CONSOLE_CONNECTION_HEALTH_APPROVALS_EVIDENCE
+NEXT_EXACT_ACTION = audit current Overview/Permissions/Logs/connection IPC surfaces and design the smallest P7 operational Console without adding provider mutation authority or redesigning frozen runtime/provider behavior
+```
+
 ### Frozen baselines
 
 ```text
@@ -653,9 +671,12 @@ P4_TAG = hearth-p4-validated-0.4.7-20260919
 
 P5 Supabase Multi-Project V1 = FROZEN / VALIDATED
 P5_TAG = hearth-p5-validated-0.4.7-20260920
+
+P6 Vercel Connection V1 = FROZEN / VALIDATED
+P6_TAG = hearth-p6-validated-0.4.7-20260920
 ```
 
-Do not modify frozen X/P2/P3/P4/P5 implementation unless an actual regression, security issue, or explicitly approved new phase requires it.
+Do not modify frozen X/P2/P3/P4/P5/P6 implementation unless an actual regression, security issue, or explicitly approved new phase requires it.
 
 ### Secure MCP / Direct Coder status
 
@@ -675,7 +696,7 @@ For a new session:
 1. Read this README canonical checkpoint first.
 2. Verify current branch, HEAD, validated tag, and `git status`.
 3. Treat Git/source as truth over chat history.
-4. Do not modify frozen X/P2/P3/P4/P5 unless a regression or security issue is proven.
+4. Do not modify frozen X/P2/P3/P4/P5/P6 unless a regression or security issue is proven.
 5. Continue `NEXT_EXACT_ACTION` only.
 
 ### Session handoff checklist — update before changing chats
@@ -928,7 +949,7 @@ NEXT_PHASE = P6_VERCEL_CONNECTION
 NEXT_EXACT_ACTION = audit existing Vercel/deploy/environment surfaces and design the smallest P6 connection on top of the frozen P3 registry
 ```
 
-### P6 — Vercel connection — IMPLEMENTED / VALIDATED ON FEATURE BRANCH
+### P6 — Vercel connection — COMPLETE / VALIDATED / FROZEN
 
 Canonical design: `docs/HEARTH-VERCEL-CONNECTION-V1.md`.
 
@@ -953,7 +974,11 @@ Locked P6 V1 rules:
 - full Connections management UI remains P7.
 
 ```text
-NEXT_EXACT_ACTION = finalize P6 checkpoint/tag/merge on main after final scoped diff review
+VALIDATED_MAIN_COMMIT = 6fc48dd876ebde72af2d49981dde16c0268b2e02
+TAG = hearth-p6-validated-0.4.7-20260920
+FINAL_GATE = P6_MAIN_FINAL_GATE_PASS
+NEXT_PHASE = P7_CONSOLE_CONNECTION_HEALTH_APPROVALS_EVIDENCE
+NEXT_EXACT_ACTION = audit current Overview/Permissions/Logs/connection surfaces and design the smallest P7 operational Console without expanding provider execution authority
 ```
 
 ### P7 — Console / connection health / approvals / evidence
