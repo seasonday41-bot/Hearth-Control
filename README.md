@@ -216,7 +216,7 @@ Connection management UI = deferred to P7; P4 exposes local renderer IPC only
 - [x] Create P5 implementation checkpoint commit — `034e34479e0f37866c264a694ba705caee5869d4`
 - [x] Fast-forward merge validated P5 branch into `main`
 - [x] Run P5 Main Final Gate — PASS
-- [ ] Create validated P5 tag and push `main` + tag — tag created locally; remote push pending
+- [x] Create validated P5 tag and push `main` + tag — remote `main` verified at `f6b8922e6971949c69f55b710e0499853a4d8207`; tag dereferences to `034e34479e0f37866c264a694ba705caee5869d4`
 
 ### P5 validation evidence — 2026-09-20 (main Final Gate)
 
