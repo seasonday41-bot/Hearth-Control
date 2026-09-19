@@ -419,7 +419,7 @@ LIVE_PROVIDER_SMOKE =
 - [x] Create P7 implementation checkpoint commit — `7865119f9e242099db9ba30b9215e0fd5dfd9a8d`
 - [x] Fast-forward merge validated P7 branch into `main`
 - [x] Run P7 Main Final Gate — PASS
-- [ ] Create validated P7 tag and push `main` + tag — tag created locally; remote push pending
+- [x] Create validated P7 tag and push `main` + tag — remote `main` verified at `2218c3a76308e4487cc2f4fab93f6e476af68f6d`; tag dereferences to `7865119f9e242099db9ba30b9215e0fd5dfd9a8d`
 
 ### P7 validation evidence — 2026-09-20 (main Final Gate)
 
