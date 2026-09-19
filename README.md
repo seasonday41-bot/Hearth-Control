@@ -11,16 +11,17 @@ This section is the project handoff/source of truth for any new ChatGPT/Codex/AI
 ## CURRENT STATUS
 
 ```text
-PHASE = P4_GITHUB_MULTI_CONNECTION — IMPLEMENTED / VALIDATED ON FEATURE BRANCH
-CURRENT_BRANCH = feature/p4-github-multi-connection-v1
-BASELINE_MAIN = 99c2b91c4843e1268c472c31859966df9623ce2b
-P3_VALIDATED_TAG = hearth-p3-validated-0.4.7-20260919
-STATUS = P4_IMPLEMENTED_VALIDATED_AWAITING_CHECKPOINT
-BLOCKED_BY = no technical blocker; P4 checkpoint/tag/merge not yet performed
-LAST_COMPLETED_STEP = P4 GitHub multi-connection V1 implemented and regression-validated: fixed-origin REST client, two isolated aliases, local connect/disconnect IPC, remote health, explicit-alias MCP reads, and approval-gated PR creation
-NEXT_PHASE = P4_FINALIZE_CHECKPOINT
-NEXT_EXACT_ACTION = review final diff/status, create P4 checkpoint commit/tag, fast-forward merge to main, run Main Final Gate, update README checkpoint, and push main + validated tag
-DO_NOT_MODIFY_FROZEN = X v0.1, P2, or P3 unless an actual regression/security issue or an explicitly approved P4 extension requires a targeted change
+PHASE = P4_GITHUB_MULTI_CONNECTION — COMPLETE / VALIDATED / FROZEN
+CURRENT_BRANCH = main
+VALIDATED_MAIN_COMMIT = cf9e24dd4e3d0bd19e68c0ebf71a777e58056148
+VALIDATED_TAG = hearth-p4-validated-0.4.7-20260919
+FINAL_GATE = P4_MAIN_FINAL_GATE_PASS
+STATUS = P4_COMPLETE_VALIDATED
+BLOCKED_BY = none
+LAST_COMPLETED_STEP = P4 GitHub multi-connection V1 validated on main, tagged, and frozen
+NEXT_PHASE = P5_SUPABASE_MULTI_PROJECT
+NEXT_EXACT_ACTION = audit the existing supabase:hearth and supabase:xgen provider/client/auth surfaces and design the smallest P5 multi-project foundation on the frozen P3 registry without collapsing their existing auth boundaries
+DO_NOT_MODIFY_FROZEN = X v0.1, P2, P3, or P4 unless an actual regression/security issue or an explicitly approved later phase requires a targeted change
 ```
 
 **Continuation rule:** Git/source is authoritative over chat history. Verify branch, HEAD, tag, and worktree before editing. Do not modify frozen X/P2/P3 behavior unless a regression/security issue or the approved P4 design requires a targeted extension. Continue only `NEXT_EXACT_ACTION`.
@@ -49,16 +50,17 @@ GitHub / Supabase / Vercel / AI providers
 
 ### Current active branch — validated baseline
 
-`main` is the canonical branch and now contains the validated P3 checkpoint:
+`main` is the canonical branch and now contains the validated P4 implementation checkpoint:
 
 ```text
-P3_VALIDATED_IMPLEMENTATION_COMMIT = 474a4f6f3994d13136d467bf6105a2a1486aad6b
+P4_VALIDATED_IMPLEMENTATION_COMMIT = cf9e24dd4e3d0bd19e68c0ebf71a777e58056148
+P4_TAG = hearth-p4-validated-0.4.7-20260919
+P4_FINAL_GATE = P4_MAIN_FINAL_GATE_PASS
 P3_TAG = hearth-p3-validated-0.4.7-20260919
-P3_FINAL_GATE = P3_MAIN_FINAL_GATE_PASS
 P2_TAG = hearth-p2-validated-0.4.7-20260919
 ```
 
-P0, P1, X v0.1, P2, and P3 histories are preserved in Git. X/P2/P3 are frozen unless a real regression/security issue or an explicitly approved later phase requires a targeted change.
+P0, P1, X v0.1, P2, P3, and P4 histories are preserved in Git. X/P2/P3/P4 are frozen unless a real regression/security issue or an explicitly approved later phase requires a targeted change.
 
 ---
 
@@ -72,7 +74,7 @@ This checklist is the handoff ledger for every future chat/agent. **A phase is n
 - [x] **P1 — Wire Skill Registry into X**
 - [x] **P2 — Remote One-Click Updater** — VALIDATED / FROZEN
 - [x] **P3 — Connection Registry + Secure Credential Store** — VALIDATED / FROZEN
-- [ ] **P4 — GitHub multi-connection (2+)** — IMPLEMENTED / VALIDATED ON FEATURE BRANCH; CHECKPOINT/MERGE PENDING
+- [x] **P4 — GitHub multi-connection (2+)** — VALIDATED / FROZEN
 - [ ] **P5 — Supabase multi-project (2+)**
 - [ ] **P6 — Vercel connection**
 - [ ] **P7 — Console / connection health / approvals / evidence**
@@ -100,13 +102,15 @@ This checklist is the handoff ledger for every future chat/agent. **A phase is n
 - [x] P4.3 — dual-account isolation tests
 - [x] P4.4 — read-only MCP tools with explicit connection alias
 - [x] P4.5 — first approved mutation (`github_pull_request_create`) after read path stabilized; capability + Git permission/approval gated
-- [ ] P4.6 — full regression complete; checkpoint/tag/merge/freeze pending
+- [x] P4.6 — full regression / checkpoint / freeze — PASS; implementation commit `cf9e24dd4e3d0bd19e68c0ebf71a777e58056148`, tag `hearth-p4-validated-0.4.7-20260919`, fast-forward merged to `main`
 
-### P4 validation evidence — 2026-09-19 (feature branch, pre-checkpoint)
+### P4 validation evidence — 2026-09-19 (main Final Gate)
 
 ```text
-BRANCH = feature/p4-github-multi-connection-v1
-BASELINE_MAIN = 99c2b91c4843e1268c472c31859966df9623ce2b
+BRANCH = main
+VALIDATED_MAIN_COMMIT = cf9e24dd4e3d0bd19e68c0ebf71a777e58056148
+TAG = hearth-p4-validated-0.4.7-20260919
+FINAL_GATE = P4_MAIN_FINAL_GATE_PASS
 
 npm run test:github
   PASS = 30/30
@@ -403,6 +407,20 @@ NEXT_PHASE = P4_GITHUB_MULTI_CONNECTION
 NEXT_EXACT_ACTION = audit GitHub auth/integration surfaces and design the smallest P4 multi-connection implementation on top of the P3 registry
 ```
 
+```text
+PHASE_COMPLETED = P4_GITHUB_MULTI_CONNECTION
+STATUS = PASS / VALIDATED / FROZEN
+COMPLETED_AT = 2026-09-19
+VALIDATED_MAIN_COMMIT = cf9e24dd4e3d0bd19e68c0ebf71a777e58056148
+TAG = hearth-p4-validated-0.4.7-20260919
+FINAL_GATE = P4_MAIN_FINAL_GATE_PASS
+VALIDATION = GitHub focused 30/30; P3 connections 18/18; X MCP tools 21/21; Project X auth 13/13; Bridge 46/46; Electron/server 98/98; Goal/Review/Remote Goal all executed suites PASS; P2 updater 149/149; production build + TypeScript PASS; syntax PASS; git diff --check PASS; X full regression 616/617 with EVT12 confirmed pre-existing baseline source-regex mismatch
+SECURITY = fine-grained PAT only; SecureCredentialStore only; no GH_TOKEN/GITHUB_TOKEN import; no gh auth switch; explicit alias per MCP tool; no cross-alias fallback; PR creation approval-gated; generic push/merge/delete/release/admin absent; P2 updater credential-independent
+KNOWN_LIMITATIONS = full Connections management UI remains deferred to P7; scripts/test-x-terminal-event.mjs EVT12 remains the pre-existing baseline test-shape mismatch
+NEXT_PHASE = P5_SUPABASE_MULTI_PROJECT
+NEXT_EXACT_ACTION = audit existing supabase:hearth and supabase:xgen auth/client surfaces and design the smallest P5 multi-project implementation on top of the frozen P3 registry
+```
+
 ### Frozen baselines
 
 ```text
@@ -414,9 +432,12 @@ P2_TAG = hearth-p2-validated-0.4.7-20260919
 
 P3 Connection Registry + Secure Credential Store V1 = FROZEN / VALIDATED
 P3_TAG = hearth-p3-validated-0.4.7-20260919
+
+P4 GitHub Multi-Connection V1 = FROZEN / VALIDATED
+P4_TAG = hearth-p4-validated-0.4.7-20260919
 ```
 
-Do not modify frozen X/P2/P3 implementation unless an actual regression, security issue, or explicitly approved new phase requires it.
+Do not modify frozen X/P2/P3/P4 implementation unless an actual regression, security issue, or explicitly approved new phase requires it.
 
 ### Secure MCP / Direct Coder status
 
@@ -436,7 +457,7 @@ For a new session:
 1. Read this README canonical checkpoint first.
 2. Verify current branch, HEAD, validated tag, and `git status`.
 3. Treat Git/source as truth over chat history.
-4. Do not modify frozen X/P2 unless a regression or security issue is proven.
+4. Do not modify frozen X/P2/P3/P4 unless a regression or security issue is proven.
 5. Continue `NEXT_EXACT_ACTION` only.
 
 ### Session handoff checklist — update before changing chats
@@ -622,7 +643,7 @@ Requirements:
 
 Do not hardcode one GitHub account, one Supabase project, or provider secrets into X.
 
-### P4 — GitHub multi-connection — IMPLEMENTED / VALIDATED ON FEATURE BRANCH
+### P4 — GitHub multi-connection — COMPLETE / VALIDATED / FROZEN
 
 Canonical design: `docs/HEARTH-GITHUB-MULTI-CONNECTION-V1.md`.
 
@@ -647,7 +668,11 @@ Locked P4 V1 rules:
 - The first mutation candidate is `github_pull_request_create`, gated by connection capability + Hearth Git permission + exact local approval.
 
 ```text
-NEXT_EXACT_ACTION = finalize P4 checkpoint/tag/merge on main after final scoped diff review
+VALIDATED_MAIN_COMMIT = cf9e24dd4e3d0bd19e68c0ebf71a777e58056148
+TAG = hearth-p4-validated-0.4.7-20260919
+FINAL_GATE = P4_MAIN_FINAL_GATE_PASS
+NEXT_PHASE = P5_SUPABASE_MULTI_PROJECT
+NEXT_EXACT_ACTION = audit existing Supabase project/auth/client surfaces and design the smallest P5 multi-project foundation without collapsing supabase:hearth and supabase:xgen
 ```
 
 ### P5 — Supabase multi-project
