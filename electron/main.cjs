@@ -6,6 +6,9 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const crypto = require('node:crypto');
 const localUpdater = require('./updater.cjs');
+const remoteUpdater = require('./remote-updater.cjs');
+const remoteUpdateStager = require('./remote-update-stager.cjs');
+const updateTrust = require('./update-trust-config.cjs');
 const { createTaskNotifier } = require('./task-notifications.cjs');
 
 const importFromHere = (relativePath) => import(pathToFileURL(path.join(__dirname, relativePath)).href);
@@ -51,6 +54,8 @@ let xWakeupTimer = null;
 let xGetNextWakeupDeadline = null;
 let xReconcileRuntimeNow = null;
 let continuationRecoveryTimer = null;
+let updaterInstallInProgress = false;
+let remoteUpdateSession = null;
 const localApprovals = new Map();
 let bridgeClientInstance = null;
 let bridgeSession = null;
@@ -648,6 +653,71 @@ const getUpdaterInfo = () => ({
   updateDirectory: readSettings().updateDirectory,
   isPackaged: app.isPackaged,
 });
+
+const publicRemoteManifest = (manifest) => manifest ? ({
+  version: manifest.version,
+  buildId: manifest.buildId,
+  builtAt: manifest.builtAt,
+  platform: manifest.platform,
+  arch: manifest.arch,
+  dmgPath: null,
+}) : null;
+
+const safeRemoteUpdateError = (error) => {
+  const message = String(error?.message || '');
+  if (/status 404\b/i.test(message)) return 'No published update is currently available.';
+  if (/signature|keyId|signing key/i.test(message)) return 'The remote update could not be trusted.';
+  if (/platform|arch/i.test(message)) return 'The published update is not compatible with this Mac.';
+  if (/size|sha-?256|checksum|artifact/i.test(message)) return 'The downloaded update failed integrity verification.';
+  if (/redirect|origin|protocol|DNS|network|request|URL|hostname|address/i.test(message)) return 'The update service could not be reached securely.';
+  if (/mount|staging|application bundle|detach/i.test(message)) return 'The downloaded update could not be prepared safely.';
+  return 'The remote update could not be prepared safely.';
+};
+
+const remoteUpdateOptions = () => ({
+  manifestUrl: updateTrust.MANIFEST_URL,
+  trustedOrigin: updateTrust.TRUSTED_DELIVERY_ORIGINS[0],
+  trustedOrigins: updateTrust.TRUSTED_DELIVERY_ORIGINS,
+  trustedKeys: updateTrust.TRUSTED_SIGNING_KEYS,
+  artifactBaseUrl: updateTrust.ARTIFACT_BASE_URL,
+  expectedPlatform: process.platform,
+  expectedArch: process.arch,
+});
+
+const inspectLocalUpdateDirectory = async (updateDirectory, info = getUpdaterInfo()) => localUpdater.inspectUpdate({
+  updateDirectory,
+  currentVersion: info.currentVersion,
+  currentBuildId: info.currentBuildId,
+  currentBuiltAt: info.builtAt,
+  isPackaged: info.isPackaged,
+  platform: process.platform,
+  arch: process.arch,
+});
+
+const getInstallUpdateDirectory = () => (
+  remoteUpdateSession?.state === localUpdater.UPDATE_STATES.UPDATE_READY && remoteUpdateSession.stagedDir
+    ? remoteUpdateSession.stagedDir
+    : getUpdaterInfo().updateDirectory
+);
+
+const getUpdaterRuntimeBlocker = ({ ignoreUpdaterBusy = false } = {}) => {
+  if (typeof xGetNextXWakeupDeadline !== 'function' || !goalRunner || !jobManager) {
+    return localUpdater.evaluateUpdaterRuntimePreflight({ runtimeAvailable: false });
+  }
+
+  try {
+    return localUpdater.evaluateUpdaterRuntimePreflight({
+      xActive: xGetNextXWakeupDeadline() != null,
+      goalActive: goalRunner.is_goal_active(),
+      queuedJobCount: jobManager.listJobs({ status: 'queued' }).length,
+      runningJobCount: jobManager.listJobs({ status: 'running' }).length,
+      updaterBusy: !ignoreUpdaterBusy && updaterInstallInProgress,
+    });
+  } catch {
+    console.error('[Updater] Runtime preflight state lookup failed.');
+    return localUpdater.evaluateUpdaterRuntimePreflight({ runtimeAvailable: false });
+  }
+};
 const startRollbackWatchdog = ({ token, target, backup, userDataPath }) => {
   const helper = path.join(__dirname, 'updater-helper.cjs');
   const child = spawn(process.execPath, [helper, token, target, backup, userDataPath, '15000'], {
@@ -1772,53 +1842,139 @@ app.whenReady().then(async () => {
   // The only install entry point is this local renderer IPC handler. The bridge
   // has no updater IPC or service reference, so remote tasks cannot install apps.
   ipcMain.handle('updater:get-info', () => getUpdaterInfo());
-  ipcMain.handle('updater:check', async () => {
+  ipcMain.handle('updater:check', async (event) => {
+    if (!mainWindow || event.sender.id !== mainWindow.webContents.id) throw new Error('Update checks must come from the local Hearth window.');
     const info = getUpdaterInfo();
-    return localUpdater.inspectUpdate({
-      updateDirectory: info.updateDirectory,
-      currentVersion: info.currentVersion,
-      currentBuildId: info.currentBuildId,
-      currentBuiltAt: info.builtAt,
-      isPackaged: info.isPackaged,
-      platform: process.platform,
-      arch: process.arch,
-    });
+    remoteUpdateSession = null;
+    if (info.isPackaged === false) {
+      return { state: localUpdater.UPDATE_STATES.UP_TO_DATE, currentVersion: info.currentVersion, currentBuildId: info.currentBuildId, available: null, error: null, devMode: true };
+    }
+    try {
+      const manifest = await remoteUpdater.fetchRemoteManifest(remoteUpdateOptions());
+      remoteUpdater.validatePlatformAndArch(manifest, { expectedPlatform: process.platform, expectedArch: process.arch });
+      if (!localUpdater.isManifestNewer({ manifest, currentVersion: info.currentVersion, currentBuiltAt: info.builtAt })) {
+        return { state: localUpdater.UPDATE_STATES.UP_TO_DATE, currentVersion: info.currentVersion, currentBuildId: info.currentBuildId, available: null, error: null };
+      }
+      remoteUpdateSession = { state: 'update_available', manifest };
+      return { state: 'update_available', currentVersion: info.currentVersion, currentBuildId: info.currentBuildId, available: publicRemoteManifest(manifest), error: null };
+    } catch (error) {
+      return { state: localUpdater.UPDATE_STATES.ERROR, currentVersion: info.currentVersion, currentBuildId: info.currentBuildId, available: null, error: safeRemoteUpdateError(error) };
+    }
+  });
+  ipcMain.handle('updater:prepare', async (event) => {
+    if (!mainWindow || event.sender.id !== mainWindow.webContents.id) throw new Error('Update preparation must come from the local Hearth window.');
+    const info = getUpdaterInfo();
+    const expectedBuildId = remoteUpdateSession?.state === 'update_available' ? remoteUpdateSession.manifest?.buildId : null;
+    if (!expectedBuildId) throw new Error('Check for a remote update before preparing it.');
+    try {
+      remoteUpdateSession = { ...remoteUpdateSession, state: 'downloading' };
+      const fetched = await remoteUpdater.fetchAndVerifyUpdate({
+        ...remoteUpdateOptions(),
+        currentVersion: info.currentVersion,
+        currentBuiltAt: info.builtAt,
+        isPackaged: info.isPackaged,
+      });
+      if (!fetched.updateAvailable) {
+        remoteUpdateSession = null;
+        return { state: localUpdater.UPDATE_STATES.UP_TO_DATE, currentVersion: info.currentVersion, currentBuildId: info.currentBuildId, available: null, error: null };
+      }
+      if (fetched.manifest.buildId !== expectedBuildId) {
+        remoteUpdateSession = null;
+        return { state: localUpdater.UPDATE_STATES.ERROR, currentVersion: info.currentVersion, currentBuildId: info.currentBuildId, available: null, error: 'The published release changed. Check for updates again.' };
+      }
+      remoteUpdateSession = { state: 'verifying', manifest: fetched.manifest };
+      const staged = await remoteUpdateStager.stageVerifiedUpdate({
+        manifest: fetched.manifest,
+        dmgPath: fetched.dmgPath,
+      });
+      const check = await inspectLocalUpdateDirectory(staged.stagedDir, info);
+      if (check.state !== localUpdater.UPDATE_STATES.UPDATE_READY) {
+        throw new Error(check.error || 'The staged update did not pass local updater validation.');
+      }
+      remoteUpdateSession = {
+        state: localUpdater.UPDATE_STATES.UPDATE_READY,
+        manifest: fetched.manifest,
+        stagedDir: staged.stagedDir,
+      };
+      return check;
+    } catch (error) {
+      remoteUpdateSession = null;
+      return { state: localUpdater.UPDATE_STATES.ERROR, currentVersion: info.currentVersion, currentBuildId: info.currentBuildId, available: null, error: safeRemoteUpdateError(error) };
+    }
+  });
+  ipcMain.handle('updater:check-local', async (event) => {
+    if (!mainWindow || event.sender.id !== mainWindow.webContents.id) throw new Error('Local update checks must come from the local Hearth window.');
+    remoteUpdateSession = null;
+    const info = getUpdaterInfo();
+    return inspectLocalUpdateDirectory(info.updateDirectory, info);
   });
   ipcMain.handle('updater:choose-directory', async () => {
     const result = await dialog.showOpenDialog(mainWindow, { title: 'Choose trusted update folder', properties: ['openDirectory', 'createDirectory'] });
     if (result.canceled || !result.filePaths[0]) return getUpdaterInfo();
+    remoteUpdateSession = null;
     saveSettings({ updateDirectory: result.filePaths[0] });
     return getUpdaterInfo();
   });
   ipcMain.handle('updater:install', async (event) => {
     if (!mainWindow || event.sender.id !== mainWindow.webContents.id) throw new Error('Install requests must come from the local Hearth window.');
     const info = getUpdaterInfo();
-    const check = await localUpdater.inspectUpdate({
-      updateDirectory: info.updateDirectory,
-      currentVersion: info.currentVersion,
-      currentBuildId: info.currentBuildId,
-      currentBuiltAt: info.builtAt,
-      isPackaged: info.isPackaged,
-      platform: process.platform,
-      arch: process.arch,
-    });
+    const installUpdateDirectory = getInstallUpdateDirectory();
+    const check = await inspectLocalUpdateDirectory(installUpdateDirectory, info);
     if (check.state !== localUpdater.UPDATE_STATES.UPDATE_READY) throw new Error(check.error || 'No verified update is ready to install.');
-    const manifest = await localUpdater.readAndValidateManifest(info.updateDirectory, process.platform, process.arch);
-    const install = await localUpdater.installUpdate({
-      manifest,
-      currentVersion: info.currentVersion,
-      currentBuiltAt: info.builtAt,
-      isPackaged: info.isPackaged,
-      applicationsDirectory: '/Applications',
-      userDataPath: app.getPath('userData'),
-      launchRollbackHelper: startRollbackWatchdog,
-      // This handler is reachable only after the visible local button and its
-      // confirmation dialog. No remote payload can supply this flag.
-      userApproved: true,
-    });
-    app.relaunch({ args: process.argv.slice(1) });
-    setImmediate(() => app.exit(0));
-    return install;
+
+    const initialBlocker = getUpdaterRuntimeBlocker();
+    if (initialBlocker) return localUpdater.blockedUpdateResult(initialBlocker);
+
+    // This process-local lock is acquired synchronously after the canonical
+    // runtime checks, before the first approval await, so a concurrent IPC
+    // attempt observes UPDATER_BUSY instead of racing a second install.
+    updaterInstallInProgress = true;
+    let installCommitted = false;
+    try {
+      const approval = await dialog.showMessageBox(mainWindow, {
+        type: 'warning',
+        buttons: ['Update & Restart', 'Cancel'],
+        defaultId: 1,
+        cancelId: 1,
+        noLink: true,
+        title: 'Install Hearth Control Update',
+        message: `Install Hearth Control ${check.available?.version || 'update'}?`,
+        detail: 'The current app will be backed up and Hearth will restart.',
+      });
+      if (approval.response !== 0) {
+        return { state: localUpdater.UPDATE_STATES.UPDATE_READY, cancelled: true };
+      }
+
+      const manifest = await localUpdater.readAndValidateManifest(installUpdateDirectory, process.platform, process.arch);
+
+      // Approval can remain open while runtime state changes. Recheck the
+      // canonical sources after approval/revalidation, ignoring only this
+      // handler's own updater lock.
+      const lateBlocker = getUpdaterRuntimeBlocker({ ignoreUpdaterBusy: true });
+      if (lateBlocker) return localUpdater.blockedUpdateResult(lateBlocker);
+
+      const install = await localUpdater.installUpdate({
+        manifest,
+        currentVersion: info.currentVersion,
+        currentBuiltAt: info.builtAt,
+        isPackaged: info.isPackaged,
+        applicationsDirectory: '/Applications',
+        userDataPath: app.getPath('userData'),
+        launchRollbackHelper: startRollbackWatchdog,
+        // The main process sets this only after its own native confirmation
+        // and runtime preflight. No renderer payload, remote task, Goal, X
+        // run, or MCP request can supply or bypass either gate.
+        userApproved: true,
+      });
+      // The installed app has now been replaced and rollback/restart state is
+      // armed. Keep the process-local updater lock held until this process exits.
+      installCommitted = true;
+      app.relaunch({ args: process.argv.slice(1) });
+      setImmediate(() => app.exit(0));
+      return install;
+    } finally {
+      if (!installCommitted) updaterInstallInProgress = false;
+    }
   });
   ipcMain.handle('antigravity:status', async () => {
     const { detectAntigravity } = await importFromHere('../mcp/executors/antigravity.mjs');
@@ -2790,10 +2946,12 @@ app.whenReady().then(async () => {
     console.error('Failed to initialize bridge:', err);
   }
 
-  // A detached updater watchdog accepts this main-process marker as the V1
-  // health handshake. It never relies on renderer text or a remote event.
-  await localUpdater.recordStartupSuccess(app.getPath('userData'));
+  // The updater watchdog accepts this main-process marker as the V1 health
+  // handshake only after essential local initialization above has completed
+  // and the main BrowserWindow has been created successfully. If createWindow()
+  // throws, startup remains unhealthy and the marker is deliberately absent.
   createWindow();
+  await localUpdater.recordStartupSuccess(app.getPath('userData'));
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 }

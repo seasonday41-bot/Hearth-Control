@@ -94,7 +94,8 @@ interface PublicTasksState {
   accountEmail: string | null;
 }
 
-type UpdateStatus = 'idle' | 'checking' | 'up_to_date' | 'update_ready' | 'installing' | 'restarting' | 'rollback' | 'error';
+type UpdateStatus = 'idle' | 'checking' | 'up_to_date' | 'update_available' | 'downloading' | 'verifying' | 'update_ready' | 'installing' | 'restarting' | 'rollback' | 'error';
+type UpdateInstallBlocker = 'X_ACTIVE' | 'GOAL_ACTIVE' | 'DURABLE_JOB_ACTIVE' | 'UPDATER_BUSY' | 'RUNTIME_STATE_UNAVAILABLE';
 interface UpdaterInfo { currentVersion: string; currentBuildId: string; builtAt: string | null; updateDirectory: string; }
 interface UpdateCheck extends Pick<UpdaterInfo, 'currentVersion' | 'currentBuildId'> {
   state: UpdateStatus;
@@ -182,8 +183,14 @@ interface Window { controlApp: {
   antigravityListTasks: () => Promise<AntigravityTaskData[]>;
   updaterGetInfo: () => Promise<UpdaterInfo>;
   updaterCheck: () => Promise<UpdateCheck>;
+  updaterPrepare: () => Promise<UpdateCheck>;
+  updaterCheckLocal: () => Promise<UpdateCheck>;
   updaterChooseDirectory: () => Promise<UpdaterInfo>;
-  updaterInstall: () => Promise<{ state: UpdateStatus; target: string; backup: string; token: string }>;
+  updaterInstall: () => Promise<
+    | { state: 'restarting'; target: string; backup: string; token: string; cancelled?: false; blocked?: false }
+    | { state: 'update_ready'; cancelled: true; blocked?: false }
+    | { state: 'update_ready'; blocked: true; blocker: UpdateInstallBlocker; message: string; cancelled?: false }
+  >;
   bridgeGetState: () => Promise<BridgeState>;
   bridgeSignUp: (credentials: { email: string; password: string }) => Promise<{ signedIn: boolean; needsEmailVerification: boolean }>;
   bridgeSignIn: (credentials: { email: string; password: string }) => Promise<BridgeState>;

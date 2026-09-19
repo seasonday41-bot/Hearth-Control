@@ -42,6 +42,8 @@ contextBridge.exposeInMainWorld('controlApp', {
   antigravityListTasks: () => ipcRenderer.invoke('antigravity:list-tasks'),
   updaterGetInfo: () => ipcRenderer.invoke('updater:get-info'),
   updaterCheck: () => ipcRenderer.invoke('updater:check'),
+  updaterPrepare: () => ipcRenderer.invoke('updater:prepare'),
+  updaterCheckLocal: () => ipcRenderer.invoke('updater:check-local'),
   updaterChooseDirectory: () => ipcRenderer.invoke('updater:choose-directory'),
   // There is intentionally no bridge equivalent: installation is initiated only
   // from the visible, local Hearth window after an explicit button click.

@@ -910,9 +910,24 @@ export default function App() {
     try {
       const result = await window.controlApp.updaterCheck();
       setUpdateCheck(result);
-      if (result.state === 'update_ready') flash(`Update ${result.available?.version} is ready`);
+      if (result.state === 'update_available') flash(`Update ${result.available?.version} is available`);
     } catch (err: any) {
       flash(err?.message || 'Could not check for updates');
+    } finally {
+      setUpdateBusy(false);
+    }
+  };
+
+  const prepareUpdate = async () => {
+    if (updateBusy || updateCheck?.state !== 'update_available' || !updateCheck.available) return;
+    setUpdateBusy(true);
+    setUpdateCheck((current) => current ? { ...current, state: 'downloading', error: null } : current);
+    try {
+      const result = await window.controlApp.updaterPrepare();
+      setUpdateCheck(result);
+      if (result.state === 'update_ready') flash(`Update ${result.available?.version} is ready to install`);
+    } catch (err: any) {
+      setUpdateCheck((current) => current ? { ...current, state: 'error', error: err?.message || 'Could not prepare update' } : current);
     } finally {
       setUpdateBusy(false);
     }
@@ -922,17 +937,31 @@ export default function App() {
     if (updateBusy) return;
     const info = await window.controlApp.updaterChooseDirectory();
     setUpdaterInfo(info);
-    await checkForUpdate();
+    setUpdateBusy(true);
+    try {
+      setUpdateCheck(await window.controlApp.updaterCheckLocal());
+    } finally {
+      setUpdateBusy(false);
+    }
   };
 
   const installUpdate = async () => {
     if (updateBusy || updateCheck?.state !== 'update_ready' || !updateCheck.available) return;
-    const approved = window.confirm(`Install Hearth Control ${updateCheck.available.version}?\n\nThe current app will be backed up and Hearth will restart.`);
-    if (!approved) return;
     setUpdateBusy(true);
     setUpdateCheck((current) => current ? { ...current, state: 'installing', error: null } : current);
     try {
-      await window.controlApp.updaterInstall();
+      const result = await window.controlApp.updaterInstall();
+      if (result.blocked) {
+        setUpdateCheck((current) => current ? { ...current, state: 'update_ready', error: null } : current);
+        setUpdateBusy(false);
+        flash(result.message);
+        return;
+      }
+      if (result.cancelled) {
+        setUpdateCheck((current) => current ? { ...current, state: 'update_ready', error: null } : current);
+        setUpdateBusy(false);
+        return;
+      }
       setUpdateCheck((current) => current ? { ...current, state: 'restarting' } : current);
     } catch (err: any) {
       setUpdateCheck((current) => current ? { ...current, state: 'error', error: err?.message || 'Install failed' } : current);
@@ -941,7 +970,7 @@ export default function App() {
   };
 
   const updateStatusText: Record<UpdateStatus, string> = {
-    idle: 'Checking for update', checking: 'Checking for update', up_to_date: 'Up to date', update_ready: 'Update ready', installing: 'Installing', restarting: 'Restarting', rollback: 'Rollback', error: 'Error',
+    idle: 'Ready to check', checking: 'Checking for update', up_to_date: 'Up to date', update_available: 'Update available', downloading: 'Downloading', verifying: 'Verifying', update_ready: 'Update ready', installing: 'Installing', restarting: 'Restarting', rollback: 'Rollback', error: 'Error',
   };
 
   const handleApproveRemoteTask = async (task: BridgeTask) => {
@@ -1885,7 +1914,7 @@ export default function App() {
 
               <section className="soft-panel update-panel" aria-labelledby="updates-title">
                 <div className="panel-title">
-                  <div><p className="section-kicker">LOCAL UPDATE</p><h2 id="updates-title">Hearth updates</h2></div>
+                  <div><p className="section-kicker">UPDATE</p><h2 id="updates-title">Hearth updates</h2></div>
                   <span className={`update-status ${updateCheck?.state ?? 'idle'}`}><i />{updateStatusText[updateCheck?.state ?? 'idle']}</span>
                 </div>
                 <dl className="update-facts">
@@ -1897,13 +1926,14 @@ export default function App() {
                 {updateCheck?.error && <p className="update-error">{updateCheck.error}</p>}
                 <div className="update-actions">
                   <button type="button" className="subtle-action" disabled={updateBusy} onClick={checkForUpdate}>{updateBusy && updateCheck?.state === 'checking' ? 'Checking…' : 'Check for Update'}</button>
+                  {updateCheck?.state === 'update_available' && <button type="button" className="update-install" disabled={updateBusy} onClick={prepareUpdate}>Download / Prepare</button>}
                   <button type="button" className="update-install" disabled={updateBusy || updateCheck?.state !== 'update_ready'} onClick={installUpdate}>{updateCheck?.state === 'installing' ? 'Installing…' : 'Install Update'}</button>
                   <button type="button" className="text-action" onClick={() => setShowUpdateDetails((visible) => !visible)}>{showUpdateDetails ? 'Hide Details' : 'View Details'}</button>
                 </div>
                 {showUpdateDetails && <div className="update-details">
-                  <p><strong>Trusted folder</strong><code>{updaterInfo?.updateDirectory ?? '—'}</code></p>
-                  <p>Only a verified <code>update-manifest.json</code> and <code>Hearth Control.app</code> from this folder can be installed.</p>
-                  <button type="button" className="text-action" disabled={updateBusy} onClick={chooseUpdateDirectory}>Choose trusted folder</button>
+                  <p>Remote updates are checked from the built-in Hearth GitHub Releases trust configuration and must pass signature, download, and staging verification before Install is enabled.</p>
+                  <p><strong>Manual trusted folder</strong><code>{updaterInfo?.updateDirectory ?? '—'}</code></p>
+                  <button type="button" className="text-action" disabled={updateBusy} onClick={chooseUpdateDirectory}>Choose manual update folder</button>
                 </div>}
               </section>
 
@@ -1923,7 +1953,7 @@ export default function App() {
             <div className="approval-icon"><Icon name="flag" /></div>
             <p className="section-kicker">GOAL CREATION</p>
             <h2 id="new-goal-heading">Create New Goal</h2>
-            
+
             <div className="goal-form-group">
               <label>Goal Title</label>
               <input

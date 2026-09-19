@@ -78,8 +78,10 @@ async function generateRemoteManifestV2({
 
   const dmgSha256 = await sha256File(dmgPath);
   const dmgName = path.basename(dmgPath);
-  const resolvedArtifactPath = relativeArtifactPath
-    || `releases/${metadata.version}/${metadata.buildId}/${dmgName}`;
+  // GitHub Releases exposes assets as flat filenames within a release.
+  // Keep the signed artifact authority relative; production main resolves it
+  // against its fixed /releases/latest/download/ base URL.
+  const resolvedArtifactPath = relativeArtifactPath || dmgName;
 
   if (!isSafeRelativeArtifactPath(resolvedArtifactPath)) {
     throw new Error(`Artifact path must be strictly relative and safe: '${resolvedArtifactPath}'.`);

@@ -26,6 +26,51 @@ const UPDATE_STATES = Object.freeze({
   ERROR: 'error',
 });
 
+const UPDATE_RUNTIME_BLOCKERS = Object.freeze({
+  X_ACTIVE: 'X_ACTIVE',
+  GOAL_ACTIVE: 'GOAL_ACTIVE',
+  DURABLE_JOB_ACTIVE: 'DURABLE_JOB_ACTIVE',
+  UPDATER_BUSY: 'UPDATER_BUSY',
+  RUNTIME_STATE_UNAVAILABLE: 'RUNTIME_STATE_UNAVAILABLE',
+});
+const UPDATE_RUNTIME_BLOCKER_MESSAGES = Object.freeze({
+  [UPDATE_RUNTIME_BLOCKERS.X_ACTIVE]: 'Update installation is blocked while X is active.',
+  [UPDATE_RUNTIME_BLOCKERS.GOAL_ACTIVE]: 'Update installation is blocked while a Goal is active.',
+  [UPDATE_RUNTIME_BLOCKERS.DURABLE_JOB_ACTIVE]: 'Update installation is blocked while a durable job is queued or running.',
+  [UPDATE_RUNTIME_BLOCKERS.UPDATER_BUSY]: 'Another update installation is already in progress.',
+  [UPDATE_RUNTIME_BLOCKERS.RUNTIME_STATE_UNAVAILABLE]: 'Update installation is blocked because Hearth runtime activity could not be verified.',
+});
+
+function evaluateUpdaterRuntimePreflight({
+  runtimeAvailable = true,
+  xActive = false,
+  goalActive = false,
+  queuedJobCount = 0,
+  runningJobCount = 0,
+  updaterBusy = false,
+} = {}) {
+  let code = null;
+  if (!runtimeAvailable) code = UPDATE_RUNTIME_BLOCKERS.RUNTIME_STATE_UNAVAILABLE;
+  else if (updaterBusy) code = UPDATE_RUNTIME_BLOCKERS.UPDATER_BUSY;
+  else if (xActive) code = UPDATE_RUNTIME_BLOCKERS.X_ACTIVE;
+  else if (goalActive) code = UPDATE_RUNTIME_BLOCKERS.GOAL_ACTIVE;
+  else if (Number(queuedJobCount) > 0 || Number(runningJobCount) > 0) code = UPDATE_RUNTIME_BLOCKERS.DURABLE_JOB_ACTIVE;
+  if (!code) return null;
+  return { code, message: UPDATE_RUNTIME_BLOCKER_MESSAGES[code] };
+}
+
+function blockedUpdateResult(blocker) {
+  if (!blocker?.code || !UPDATE_RUNTIME_BLOCKER_MESSAGES[blocker.code]) {
+    throw new Error('A valid updater runtime blocker is required.');
+  }
+  return {
+    state: UPDATE_STATES.UPDATE_READY,
+    blocked: true,
+    blocker: blocker.code,
+    message: UPDATE_RUNTIME_BLOCKER_MESSAGES[blocker.code],
+  };
+}
+
 const safeReason = (message, fallback = 'The local update could not be verified.') => {
   const text = String(message || fallback).replace(/[\r\n]+/g, ' ').trim();
   // Keep filesystem paths out of the UI. The old whitespace-based replacement
@@ -253,4 +298,4 @@ async function rollbackPendingUpdate({ userDataPath, token, target, backup }) {
   return { rolledBack: true, healthy: false, target };
 }
 
-module.exports = { PRODUCT_NAME, MANIFEST_NAME, UPDATE_STATES, sha256File, sha256Directory, compareVersions, isManifestNewer, isInside, readAndValidateManifest, inspectUpdate, installUpdate, recordStartupSuccess, rollbackPendingUpdate, safeReason };
+module.exports = { PRODUCT_NAME, MANIFEST_NAME, UPDATE_STATES, UPDATE_RUNTIME_BLOCKERS, evaluateUpdaterRuntimePreflight, blockedUpdateResult, sha256File, sha256Directory, compareVersions, isManifestNewer, isInside, readAndValidateManifest, inspectUpdate, installUpdate, recordStartupSuccess, rollbackPendingUpdate, safeReason };

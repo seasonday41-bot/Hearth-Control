@@ -290,7 +290,7 @@ function nodeHttpsRequest(targetUrl, options = {}) {
 /**
  * Validates a target URL against trusted origin and security restrictions.
  */
-function validateUrl({ url, trustedOrigin = DEFAULT_TRUSTED_ORIGIN, allowLocalhost = false }) {
+function validateUrl({ url, trustedOrigin = DEFAULT_TRUSTED_ORIGIN, trustedOrigins, allowLocalhost = false }) {
   if (!url || typeof url !== 'string') {
     throw new Error('URL must be a non-empty string.');
   }
@@ -302,12 +302,20 @@ function validateUrl({ url, trustedOrigin = DEFAULT_TRUSTED_ORIGIN, allowLocalho
     throw new Error(`Malformed URL: '${url}'.`);
   }
 
-  let parsedTrusted;
-  try {
-    parsedTrusted = new URL(trustedOrigin);
-  } catch (err) {
-    throw new Error(`Malformed trusted origin: '${trustedOrigin}'.`);
-  }
+  const configuredTrustedOrigins = Array.isArray(trustedOrigins) && trustedOrigins.length > 0
+    ? trustedOrigins
+    : [trustedOrigin];
+  const parsedTrustedOrigins = configuredTrustedOrigins.map((origin) => {
+    try {
+      const parsedOrigin = new URL(origin);
+      if (parsedOrigin.pathname !== '/' || parsedOrigin.search || parsedOrigin.hash || parsedOrigin.username || parsedOrigin.password) {
+        throw new Error('trusted origin must be an origin only');
+      }
+      return parsedOrigin.origin;
+    } catch {
+      throw new Error(`Malformed trusted origin: '${origin}'.`);
+    }
+  });
 
   // Protocol check: HTTPS only (allow HTTP only if allowLocalhost is explicitly set for testing on localhost)
   const isLocalhost = isPrivateOrLocalHost(parsed.hostname);
@@ -334,9 +342,13 @@ function validateUrl({ url, trustedOrigin = DEFAULT_TRUSTED_ORIGIN, allowLocalho
     throw new Error(`Private or loopback destination is not permitted: '${parsed.hostname}'.`);
   }
 
-  // Origin check
-  if (parsed.origin !== parsedTrusted.origin) {
-    throw new Error(`URL origin '${parsed.origin}' does not match trusted origin '${parsedTrusted.origin}'.`);
+  // Exact origin allowlist check. Production may include GitHub's dedicated
+  // release-asset delivery origin, but never wildcard host trust.
+  if (!parsedTrustedOrigins.includes(parsed.origin)) {
+    if (parsedTrustedOrigins.length === 1) {
+      throw new Error(`URL origin '${parsed.origin}' does not match trusted origin '${parsedTrustedOrigins[0]}'.`);
+    }
+    throw new Error(`URL origin '${parsed.origin}' is not permitted by the trusted origin policy.`);
   }
 
   return parsed;
@@ -350,6 +362,7 @@ function validateUrl({ url, trustedOrigin = DEFAULT_TRUSTED_ORIGIN, allowLocalho
 async function safeFetchWithRedirects(initialUrl, options = {}) {
   const {
     trustedOrigin = DEFAULT_TRUSTED_ORIGIN,
+    trustedOrigins,
     maxRedirects = MAX_REDIRECTS,
     timeoutMs = DEFAULT_TIMEOUT_MS,
     fetchFn,
@@ -369,7 +382,7 @@ async function safeFetchWithRedirects(initialUrl, options = {}) {
   let redirectCount = 0;
 
   while (true) {
-    const parsedCurrent = validateUrl({ url: currentUrl, trustedOrigin, allowLocalhost });
+    const parsedCurrent = validateUrl({ url: currentUrl, trustedOrigin, trustedOrigins, allowLocalhost });
     const validatedIps = await resolveAndValidateDns(parsedCurrent.hostname, { lookupFn: dnsResolver, allowLocalhost });
     const agent = createPinnedAgent(parsedCurrent.hostname, validatedIps, parsedCurrent.protocol);
 
@@ -443,7 +456,7 @@ async function safeFetchWithRedirects(initialUrl, options = {}) {
       }
 
       // Validate next destination against origin and credentials
-      validateUrl({ url: nextUrl.href, trustedOrigin, allowLocalhost });
+      validateUrl({ url: nextUrl.href, trustedOrigin, trustedOrigins, allowLocalhost });
 
       currentUrl = nextUrl.href;
       continue;
@@ -488,6 +501,7 @@ function validatePlatformAndArch(manifest, options = {}) {
 async function fetchRemoteManifest({
   manifestUrl,
   trustedOrigin = DEFAULT_TRUSTED_ORIGIN,
+  trustedOrigins,
   trustedKeys = {},
   maxManifestBytes = MAX_MANIFEST_BYTES,
   timeoutMs = DEFAULT_TIMEOUT_MS,
@@ -499,6 +513,7 @@ async function fetchRemoteManifest({
   try {
     response = await safeFetchWithRedirects(manifestUrl, {
       trustedOrigin,
+      trustedOrigins,
       timeoutMs,
       fetchFn,
       lookupFn,
@@ -578,6 +593,8 @@ function resolveUpdatesDirectory(options = {}) {
 async function downloadRemoteArtifact({
   manifest,
   trustedOrigin = DEFAULT_TRUSTED_ORIGIN,
+  trustedOrigins,
+  artifactBaseUrl,
   updatesDir,
   maxDmgBytes = MAX_DMG_BYTES,
   timeoutMs = DEFAULT_TIMEOUT_MS,
@@ -593,12 +610,14 @@ async function downloadRemoteArtifact({
     throw new Error(`Artifact path must be strictly relative: '${manifest.artifact.path}'.`);
   }
 
-  // Resolve artifact URL against trusted origin
-  const parsedTrusted = new URL(trustedOrigin);
-  const artifactUrl = new URL(manifest.artifact.path, parsedTrusted.origin).href;
+  // Resolve the signed relative artifact path against a main-process-owned
+  // release base URL. Legacy callers fall back to the trusted origin root.
+  const resolvedArtifactBaseUrl = artifactBaseUrl || `${new URL(trustedOrigin).origin}/`;
+  validateUrl({ url: resolvedArtifactBaseUrl, trustedOrigin, trustedOrigins, allowLocalhost });
+  const artifactUrl = new URL(manifest.artifact.path, resolvedArtifactBaseUrl).href;
 
-  // Validate artifact URL
-  validateUrl({ url: artifactUrl, trustedOrigin, allowLocalhost });
+  // Validate artifact URL against the same exact delivery-origin policy.
+  validateUrl({ url: artifactUrl, trustedOrigin, trustedOrigins, allowLocalhost });
 
   const targetDir = path.join(resolveUpdatesDirectory({ updatesDir }), manifest.buildId);
   const partPath = path.join(targetDir, `${DMG_FILENAME}${PART_SUFFIX}`);
@@ -610,6 +629,7 @@ async function downloadRemoteArtifact({
   try {
     response = await safeFetchWithRedirects(artifactUrl, {
       trustedOrigin,
+      trustedOrigins,
       timeoutMs,
       fetchFn,
       lookupFn,
@@ -720,7 +740,9 @@ async function downloadRemoteArtifact({
 async function fetchAndVerifyUpdate({
   manifestUrl,
   trustedOrigin = DEFAULT_TRUSTED_ORIGIN,
+  trustedOrigins,
   trustedKeys = {},
+  artifactBaseUrl,
   currentVersion,
   currentBuiltAt,
   isPackaged = true,
@@ -738,6 +760,7 @@ async function fetchAndVerifyUpdate({
   const manifest = await fetchRemoteManifest({
     manifestUrl,
     trustedOrigin,
+    trustedOrigins,
     trustedKeys,
     maxManifestBytes,
     timeoutMs,
@@ -778,6 +801,8 @@ async function fetchAndVerifyUpdate({
   const downloadResult = await downloadRemoteArtifact({
     manifest,
     trustedOrigin,
+    trustedOrigins,
+    artifactBaseUrl,
     updatesDir,
     maxDmgBytes,
     timeoutMs,

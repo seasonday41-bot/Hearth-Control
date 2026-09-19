@@ -191,9 +191,33 @@ await test('arbitrary app names are rejected', async () => {
   const update = await fixture({ appPath: 'Not Hearth.app' });
   assert.equal((await updater.inspectUpdate({ updateDirectory: update.directory, ...current })).state, 'error');
 });
-await test('install requires explicit user action', async () => {
+await test('install requires explicit local user action in main process and core updater', async () => {
   const update = await fixture(); const manifest = await updater.readAndValidateManifest(update.directory, process.platform, process.arch);
   await assert.rejects(() => updater.installUpdate({ manifest, applicationsDirectory: path.join(root, 'Applications'), userDataPath: path.join(root, 'user-data'), launchRollbackHelper: async () => {} }), /approval/);
+
+  const main = await fs.promises.readFile(new URL('../electron/main.cjs', import.meta.url), 'utf8');
+  const handlerStart = main.indexOf("ipcMain.handle('updater:install'");
+  const handlerEnd = main.indexOf("ipcMain.handle('antigravity:status'", handlerStart);
+  assert.ok(handlerStart >= 0 && handlerEnd > handlerStart, 'local updater IPC handler must exist');
+  const handler = main.slice(handlerStart, handlerEnd);
+  const confirmationIndex = handler.indexOf('dialog.showMessageBox');
+  const validationIndex = handler.indexOf('localUpdater.readAndValidateManifest');
+  const installIndex = handler.indexOf('localUpdater.installUpdate(');
+  assert.ok(confirmationIndex >= 0, 'main process must own the final native confirmation');
+  assert.ok(validationIndex > confirmationIndex, 'candidate must be revalidated after main-process approval');
+  assert.ok(installIndex > validationIndex, 'install must occur only after approval and revalidation');
+  assert.ok(handler.includes('event.sender.id !== mainWindow.webContents.id'), 'install IPC must be restricted to the local Hearth window');
+  assert.ok(handler.includes('approval.response !== 0'), 'cancel/close must fail closed');
+  assert.ok(handler.includes('cancelled: true'), 'main process cancellation must not install');
+  assert.ok(handler.includes('userApproved: true'), 'core updater approval flag must be supplied only by the guarded main handler');
+
+  const renderer = await fs.promises.readFile(new URL('../src/App.tsx', import.meta.url), 'utf8');
+  const rendererStart = renderer.indexOf('const installUpdate = async () =>');
+  const rendererEnd = renderer.indexOf('const updateStatusText', rendererStart);
+  assert.ok(rendererStart >= 0 && rendererEnd > rendererStart, 'renderer update action must exist');
+  const rendererHandler = renderer.slice(rendererStart, rendererEnd);
+  assert.equal(rendererHandler.includes('window.confirm('), false, 'renderer must not be the authoritative approval boundary');
+  assert.ok(rendererHandler.includes('result.cancelled'), 'renderer must restore update_ready when main-process approval is cancelled');
 });
 await test('install creates backup in fixture and keeps user data untouched', async () => {
   const update = await fixture(); const manifest = await updater.readAndValidateManifest(update.directory, process.platform, process.arch);
