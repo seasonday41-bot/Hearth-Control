@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import StorageAudit from './StorageAudit';
 
 type Permission = 'Allow' | 'Ask' | 'Blocked';
-type NavItem = 'Overview' | 'Local Chat' | 'Storage Audit' | 'Task Console' | 'Goals' | 'Workspace' | 'Permissions' | 'Logs';
+type NavItem = 'Overview' | 'Console' | 'Local Chat' | 'Storage Audit' | 'Task Console' | 'Goals' | 'Workspace' | 'Permissions' | 'Logs';
 type IconName = 'grid' | 'folder' | 'lock' | 'terminal' | 'moon' | 'sun' | 'chevron' | 'activity' | 'copy' | 'server' | 'console' | 'radio' | 'flag' | 'check' | 'plus';
 
 const Icon = ({ name }: { name: IconName }) => {
@@ -28,6 +28,46 @@ const Icon = ({ name }: { name: IconName }) => {
 
 type LogEntry = { time: string; source: string; message: string; tone: string };
 type ApprovalRequest = { requestId: string; permission: string; action: string };
+type ApprovalEvidenceState = 'pending' | 'allowed' | 'denied' | 'timeout' | 'aborted' | 'shutdown';
+type ApprovalEvidence = ApprovalRequest & {
+  state: ApprovalEvidenceState;
+  time: string;
+  reason: 'user' | 'timeout' | 'aborted' | 'shutdown' | null;
+};
+
+const APPROVAL_EVIDENCE_LIMIT = 40;
+
+export const recordApprovalRequested = (
+  history: ApprovalEvidence[],
+  incoming: ApprovalRequest,
+  time: string,
+): ApprovalEvidence[] => {
+  const existing = history.find((item) => item.requestId === incoming.requestId);
+  const next = existing
+    ? history.map((item) => item.requestId === incoming.requestId
+      ? { ...item, permission: incoming.permission, action: incoming.action }
+      : item)
+    : [...history, { ...incoming, state: 'pending' as const, time, reason: null }];
+  return next.slice(-APPROVAL_EVIDENCE_LIMIT);
+};
+
+export const recordApprovalResolved = (
+  history: ApprovalEvidence[],
+  requestId: string,
+  allowed: boolean,
+  reason: 'user' | 'timeout' | 'aborted' | 'shutdown' | undefined,
+  time: string,
+): ApprovalEvidence[] => {
+  const state: ApprovalEvidenceState = allowed
+    ? 'allowed'
+    : reason === 'timeout' || reason === 'aborted' || reason === 'shutdown'
+      ? reason
+      : 'denied';
+  const next = history.map((item) => item.requestId === requestId
+    ? { ...item, state, reason: reason ?? 'user', time }
+    : item);
+  return next.slice(-APPROVAL_EVIDENCE_LIMIT);
+};
 
 // Pure FIFO queue logic for the approval collection -- kept outside the
 // component so it's a plain, deterministic function of (queue, event),
@@ -55,6 +95,7 @@ const initialPermissions: Array<{ name: string; detail: string; value: Permissio
 
 const nav: Array<{ name: NavItem; icon: IconName }> = [
   { name: 'Overview', icon: 'grid' },
+  { name: 'Console', icon: 'activity' },
   { name: 'Local Chat', icon: 'radio' },
   { name: 'Storage Audit', icon: 'folder' },
   { name: 'Task Console', icon: 'console' },
@@ -94,7 +135,15 @@ export default function App() {
   const [dark, setDark] = useState(() => localStorage.getItem('control-theme') === 'dark');
   const [notice, setNotice] = useState('');
   const [approvalQueue, setApprovalQueue] = useState<ApprovalRequest[]>([]);
+  const [approvalEvidence, setApprovalEvidence] = useState<ApprovalEvidence[]>([]);
   const approval = approvalQueue[0] ?? null;
+  const [connections, setConnections] = useState<ConnectionSummary[]>([]);
+  const [connectionsBusy, setConnectionsBusy] = useState(false);
+  const [connectionsError, setConnectionsError] = useState('');
+  const [connectionActionBusy, setConnectionActionBusy] = useState<string | null>(null);
+  const [connectionTokenInputs, setConnectionTokenInputs] = useState<Record<string, string>>({});
+  const [githubPrCreateInputs, setGithubPrCreateInputs] = useState<Record<string, boolean>>({});
+  const [vercelTeamIdInput, setVercelTeamIdInput] = useState('');
   const [workspaceValid, setWorkspaceValid] = useState<boolean | null>(null);
   const [updaterInfo, setUpdaterInfo] = useState<UpdaterInfo | null>(null);
   const [updateCheck, setUpdateCheck] = useState<UpdateCheck | null>(null);
@@ -200,7 +249,8 @@ export default function App() {
       window.controlApp.updaterCheck().catch(() => null),
       window.controlApp.goalsList().catch(() => []),
       window.controlApp.antigravityListTasks().catch(() => []),
-    ]).then(([settings, state, executor, bridge, publicX, updateInfo, update, goalsList, taskList]) => {
+      window.controlApp.connectionsList().catch(() => []),
+    ]).then(([settings, state, executor, bridge, publicX, updateInfo, update, goalsList, taskList, connectionList]) => {
       if (!active) return;
       if (settings.workspace) setWorkspace(settings.workspace);
       setPort(settings.port);
@@ -214,6 +264,7 @@ export default function App() {
       if (updateInfo) setUpdaterInfo(updateInfo);
       if (update) setUpdateCheck(update);
       if (goalsList) setGoals(goalsList);
+      if (Array.isArray(connectionList)) setConnections(connectionList);
 
       if (Array.isArray(taskList) && taskList.length > 0) {
         const recoveringOrActive = taskList.find((t: any) => !t.dismissed && ['recovery_required', 'running', 'starting', 'waiting'].includes(t.status))
@@ -245,10 +296,19 @@ export default function App() {
         setLogs((current) => [...current, { time: now(), source: event.source ?? 'core', tone: event.tone ?? 'quiet', message: event.message ?? '' }]);
       }
       if (event.type === 'approval' && event.requestId && event.permission && event.action) {
-        setApprovalQueue((current) => upsertApproval(current, { requestId: event.requestId!, permission: event.permission!, action: event.action! }));
+        const incoming = { requestId: event.requestId!, permission: event.permission!, action: event.action! };
+        setApprovalQueue((current) => upsertApproval(current, incoming));
+        setApprovalEvidence((current) => recordApprovalRequested(current, incoming, now()));
       }
       if (event.type === 'approval:resolved' && event.requestId) {
         setApprovalQueue((current) => removeApproval(current, event.requestId!));
+        setApprovalEvidence((current) => recordApprovalResolved(
+          current,
+          event.requestId!,
+          event.allowed === true,
+          event.reason,
+          now(),
+        ));
       }
       if (event.type === 'goals:updated' && event.goal) {
         const updatedGoal = event.goal;
@@ -431,6 +491,23 @@ export default function App() {
 
   const now = () => new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(new Date());
   const allowed = useMemo(() => permissions.filter((item) => item.value === 'Allow').length, [permissions]);
+  const healthyConnections = useMemo(() => connections.filter((item) => item.status === 'CONNECTED').length, [connections]);
+  const attentionConnections = useMemo(
+    () => connections.filter((item) => ['EXPIRED', 'NEEDS_REAUTH', 'ERROR'].includes(item.status)).length,
+    [connections],
+  );
+  const durableGoalEvidence = useMemo(() => goals
+    .flatMap((goal) => goal.checkpoints.map((checkpoint) => ({
+      goalId: goal.id,
+      goalTitle: goal.title,
+      checkpointId: checkpoint.id,
+      timestamp: checkpoint.timestamp,
+      summary: checkpoint.summary,
+      checks: checkpoint.checks,
+      filesChanged: checkpoint.filesChanged,
+    })))
+    .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+    .slice(0, 8), [goals]);
   const flash = (message: string) => { setNotice(message); window.setTimeout(() => setNotice(''), 2200); };
 
   const promptBytes = useMemo(() => new TextEncoder().encode(taskPrompt).length, [taskPrompt]);
@@ -596,12 +673,81 @@ export default function App() {
     if (!approval) return;
     const { requestId, action } = approval;
     await window.controlApp.respondToApproval({ requestId, allowed: allowedChoice });
-    setLogs((current) => [...current, { time: now(), source: 'approval', tone: allowedChoice ? 'success' : 'warning', message: `${allowedChoice ? 'Allowed' : 'Denied'} once: ${action}` }]);
+    const resolvedAt = now();
+    setLogs((current) => [...current, { time: resolvedAt, source: 'approval', tone: allowedChoice ? 'success' : 'warning', message: `${allowedChoice ? 'Allowed' : 'Denied'} once: ${action}` }]);
+    setApprovalEvidence((current) => recordApprovalResolved(current, requestId, allowedChoice, 'user', resolvedAt));
     // Optimistic, requestId-specific removal -- a later approval:resolved
     // for this same id (the normal server-side confirmation) is harmless
     // (removeApproval no-ops on an already-absent requestId), and this
     // never disturbs any other queued approval.
     setApprovalQueue((current) => removeApproval(current, requestId));
+  };
+
+  const refreshConnections = async (alias?: string) => {
+    if (connectionsBusy) return;
+    setConnectionsBusy(true);
+    setConnectionsError('');
+    try {
+      await window.controlApp.connectionsRefresh(alias);
+      setConnections(await window.controlApp.connectionsList());
+    } catch (error: any) {
+      setConnectionsError(error?.message || 'Connection refresh failed');
+    } finally {
+      setConnectionsBusy(false);
+    }
+  };
+
+  const connectManagedConnection = async (connection: ConnectionSummary) => {
+    const token = (connectionTokenInputs[connection.alias] || '').trim();
+    if (!token) {
+      setConnectionsError('Enter a token before connecting.');
+      return;
+    }
+    setConnectionActionBusy(connection.alias);
+    setConnectionsError('');
+    try {
+      if (connection.provider === 'github') {
+        await window.controlApp.githubConnect({
+          alias: connection.alias as 'github:personal' | 'github:work',
+          token,
+          allowPullRequestCreate: githubPrCreateInputs[connection.alias] === true,
+        });
+      } else if (connection.provider === 'vercel') {
+        await window.controlApp.vercelConnect({
+          alias: 'vercel:main',
+          token,
+          ...(vercelTeamIdInput.trim() ? { teamId: vercelTeamIdInput.trim() } : {}),
+        });
+      } else {
+        throw new Error('This connection uses its existing dedicated auth surface.');
+      }
+      setConnectionTokenInputs((current) => ({ ...current, [connection.alias]: '' }));
+      setConnections(await window.controlApp.connectionsList());
+    } catch (error: any) {
+      setConnectionsError(error?.message || 'Connection failed');
+    } finally {
+      setConnectionActionBusy(null);
+    }
+  };
+
+  const disconnectManagedConnection = async (connection: ConnectionSummary) => {
+    setConnectionActionBusy(connection.alias);
+    setConnectionsError('');
+    try {
+      if (connection.provider === 'github') {
+        await window.controlApp.githubDisconnect(connection.alias as 'github:personal' | 'github:work');
+      } else if (connection.provider === 'vercel') {
+        await window.controlApp.vercelDisconnect('vercel:main');
+      } else {
+        throw new Error('This connection uses its existing dedicated auth surface.');
+      }
+      setConnectionTokenInputs((current) => ({ ...current, [connection.alias]: '' }));
+      setConnections(await window.controlApp.connectionsList());
+    } catch (error: any) {
+      setConnectionsError(error?.message || 'Disconnect failed');
+    } finally {
+      setConnectionActionBusy(null);
+    }
   };
 
   const navigate = (item: NavItem) => {
@@ -1153,6 +1299,189 @@ export default function App() {
               {showChatContext && <section className="local-chat-context-inspector" aria-label="Local AI context"><header><strong>Context supplied to Local AI</strong><button type="button" onClick={() => setShowChatContext(false)}>Close</button></header>{chatContextLoading ? <p>Loading current context…</p> : chatContextError ? <p role="alert">{chatContextError}</p> : chatContext && <div><h3>Runtime</h3><pre>{chatContext.runtime}</pre><h3>Capabilities</h3><p><strong>Available:</strong> {chatContext.capabilities.available.join('; ')}</p><p><strong>Not available:</strong> {chatContext.capabilities.unavailable.join('; ')}</p><h3>Project</h3><pre>{chatContext.project}</pre><h3>Safety</h3><p>{chatContext.safety}</p><h3>Response Style</h3><p>{chatContext.responseStyle}</p></div>}</section>}
               {chatExpandedCode && <div className="local-chat-code-modal" role="dialog" aria-modal="true"><div className="local-chat-code-modal-header"><span>{chatExpandedCode.language || 'code'}</span><button type="button" onClick={() => setChatExpandedCode(null)}>Close</button></div><pre><code>{chatExpandedCode.code}</code></pre></div>}
             </section>
+          </div>
+        ) : activeNav === 'Console' ? (
+          <div className="operations-console-view">
+            <header className="page-header" id="console">
+              <div>
+                <p className="kicker">OPERATIONAL CONSOLE</p>
+                <h1>Console.</h1>
+                <p className="intro">Read-only operational state for connections, approvals, and evidence.</p>
+              </div>
+              <div className={`connection-pill ${attentionConnections === 0 && healthyConnections > 0 ? 'online' : ''}`}>
+                <span /> {healthyConnections}/{connections.length} connections healthy
+              </div>
+            </header>
+
+            <section className="metrics console-metrics" aria-label="Operational overview">
+              <article><div className="metric-icon sage"><Icon name="activity" /></div><div><span>Connections</span><strong>{healthyConnections} healthy</strong><small>{attentionConnections > 0 ? `${attentionConnections} require attention` : 'No provider errors reported'}</small></div></article>
+              <article><div className="metric-icon sand"><Icon name="lock" /></div><div><span>Approvals</span><strong>{approvalQueue.length} pending</strong><small>Decisions remain in the existing approval dialog</small></div></article>
+              <article><div className="metric-icon blue"><Icon name="terminal" /></div><div><span>Session evidence</span><strong>{logs.length + approvalEvidence.length} events</strong><small>Current app session only</small></div></article>
+              <article><div className="metric-icon purple"><Icon name="flag" /></div><div><span>Durable evidence</span><strong>{durableGoalEvidence.length} checkpoints</strong><small>Latest persisted Goal checkpoints</small></div></article>
+            </section>
+
+            <div className="console-grid">
+              <section className="soft-panel console-connections-panel" aria-labelledby="console-connections-title">
+                <div className="panel-title">
+                  <div><p className="section-kicker">CONNECTIONS</p><h2 id="console-connections-title">Health</h2></div>
+                  <button type="button" className="subtle-action" disabled={connectionsBusy} onClick={() => void refreshConnections()}>
+                    {connectionsBusy ? 'Refreshing…' : 'Refresh all'}
+                  </button>
+                </div>
+                {connectionsError && <p className="console-error" role="alert">{connectionsError}</p>}
+                <div className="console-connection-list">
+                  {connections.length === 0 ? (
+                    <div className="console-empty"><Icon name="activity" /><p>No connection metadata available</p><small>Connection credentials are never shown here.</small></div>
+                  ) : connections.map((connection) => (
+                    <article className="console-connection-row" key={connection.alias}>
+                      <div className="console-connection-main">
+                        <div>
+                          <strong>{connection.label}</strong>
+                          <code>{connection.alias}</code>
+                        </div>
+                        <span className={`console-status status-${connection.status.toLowerCase()}`}>{connection.status}</span>
+                      </div>
+                      <dl className="console-facts">
+                        <div><dt>Provider</dt><dd>{connection.provider}</dd></div>
+                        <div><dt>Account</dt><dd>{connection.account || '—'}</dd></div>
+                        <div><dt>Last checked</dt><dd>{connection.lastCheckedAt ? new Date(connection.lastCheckedAt).toLocaleString() : 'Not checked'}</dd></div>
+                        <div><dt>Capabilities</dt><dd>{connection.capabilities.length ? connection.capabilities.join(', ') : 'None granted'}</dd></div>
+                      </dl>
+                      {connection.lastError && <p className="console-inline-error">Last error: {connection.lastError}</p>}
+                      {(connection.provider === 'github' || connection.provider === 'vercel') && (
+                        <div className="console-connection-management">
+                          {connection.status !== 'CONNECTED' && (
+                            <div className="console-connect-form">
+                              <label>
+                                <span>{connection.provider === 'github' ? 'Fine-grained PAT' : 'Personal access token'}</span>
+                                <input
+                                  type="password"
+                                  autoComplete="new-password"
+                                  spellCheck={false}
+                                  value={connectionTokenInputs[connection.alias] || ''}
+                                  onChange={(event) => setConnectionTokenInputs((current) => ({ ...current, [connection.alias]: event.target.value }))}
+                                  placeholder="Enter token locally"
+                                />
+                              </label>
+                              {connection.provider === 'github' && (
+                                <label className="console-checkbox">
+                                  <input
+                                    type="checkbox"
+                                    checked={githubPrCreateInputs[connection.alias] === true}
+                                    onChange={(event) => setGithubPrCreateInputs((current) => ({ ...current, [connection.alias]: event.target.checked }))}
+                                  />
+                                  Allow pull request creation
+                                </label>
+                              )}
+                              {connection.provider === 'vercel' && (
+                                <label>
+                                  <span>Team ID (optional)</span>
+                                  <input
+                                    type="text"
+                                    autoComplete="off"
+                                    spellCheck={false}
+                                    value={vercelTeamIdInput}
+                                    onChange={(event) => setVercelTeamIdInput(event.target.value)}
+                                    placeholder="team_..."
+                                  />
+                                </label>
+                              )}
+                              <button
+                                type="button"
+                                className="subtle-action"
+                                disabled={connectionActionBusy === connection.alias || !(connectionTokenInputs[connection.alias] || '').trim()}
+                                onClick={() => void connectManagedConnection(connection)}
+                              >
+                                {connectionActionBusy === connection.alias ? 'Connecting…' : connection.status === 'DISCONNECTED' ? 'Connect' : 'Reconnect'}
+                              </button>
+                            </div>
+                          )}
+                          {connection.status !== 'DISCONNECTED' && (
+                            <button
+                              type="button"
+                              className="text-action console-disconnect"
+                              disabled={connectionActionBusy === connection.alias}
+                              onClick={() => void disconnectManagedConnection(connection)}
+                            >
+                              Disconnect
+                            </button>
+                          )}
+                        </div>
+                      )}
+                      {connection.provider === 'supabase' && <p className="console-boundary-note">Authentication remains in the existing Remote Bridge / Project X surfaces; P7 does not create a second Supabase login path.</p>}
+                      <button type="button" className="text-action" disabled={connectionsBusy || connectionActionBusy === connection.alias} onClick={() => void refreshConnections(connection.alias)}>Refresh health</button>
+                    </article>
+                  ))}
+                </div>
+                <p className="console-boundary-note">Renderer-safe summaries only. Stored provider targets, credentials, tokens, and ciphertext are never read back or rendered.</p>
+              </section>
+
+              <section className="soft-panel console-approvals-panel" aria-labelledby="console-approvals-title">
+                <div className="panel-title">
+                  <div><p className="section-kicker">APPROVALS</p><h2 id="console-approvals-title">Pending requests</h2></div>
+                  <span className="panel-meta">Status only</span>
+                </div>
+                {approvalQueue.length === 0 ? (
+                  <div className="console-empty"><Icon name="lock" /><p>No pending approvals</p><small>New requests still open the existing one-time approval dialog.</small></div>
+                ) : (
+                  <div className="console-approval-list">
+                    {approvalQueue.map((item, index) => (
+                      <article className="console-approval-row" key={item.requestId}>
+                        <span>{index === 0 ? 'Waiting now' : `Queued ${index + 1}`}</span>
+                        <strong>{item.permission}</strong>
+                        <p>{item.action}</p>
+                      </article>
+                    ))}
+                  </div>
+                )}
+                <p className="console-boundary-note">The Console cannot allow or deny requests. Decisions remain owned by the existing approval lifecycle.</p>
+              </section>
+
+              <section className="soft-panel console-evidence-panel" aria-labelledby="console-evidence-title">
+                <div className="panel-title">
+                  <div><p className="section-kicker">EVIDENCE</p><h2 id="console-evidence-title">Operational evidence</h2></div>
+                  <span className="panel-meta">Read only</span>
+                </div>
+                <div className="console-evidence-grid">
+                  <div>
+                    <h3>Current session</h3>
+                    <p className="console-evidence-caption">System logs and approval lifecycle events are retained only for this open app session.</p>
+                    <div className="console-evidence-list">
+                      {[...approvalEvidence].reverse().slice(0, 6).map((item) => (
+                        <article key={item.requestId}>
+                          <time>{item.time}</time>
+                          <strong>{item.permission} · {item.state}</strong>
+                          <p>{item.action}</p>
+                        </article>
+                      ))}
+                      {[...logs].reverse().slice(0, 6).map((log, index) => (
+                        <article key={`${log.time}-${log.source}-${index}`}>
+                          <time>{log.time}</time>
+                          <strong>{log.source}</strong>
+                          <p>{log.message}</p>
+                        </article>
+                      ))}
+                      {approvalEvidence.length === 0 && logs.length === 0 && <div className="console-empty compact"><p>No session evidence yet</p></div>}
+                    </div>
+                  </div>
+                  <div>
+                    <h3>Durable Goal checkpoints</h3>
+                    <p className="console-evidence-caption">These summaries come from Goal Runner checkpoint evidence already persisted by Hearth.</p>
+                    <div className="console-evidence-list">
+                      {durableGoalEvidence.map((item) => (
+                        <article key={item.checkpointId}>
+                          <time>{new Date(item.timestamp).toLocaleString()}</time>
+                          <strong>{item.goalTitle}</strong>
+                          <p>{item.summary || 'Checkpoint recorded'}</p>
+                          <small>{item.filesChanged.length ? `${item.filesChanged.length} file(s) changed` : 'No changed files recorded'} · {Object.keys(item.checks || {}).length} check(s)</small>
+                        </article>
+                      ))}
+                      {durableGoalEvidence.length === 0 && <div className="console-empty compact"><p>No durable Goal checkpoints yet</p></div>}
+                    </div>
+                  </div>
+                </div>
+              </section>
+            </div>
           </div>
         ) : activeNav === 'Task Console' ? (
           <div className="task-console-view">
@@ -1909,7 +2238,7 @@ export default function App() {
             </header>
 
             <section className={`power-console ${running ? 'is-running' : ''}`} aria-labelledby="server-title">
-              <div className="console-copy"><div className="console-icon"><Icon name="server" /><span className="pulse-ring" /></div><div><p className="section-kicker">SERVER STATUS</p><h2 id="server-title">{running ? 'MCP server is active' : 'MCP server is standing by'}</h2><p>{running ? `Streamable HTTP listening on 127.0.0.1:${port}.` : 'Start the server to expose 8 workspace tools locally.'}</p></div></div>
+              <div className="console-copy"><div className="console-icon"><Icon name="server" /><span className="pulse-ring" /></div><div><p className="section-kicker">SERVER STATUS</p><h2 id="server-title">{running ? 'MCP server is active' : 'MCP server is standing by'}</h2><p>{running ? `Streamable HTTP listening on 127.0.0.1:${port}.` : 'Start the server to expose Hearth MCP tools locally.'}</p></div></div>
               <div className="server-action"><label className="port-readout"><span>PORT</span><input aria-label="Server port" inputMode="numeric" disabled={running || busy} value={port} onChange={(event) => setPort(Number(event.target.value.replace(/\D/g, '').slice(0, 5)) || 3001)} onBlur={() => void window.controlApp.saveSettings({ port })} /></label><button className={`power-button ${running ? 'stop' : ''}`} disabled={busy} onClick={toggleServer}><span className="power-symbol" />{busy ? 'Working…' : running ? 'Stop Server' : 'Start Server'}</button></div>
             </section>
 
@@ -1964,7 +2293,7 @@ export default function App() {
             </div>
           </>
         )}
-        <footer><span>System operates locally on this Mac</span><span>8 MCP tools · 1 Executor registered</span></footer>
+        <footer><span>System operates locally on this Mac</span><span>Hearth MCP tools · 1 Executor registered</span></footer>
       </main>
 
       {showNewGoalModal && (

@@ -11,20 +11,19 @@ This section is the project handoff/source of truth for any new ChatGPT/Codex/AI
 ## CURRENT STATUS
 
 ```text
-PHASE = P6_VERCEL_CONNECTION — COMPLETE / VALIDATED / FROZEN
-CURRENT_BRANCH = main
-VALIDATED_MAIN_COMMIT = 6fc48dd876ebde72af2d49981dde16c0268b2e02
-VALIDATED_TAG = hearth-p6-validated-0.4.7-20260920
-FINAL_GATE = P6_MAIN_FINAL_GATE_PASS
-STATUS = P6_COMPLETE_VALIDATED
-BLOCKED_BY = none
-LAST_COMPLETED_STEP = P6 Vercel read-only connection V1 validated on main, tagged, and frozen
-NEXT_PHASE = P7_CONSOLE_CONNECTION_HEALTH_APPROVALS_EVIDENCE
-NEXT_EXACT_ACTION = audit the current Overview/Permissions/Logs/connection IPC surfaces and design the smallest P7 Console that exposes connection health, approval state, and evidence without adding new execution authority or redesigning frozen provider/runtime behavior
+PHASE = P7_OPERATIONAL_CONSOLE — IMPLEMENTED / VALIDATED ON FEATURE BRANCH
+CURRENT_BRANCH = feature/p7-console-v1
+BASELINE_MAIN = bddfb90ec9b12a9eb0a0cd4d1fed33f0a0d726ed
+P6_VALIDATED_TAG = hearth-p6-validated-0.4.7-20260920
+STATUS = P7_IMPLEMENTED_VALIDATED_AWAITING_CHECKPOINT
+BLOCKED_BY = no technical blocker; P7 checkpoint/tag/merge not yet performed
+LAST_COMPLETED_STEP = P7 Operational Console V1 implemented and regression-validated with connection health/management, approval visibility, bounded session evidence, and durable Goal checkpoint evidence without adding backend execution authority
+NEXT_PHASE = P7_FINALIZE_CHECKPOINT
+NEXT_EXACT_ACTION = review final diff/status, create P7 implementation checkpoint, fast-forward merge to main, run Main Final Gate, create validated tag, update README checkpoint, and push main + tag
 DO_NOT_MODIFY_FROZEN = X v0.1, P2, P3, P4, P5, or P6 unless an actual regression/security issue or an explicitly approved later phase requires a targeted change
 ```
 
-**Continuation rule:** Git/source is authoritative over chat history. Verify branch, HEAD, tag, and worktree before editing. Do not modify frozen X/P2/P3/P4/P5 behavior unless a regression/security issue or the approved current phase requires a targeted extension. Continue only `NEXT_EXACT_ACTION`.
+**Continuation rule:** Git/source is authoritative over chat history. Verify branch, HEAD, tag, and worktree before editing. Do not modify frozen X/P2/P3/P4/P5/P6 behavior unless a regression/security issue or the approved current phase requires a targeted extension. Continue only `NEXT_EXACT_ACTION`.
 
 ### Current validated/stable direction
 
@@ -79,7 +78,7 @@ This checklist is the handoff ledger for every future chat/agent. **A phase is n
 - [x] **P4 — GitHub multi-connection (2+)** — VALIDATED / FROZEN
 - [x] **P5 — Supabase multi-project (2+)** — VALIDATED / FROZEN
 - [x] **P6 — Vercel connection** — VALIDATED / FROZEN
-- [ ] **P7 — Console / connection health / approvals / evidence**
+- [ ] **P7 — Console / connection health / approvals / evidence** — IMPLEMENTED / VALIDATED ON FEATURE BRANCH; CHECKPOINT/MERGE PENDING
 - [ ] **P8 — Multi-Agent Router + universal `ส่งงาน:` ingress**
 - [ ] **P9 — Full UI redesign LAST**
 
@@ -383,6 +382,106 @@ SECURITY / AUTHORITY =
 LIVE_PROVIDER_SMOKE =
   not performed through Hearth because no P6 PAT was entered into Hearth;
   global Vercel CLI credential was deliberately not imported or exposed.
+```
+
+### P7 detailed checklist — current truth
+
+- [x] Create `feature/p7-console-v1` from `main@bddfb90ec9b12a9eb0a0cd4d1fed33f0a0d726ed`
+- [x] Audit existing Overview/Permissions/Logs/connection/approval/evidence surfaces instead of creating a parallel backend
+- [x] Lock canonical design: `docs/HEARTH-OPERATIONAL-CONSOLE-V1.md`
+- [x] Add first-class `Console` navigation/page without removing existing pages
+- [x] Reuse `connections:list` and `connections:refresh` for renderer-safe connection health
+- [x] Render alias/provider/status/account/capabilities/last checked/error only; do not render provider target/auth/stored credential material
+- [x] Add local GitHub Connect/Reconnect/Disconnect using existing P4 IPC only
+- [x] Add local Vercel Connect/Reconnect/Disconnect using existing P6 IPC only
+- [x] Keep connection token inputs transient/password-style; clear after successful connect; no localStorage/settings/log writes
+- [x] Keep Supabase authentication in existing Remote Bridge / Project X surfaces; no duplicate Supabase login path
+- [x] Show pending approvals as status-only; existing approval modal remains the only decision path
+- [x] Add bounded current-session approval history (40 max) from existing approval/resolution events
+- [x] Label system logs and approval history explicitly as current-session evidence
+- [x] Summarize durable Goal checkpoints read-only from already-persisted Goal Runner evidence
+- [x] Add no `console:` backend IPC namespace, no new durable store, no new execution route, and no provider mutation action
+- [x] Remove stale fixed `8 MCP tools` UI copy
+- [x] `npm run test:console` — 10/10 PASS
+- [x] P3 Connections — 18/18 PASS
+- [x] P4 GitHub — 30/30 PASS
+- [x] P5 Supabase — 28/28 PASS
+- [x] P6 Vercel — 31/31 PASS
+- [x] Electron/HTTP + X MCP registry — 119/119 PASS
+- [x] Bridge standalone — 46/46 PASS
+- [x] Goal/Review/Remote Goal — all executed suites PASS
+- [x] P2 updater — 149/149 PASS
+- [x] production build + TypeScript — PASS
+- [x] X full regression — 616/617 PASS; sole failure is pre-existing EVT12 source-regex mismatch
+- [x] runtime scope audit + `git diff --check` — PASS
+- [ ] Create P7 implementation checkpoint commit
+- [ ] Fast-forward merge validated P7 branch into `main`
+- [ ] Run P7 Main Final Gate
+- [ ] Create validated P7 tag and push `main` + tag
+
+### P7 validation evidence — 2026-09-20 (feature branch, pre-checkpoint)
+
+```text
+BRANCH = feature/p7-console-v1
+BASELINE_MAIN = bddfb90ec9b12a9eb0a0cd4d1fed33f0a0d726ed
+
+npm run test:console
+  PASS = 10/10
+  FAIL = 0
+
+npm run test:connections
+  PASS = 18/18
+  FAIL = 0
+
+npm run test:github
+  PASS = 30/30
+  FAIL = 0
+
+npm run test:supabase
+  PASS = 28/28
+  FAIL = 0
+
+npm run test:vercel
+  PASS = 31/31
+  FAIL = 0
+
+Electron/HTTP + X MCP registry
+  PASS = 119/119
+  FAIL = 0
+
+Bridge standalone
+  PASS = 46/46
+  FAIL = 0
+
+Goal/Review/Remote Goal
+  PASS = all executed suites
+  FAIL = 0
+
+P2 updater
+  PASS = 149/149
+  FAIL = 0
+
+X full regression
+  PASS = 616/617
+  FAIL = 1 PRE-EXISTING BASELINE TEST MISMATCH ONLY
+  PRE_EXISTING = scripts/test-x-terminal-event.mjs EVT12 source-regex expects non-async serverProcess message handler while validated baseline already uses async (message) =>
+
+npm run build
+  PASS
+  TypeScript = PASS
+  Vite production build = PASS
+  stable build metadata restored after validation
+
+SCOPE / SECURITY =
+  backend/runtime authority changes = NONE
+  new console IPC namespace = NONE
+  GitHub/Vercel management = existing local P4/P6 IPC only
+  Supabase auth duplication = NONE
+  stored credential readback = NONE
+  token input persistence/logging = NONE
+  approval decision path from Console = NONE
+  current-session evidence is labeled non-durable
+  durable evidence source = existing Goal checkpoints
 ```
 
 ### P0 detailed checklist — current truth
@@ -981,25 +1080,40 @@ NEXT_PHASE = P7_CONSOLE_CONNECTION_HEALTH_APPROVALS_EVIDENCE
 NEXT_EXACT_ACTION = audit current Overview/Permissions/Logs/connection surfaces and design the smallest P7 operational Console without expanding provider execution authority
 ```
 
-### P7 — Console / connection health / approvals / evidence
+### P7 — Console / connection health / approvals / evidence — IMPLEMENTED / VALIDATED ON FEATURE BRANCH
 
-After Skills and provider connections work, build the operational Console needed to manage them.
+Canonical design: `docs/HEARTH-OPERATIONAL-CONSOLE-V1.md`.
 
-Target information architecture:
+P7 adds a functional operational Console over existing trusted state rather than a new backend:
 
 ```text
-Dashboard
-Projects
-Agents
-Skills
 Connections
-Tasks / Goals
+  -> safe public snapshots + explicit health refresh
+  -> local GitHub/Vercel connect/reconnect/disconnect via existing IPC
+
 Approvals
-Console / Logs / Evidence
-Settings
+  -> existing FIFO approval queue shown status-only
+  -> existing modal remains the only allow/deny decision path
+
+Evidence
+  -> current-session logs + bounded approval history
+  -> durable Goal checkpoints from existing Goal Runner persistence
 ```
 
-This phase is functional/operational UI. Do not perform the full visual redesign yet.
+Locked P7 V1 rules:
+
+- no new execution authority or provider mutation tool;
+- no new `console:` IPC namespace or durable Console database;
+- stored provider secrets are never read back into renderer;
+- token inputs are transient password fields and cleared after successful connect;
+- Supabase keeps existing Bridge / Project X auth surfaces;
+- current-session evidence is labeled as non-durable;
+- durable evidence is read-only Goal checkpoint state already owned by Hearth;
+- P9 full visual redesign remains deferred.
+
+```text
+NEXT_EXACT_ACTION = finalize P7 checkpoint/tag/merge on main after final scoped diff review
+```
 
 ### P8 — Multi-Agent Router + universal ingress
 
