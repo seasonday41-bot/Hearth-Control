@@ -14,6 +14,8 @@ const updateTrust = require('./update-trust-config.cjs');
 const { createTaskNotifier } = require('./task-notifications.cjs');
 const { SecureCredentialStore } = require('./security/secure-credential-store.cjs');
 const { ConnectionService } = require('./connections/connection-service.cjs');
+const { GitHubClient } = require('./github/github-client.cjs');
+const { GitHubConnectionService } = require('./github/github-connection-service.cjs');
 
 const importFromHere = (relativePath) => import(pathToFileURL(path.join(__dirname, relativePath)).href);
 let buildMetadata;
@@ -44,6 +46,7 @@ let taskStore = null;
 let connectionRegistry = null;
 let credentialStore = null;
 let connectionService = null;
+let githubConnectionService = null;
 let jobManager = null;
 let xQueueCoordinator = null;
 let xQueueStore = null;
@@ -327,7 +330,19 @@ const initializeConnectionInfrastructure = async () => {
   });
 
   migrateLegacyCredentials();
-  connectionService.refreshAllHealth();
+
+  githubConnectionService = new GitHubConnectionService({
+    registry: connectionRegistry,
+    connectionService,
+    githubClient: new GitHubClient(),
+  });
+
+  // Preserve frozen P3/Supabase startup semantics without pretending a stored
+  // GitHub credential is remotely healthy. GitHub health is provider-owned
+  // and runs only through githubConnectionService.refresh().
+  for (const connection of connectionRegistry.list()) {
+    if (connection.provider !== 'github') connectionService.refreshHealth(connection.alias);
+  }
 };
 
 let canonicalJson = null;
@@ -1082,6 +1097,72 @@ const startServer = async ({ workspace, port }) => {
         }
       }).finally(() => cancelXQueueRequest(message.transportId));
     }
+    if ([
+      'github_connections_list_request',
+      'github_repositories_list_request',
+      'github_repository_get_request',
+      'github_pull_requests_list_request',
+      'github_pull_request_create_request',
+    ].includes(message?.type)) {
+      if (typeof message.transportId !== 'string' || !/^[0-9a-f-]{36}$/i.test(message.transportId)) return;
+      let result = null;
+      let ok = true;
+      let error = null;
+      try {
+        if (!githubConnectionService || !connectionRegistry) throw Object.assign(new Error('github_connection_service_unavailable'), { code: 'github_connection_service_unavailable' });
+        if (message.type === 'github_connections_list_request') {
+          result = {
+            connections: connectionRegistry.list()
+              .filter((connection) => connection.provider === 'github')
+              .map((connection) => githubConnectionService.publicSnapshot(connection)),
+          };
+        } else if (message.type === 'github_repositories_list_request') {
+          result = await githubConnectionService.listRepositories(message.connection, {
+            page: message.page,
+            perPage: message.perPage,
+          });
+        } else if (message.type === 'github_repository_get_request') {
+          result = await githubConnectionService.getRepository(message.connection, {
+            owner: message.owner,
+            repo: message.repo,
+          });
+        } else if (message.type === 'github_pull_requests_list_request') {
+          result = await githubConnectionService.listPullRequests(message.connection, {
+            owner: message.owner,
+            repo: message.repo,
+            state: message.state,
+            page: message.page,
+            perPage: message.perPage,
+          });
+        } else if (message.type === 'github_pull_request_create_request') {
+          result = await githubConnectionService.createPullRequest(message.connection, {
+            owner: message.owner,
+            repo: message.repo,
+            title: message.title,
+            head: message.head,
+            base: message.base,
+            body: message.body,
+            draft: message.draft === true,
+          });
+        }
+      } catch (err) {
+        ok = false;
+        error = typeof err?.code === 'string' ? err.code : 'github_request_failed';
+      }
+      if (serverProcess === child) {
+        try {
+          child.send({
+            type: message.type.replace(/_request$/, '_ack'),
+            transportId: message.transportId,
+            ok,
+            result,
+            error,
+          });
+        } catch (sendError) {
+          console.error('[Electron] GitHub request ack failed');
+        }
+      }
+    }
     if (message?.type === 'review_queue_list_request') {
       if (typeof message.transportId !== 'string' || !/^[0-9a-f-]{36}$/i.test(message.transportId)) return;
       // Read-only: calls the SAME live goalRunner.list_review_queue() the
@@ -1673,14 +1754,41 @@ app.whenReady().then(async () => {
   }
 
   ipcMain.handle('settings:get', () => publicSettingsSnapshot());
-  ipcMain.handle('connections:list', () => {
-    if (!connectionService) return [];
-    return connectionService.listPublic();
+  const listPublicConnections = () => {
+    if (!connectionService || !connectionRegistry) return [];
+    return connectionRegistry.list().map((connection) =>
+      connection.provider === 'github' && githubConnectionService
+        ? githubConnectionService.publicSnapshot(connection)
+        : connectionService.toPublic(connection)
+    );
+  };
+  ipcMain.handle('connections:list', () => listPublicConnections());
+  ipcMain.handle('connections:refresh', async (_event, alias) => {
+    if (!connectionService || !connectionRegistry) throw new Error('connection_service_unavailable');
+    const refreshOne = async (connectionAlias) => {
+      const connection = connectionRegistry.get(connectionAlias);
+      if (!connection) throw new Error('connection_not_found');
+      if (connection.provider === 'github') {
+        if (!githubConnectionService) throw new Error('github_connection_service_unavailable');
+        return githubConnectionService.refresh(connectionAlias);
+      }
+      return connectionService.refreshHealth(connectionAlias);
+    };
+    if (alias) return [await refreshOne(alias)];
+    const results = [];
+    for (const connection of connectionRegistry.list()) results.push(await refreshOne(connection.alias));
+    return results;
   });
-  ipcMain.handle('connections:refresh', (_event, alias) => {
-    if (!connectionService) throw new Error('connection_service_unavailable');
-    if (alias) return [connectionService.refreshHealth(alias)];
-    return connectionService.refreshAllHealth();
+  ipcMain.handle('github:connect', async (_event, request) => {
+    if (!githubConnectionService) throw new Error('github_connection_service_unavailable');
+    if (!request || typeof request !== 'object') throw new Error('github_connect_request_invalid');
+    const capabilities = ['repo.read', 'pull_request.read'];
+    if (request.allowPullRequestCreate === true) capabilities.push('pull_request.create');
+    return githubConnectionService.connect(request.alias, request.token, { capabilities });
+  });
+  ipcMain.handle('github:disconnect', (_event, alias) => {
+    if (!githubConnectionService) throw new Error('github_connection_service_unavailable');
+    return githubConnectionService.disconnect(alias);
   });
   ipcMain.handle('settings:save', async (_event, settings) => {
     settings = sanitizeRendererSettingsInput(settings);

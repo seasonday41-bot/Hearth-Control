@@ -176,6 +176,8 @@ interface Window { controlApp: {
   saveSettings: (settings: Partial<ControlSettings>) => Promise<ControlSettings>;
   connectionsList: () => Promise<ConnectionSummary[]>;
   connectionsRefresh: (alias?: string) => Promise<ConnectionSummary[]>;
+  githubConnect: (request: { alias: 'github:personal' | 'github:work'; token: string; allowPullRequestCreate?: boolean }) => Promise<ConnectionSummary>;
+  githubDisconnect: (alias: 'github:personal' | 'github:work') => Promise<ConnectionSummary>;
   localChatStatus: () => Promise<{ health: any; models: any }>;
   localChatContext: (request?: { model?: string; profile?: string; longResponse?: boolean; ollamaAvailable?: boolean }) => Promise<{ runtime: string; capabilities: { available: string[]; unavailable: string[] }; project: string; safety: string; responseStyle: string }>;
   storageAuditScan: () => Promise<any>;

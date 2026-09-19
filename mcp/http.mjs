@@ -79,6 +79,21 @@ const queueIngressTransportFor = (response) => {
  * goalRunner.list_review_queue() the running app itself uses; this makes
  * zero writes on either side of the channel.
  */
+const githubTransportFor = (response) => {
+  const roundTrip = createRoundTripTransport(response);
+  return {
+    listConnections: () => roundTrip('github_connections_list_request', {}),
+    listRepositories: ({ connection, page, perPage }) =>
+      roundTrip('github_repositories_list_request', { connection, page, perPage }),
+    getRepository: ({ connection, owner, repo }) =>
+      roundTrip('github_repository_get_request', { connection, owner, repo }),
+    listPullRequests: ({ connection, owner, repo, state, page, perPage }) =>
+      roundTrip('github_pull_requests_list_request', { connection, owner, repo, state, page, perPage }),
+    createPullRequest: ({ connection, owner, repo, title, head, base, body, draft }) =>
+      roundTrip('github_pull_request_create_request', { connection, owner, repo, title, head, base, body, draft }),
+  };
+};
+
 const reviewQueueTransportFor = (response) => {
   const roundTrip = createRoundTripTransport(response);
   return {
@@ -165,6 +180,12 @@ process.on('message', (message) => {
   if (message?.type === 'goal_get_context_ack') {
     queueReplies.get(message.transportId)?.finish(null, message.ok ? message.context : { error: message.error });
   }
+  if (typeof message?.type === 'string' && message.type.startsWith('github_') && message.type.endsWith('_ack')) {
+    queueReplies.get(message.transportId)?.finish(
+      null,
+      message.ok ? message.result : { ok: false, error: message.error || 'github_request_failed' },
+    );
+  }
 });
 process.on('disconnect', () => {
   for (const pending of queueReplies.values()) pending.finish(queueError('transport_unavailable'));
@@ -181,6 +202,7 @@ app.post('/mcp', async (request, response) => {
     workspace, permissions, requestApproval,
     queueIngressTransport: queueIngressTransportFor(response),
     reviewQueueTransport: reviewQueueTransportFor(response),
+    githubTransport: githubTransportFor(response),
   });
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   response.on('close', () => {

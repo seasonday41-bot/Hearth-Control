@@ -23,6 +23,11 @@ export const toolNames = [
   'git_status',
   'git_diff',
   'run_command',
+  'github_connections_list',
+  'github_repositories_list',
+  'github_repository_get',
+  'github_pull_requests_list',
+  'github_pull_request_create',
   'antigravity_status',
   'antigravity_start',
   'antigravity_task',
@@ -370,6 +375,102 @@ export const registerWorkspaceTools = (server, options) => {
         const output = [error.stdout, error.stderr].filter(Boolean).join('\n').trim();
         throw new Error(output || error.message);
       }
+    } catch (error) { return failure(error); }
+  });
+
+  const githubAliases = z.enum(['github:personal', 'github:work']);
+
+  server.registerTool('github_connections_list', {
+    title: 'List GitHub connections',
+    description: 'Read-only: lists renderer-safe Hearth GitHub connection summaries. Never returns tokens, credential refs, ciphertext, or GitHub CLI/keyring state.',
+    inputSchema: {},
+  }, async () => {
+    if (!options.githubTransport?.listConnections) return text(JSON.stringify({ connections: [], reason: 'transport_unavailable' }));
+    try {
+      await requirePermission('Git', 'List Hearth GitHub connections');
+      const result = await options.githubTransport.listConnections();
+      return text(JSON.stringify(result, null, 2));
+    } catch (error) { return failure(error); }
+  });
+
+  server.registerTool('github_repositories_list', {
+    title: 'List GitHub repositories',
+    description: 'Read-only: lists repositories accessible through one explicit Hearth GitHub connection alias. Never falls back to another account.',
+    inputSchema: {
+      connection: githubAliases,
+      page: z.number().int().min(1).max(10000).default(1),
+      per_page: z.number().int().min(1).max(100).default(30),
+    },
+  }, async ({ connection, page, per_page }) => {
+    if (!options.githubTransport?.listRepositories) return text(JSON.stringify({ repositories: [], reason: 'transport_unavailable' }));
+    try {
+      await requirePermission('Git', `Read GitHub repositories via ${connection}`);
+      const result = await options.githubTransport.listRepositories({ connection, page, perPage: per_page });
+      if (result?.ok === false) throw new Error(result.error || 'github_request_failed');
+      return text(JSON.stringify(result, null, 2));
+    } catch (error) { return failure(error); }
+  });
+
+  server.registerTool('github_repository_get', {
+    title: 'Get GitHub repository',
+    description: 'Read-only: reads one repository through one explicit Hearth GitHub connection alias.',
+    inputSchema: {
+      connection: githubAliases,
+      owner: z.string().min(1).max(100).regex(/^[A-Za-z0-9_.-]+$/),
+      repo: z.string().min(1).max(100).regex(/^[A-Za-z0-9_.-]+$/),
+    },
+  }, async ({ connection, owner, repo }) => {
+    if (!options.githubTransport?.getRepository) return text(JSON.stringify({ repository: null, reason: 'transport_unavailable' }));
+    try {
+      await requirePermission('Git', `Read GitHub repository ${owner}/${repo} via ${connection}`);
+      const result = await options.githubTransport.getRepository({ connection, owner, repo });
+      if (result?.ok === false) throw new Error(result.error || 'github_request_failed');
+      return text(JSON.stringify(result, null, 2));
+    } catch (error) { return failure(error); }
+  });
+
+  server.registerTool('github_pull_requests_list', {
+    title: 'List GitHub pull requests',
+    description: 'Read-only: lists pull requests for one repository through one explicit Hearth GitHub connection alias.',
+    inputSchema: {
+      connection: githubAliases,
+      owner: z.string().min(1).max(100).regex(/^[A-Za-z0-9_.-]+$/),
+      repo: z.string().min(1).max(100).regex(/^[A-Za-z0-9_.-]+$/),
+      state: z.enum(['open', 'closed', 'all']).default('open'),
+      page: z.number().int().min(1).max(10000).default(1),
+      per_page: z.number().int().min(1).max(100).default(30),
+    },
+  }, async ({ connection, owner, repo, state, page, per_page }) => {
+    if (!options.githubTransport?.listPullRequests) return text(JSON.stringify({ pullRequests: [], reason: 'transport_unavailable' }));
+    try {
+      await requirePermission('Git', `Read GitHub pull requests for ${owner}/${repo} via ${connection}`);
+      const result = await options.githubTransport.listPullRequests({ connection, owner, repo, state, page, perPage: per_page });
+      if (result?.ok === false) throw new Error(result.error || 'github_request_failed');
+      return text(JSON.stringify(result, null, 2));
+    } catch (error) { return failure(error); }
+  });
+
+  server.registerTool('github_pull_request_create', {
+    title: 'Create GitHub pull request',
+    description: 'Creates one pull request through one explicit Hearth GitHub connection. Requires pull_request.create capability plus Hearth Git permission; Ask mode requires exact local approval. Does not merge, push, delete, publish releases, or mutate repository administration.',
+    inputSchema: {
+      connection: githubAliases,
+      owner: z.string().min(1).max(100).regex(/^[A-Za-z0-9_.-]+$/),
+      repo: z.string().min(1).max(100).regex(/^[A-Za-z0-9_.-]+$/),
+      title: z.string().min(1).max(256),
+      head: z.string().min(1).max(256),
+      base: z.string().min(1).max(256),
+      body: z.string().max(65536).optional(),
+      draft: z.boolean().default(false),
+    },
+    annotations: { destructiveHint: true },
+  }, async ({ connection, owner, repo, title, head, base, body, draft }) => {
+    if (!options.githubTransport?.createPullRequest) return text(JSON.stringify({ ok: false, reason: 'transport_unavailable' }));
+    try {
+      await requirePermission('Git', `Create GitHub PR in ${owner}/${repo} via ${connection}: ${head} -> ${base} · ${title}`);
+      const result = await options.githubTransport.createPullRequest({ connection, owner, repo, title, head, base, body, draft });
+      if (result?.ok === false) throw new Error(result.error || 'github_request_failed');
+      return text(JSON.stringify(result, null, 2));
     } catch (error) { return failure(error); }
   });
 

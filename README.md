@@ -11,15 +11,15 @@ This section is the project handoff/source of truth for any new ChatGPT/Codex/AI
 ## CURRENT STATUS
 
 ```text
-PHASE = P4_GITHUB_MULTI_CONNECTION — AUDIT / DESIGN COMPLETE
+PHASE = P4_GITHUB_MULTI_CONNECTION — IMPLEMENTED / VALIDATED ON FEATURE BRANCH
 CURRENT_BRANCH = feature/p4-github-multi-connection-v1
 BASELINE_MAIN = 99c2b91c4843e1268c472c31859966df9623ce2b
 P3_VALIDATED_TAG = hearth-p3-validated-0.4.7-20260919
-STATUS = P4_DESIGN_LOCKED_READY_TO_IMPLEMENT
-BLOCKED_BY = none
-LAST_COMPLETED_STEP = P4 GitHub surfaces audited; canonical multi-connection auth/client/tool design locked in docs/HEARTH-GITHUB-MULTI-CONNECTION-V1.md
-NEXT_PHASE = P4_IMPLEMENTATION
-NEXT_EXACT_ACTION = implement P4.1 GitHub fixed-origin REST client and focused tests only; no connect UI, MCP write tool, git push transport, or P2 updater changes yet
+STATUS = P4_IMPLEMENTED_VALIDATED_AWAITING_CHECKPOINT
+BLOCKED_BY = no technical blocker; P4 checkpoint/tag/merge not yet performed
+LAST_COMPLETED_STEP = P4 GitHub multi-connection V1 implemented and regression-validated: fixed-origin REST client, two isolated aliases, local connect/disconnect IPC, remote health, explicit-alias MCP reads, and approval-gated PR creation
+NEXT_PHASE = P4_FINALIZE_CHECKPOINT
+NEXT_EXACT_ACTION = review final diff/status, create P4 checkpoint commit/tag, fast-forward merge to main, run Main Final Gate, update README checkpoint, and push main + validated tag
 DO_NOT_MODIFY_FROZEN = X v0.1, P2, or P3 unless an actual regression/security issue or an explicitly approved P4 extension requires a targeted change
 ```
 
@@ -72,7 +72,7 @@ This checklist is the handoff ledger for every future chat/agent. **A phase is n
 - [x] **P1 — Wire Skill Registry into X**
 - [x] **P2 — Remote One-Click Updater** — VALIDATED / FROZEN
 - [x] **P3 — Connection Registry + Secure Credential Store** — VALIDATED / FROZEN
-- [ ] **P4 — GitHub multi-connection (2+)** — AUDIT / DESIGN COMPLETE; IMPLEMENTATION NEXT
+- [ ] **P4 — GitHub multi-connection (2+)** — IMPLEMENTED / VALIDATED ON FEATURE BRANCH; CHECKPOINT/MERGE PENDING
 - [ ] **P5 — Supabase multi-project (2+)**
 - [ ] **P6 — Vercel connection**
 - [ ] **P7 — Console / connection health / approvals / evidence**
@@ -95,12 +95,86 @@ This checklist is the handoff ledger for every future chat/agent. **A phase is n
 - [x] Lock P2 updater isolation from P4 credentials
 - [x] Lock generic Git push/merge/delete/release/admin out of P4 V1 token path
 - [x] Author canonical design: `docs/HEARTH-GITHUB-MULTI-CONNECTION-V1.md`
-- [ ] P4.1 — GitHub fixed-origin REST client + focused tests
-- [ ] P4.2 — local connect/disconnect + remote health
-- [ ] P4.3 — dual-account isolation tests
-- [ ] P4.4 — read-only MCP tools with explicit connection alias
-- [ ] P4.5 — first approved mutation (`github_pull_request_create`) only after read path is stable
-- [ ] P4.6 — full regression / checkpoint / freeze
+- [x] P4.1 — GitHub fixed-origin REST client + focused tests
+- [x] P4.2 — local connect/disconnect + remote health
+- [x] P4.3 — dual-account isolation tests
+- [x] P4.4 — read-only MCP tools with explicit connection alias
+- [x] P4.5 — first approved mutation (`github_pull_request_create`) after read path stabilized; capability + Git permission/approval gated
+- [ ] P4.6 — full regression complete; checkpoint/tag/merge/freeze pending
+
+### P4 validation evidence — 2026-09-19 (feature branch, pre-checkpoint)
+
+```text
+BRANCH = feature/p4-github-multi-connection-v1
+BASELINE_MAIN = 99c2b91c4843e1268c472c31859966df9623ce2b
+
+npm run test:github
+  PASS = 30/30
+  FAIL = 0
+  includes real HTTP-child -> Electron-style parent IPC round-trip with no credential fields in child message
+
+npm run test:connections
+  PASS = 18/18
+  FAIL = 0
+
+X MCP tools regression
+  PASS = 21/21
+  FAIL = 0
+
+Project X auth
+  PASS = 13/13
+  FAIL = 0
+
+Bridge
+  PASS = 46/46
+  FAIL = 0
+
+Electron/main/preload/server integration
+  PASS = 98/98
+  FAIL = 0
+
+Goal/Review/Remote Goal
+  PASS = all executed suites
+  FAIL = 0
+
+P2 updater regression
+  PASS = 149/149
+  FAIL = 0
+
+X full regression
+  PASS = 616/617
+  FAIL = 1 PRE-EXISTING BASELINE TEST MISMATCH ONLY
+  PRE_EXISTING = scripts/test-x-terminal-event.mjs EVT12 expects a non-async serverProcess message handler, while validated baseline already uses async (message) =>
+
+npm run build
+  PASS
+  TypeScript = PASS
+  Vite production build = PASS
+  stable build metadata restored after validation
+
+Runtime syntax checks
+  PASS
+
+git diff --check
+  PASS
+```
+
+P4 V1 security/architecture evidence:
+
+```text
+GitHub API authority = fixed https://api.github.com
+GitHub REST version = 2026-03-10
+Accepted local credential shape = fine-grained PAT prefix github_pat_
+Credential storage = P3 SecureCredentialStore only
+github:personal and github:work = simultaneous + isolated
+global gh auth switch/token import = NOT USED
+MCP credential setter/getter = NONE
+MCP GitHub tools = explicit alias required
+PR create = pull_request.create capability + Hearth Git permission + exact approval when Git=Ask
+generic push/merge/delete/release/admin = OUT OF SCOPE / ABSENT
+P2 GitHub Releases updater = unchanged / credential-independent
+Connection management UI = deferred to P7; P4 exposes local renderer IPC only
+```
 
 ### P0 detailed checklist — current truth
 
@@ -548,7 +622,7 @@ Requirements:
 
 Do not hardcode one GitHub account, one Supabase project, or provider secrets into X.
 
-### P4 — GitHub multi-connection — AUDIT / DESIGN COMPLETE
+### P4 — GitHub multi-connection — IMPLEMENTED / VALIDATED ON FEATURE BRANCH
 
 Canonical design: `docs/HEARTH-GITHUB-MULTI-CONNECTION-V1.md`.
 
@@ -573,7 +647,7 @@ Locked P4 V1 rules:
 - The first mutation candidate is `github_pull_request_create`, gated by connection capability + Hearth Git permission + exact local approval.
 
 ```text
-NEXT_EXACT_ACTION = implement P4.1 GitHub fixed-origin REST client + focused tests only
+NEXT_EXACT_ACTION = finalize P4 checkpoint/tag/merge on main after final scoped diff review
 ```
 
 ### P5 — Supabase multi-project
