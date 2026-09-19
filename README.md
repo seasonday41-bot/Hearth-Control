@@ -316,7 +316,7 @@ SECURITY / ISOLATION =
 - [x] Create P6 implementation checkpoint commit — `6fc48dd876ebde72af2d49981dde16c0268b2e02`
 - [x] Fast-forward merge validated P6 branch into `main`
 - [x] Run P6 Main Final Gate — PASS
-- [ ] Create validated P6 tag and push `main` + tag — tag created locally; remote push pending
+- [x] Create validated P6 tag and push `main` + tag — remote `main` verified at `f0adadecb09a24473bdde3cae3129f138d8338fd`; tag dereferences to `6fc48dd876ebde72af2d49981dde16c0268b2e02`
 
 ### P6 validation evidence — 2026-09-20 (main Final Gate)
 
