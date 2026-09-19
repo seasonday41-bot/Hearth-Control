@@ -11,16 +11,15 @@ This section is the project handoff/source of truth for any new ChatGPT/Codex/AI
 ## CURRENT STATUS
 
 ```text
-PHASE = P7_OPERATIONAL_CONSOLE — COMPLETE / VALIDATED / FROZEN
-CURRENT_BRANCH = main
-VALIDATED_MAIN_COMMIT = 7865119f9e242099db9ba30b9215e0fd5dfd9a8d
-VALIDATED_TAG = hearth-p7-validated-0.4.7-20260920
-FINAL_GATE = P7_MAIN_FINAL_GATE_PASS
-STATUS = P7_COMPLETE_VALIDATED
-BLOCKED_BY = none
-LAST_COMPLETED_STEP = P7 Operational Console V1 validated on main, tagged, and frozen
-NEXT_PHASE = P8_MULTI_AGENT_ROUTER_UNIVERSAL_INGRESS
-NEXT_EXACT_ACTION = audit current task/job/Goal/X/specialist routing and design the smallest generic Hearth job ingress for user-facing `ส่งงาน:` commands while preserving x-task-v1 as X-internal and avoiding a second execution/runtime system
+PHASE = P8_MULTI_AGENT_ROUTER_UNIVERSAL_INGRESS — IMPLEMENTED / VALIDATED ON FEATURE BRANCH
+CURRENT_BRANCH = feature/p8-multi-agent-router-v1
+BASELINE_MAIN = d0278c4c6ba0f90fd895164fa268bcf7818a1730
+P7_VALIDATED_TAG = hearth-p7-validated-0.4.7-20260920
+STATUS = P8_IMPLEMENTED_VALIDATED_AWAITING_CHECKPOINT
+BLOCKED_BY = no technical blocker; P8 checkpoint/tag/merge not yet performed
+LAST_COMPLETED_STEP = P8 hearth-job-v1 + deterministic X/Antigravity router + Electron-owned universal submit/status ingress implemented and regression-validated without creating a second runtime/store or direct fresh-job Codex route
+NEXT_PHASE = P8_FINALIZE_CHECKPOINT
+NEXT_EXACT_ACTION = review final diff/status, create P8 implementation checkpoint, fast-forward merge to main, run Main Final Gate, create validated tag, update README checkpoint, and push main + tag
 DO_NOT_MODIFY_FROZEN = X v0.1, P2, P3, P4, P5, P6, or P7 unless an actual regression/security issue or an explicitly approved later phase requires a targeted change
 ```
 
@@ -81,7 +80,7 @@ This checklist is the handoff ledger for every future chat/agent. **A phase is n
 - [x] **P5 — Supabase multi-project (2+)** — VALIDATED / FROZEN
 - [x] **P6 — Vercel connection** — VALIDATED / FROZEN
 - [x] **P7 — Console / connection health / approvals / evidence** — VALIDATED / FROZEN
-- [ ] **P8 — Multi-Agent Router + universal `ส่งงาน:` ingress**
+- [ ] **P8 — Multi-Agent Router + universal `ส่งงาน:` ingress** — IMPLEMENTED / VALIDATED ON FEATURE BRANCH; CHECKPOINT/MERGE PENDING
 - [ ] **P9 — Full UI redesign LAST**
 
 ### P4 detailed checklist — current truth
@@ -486,6 +485,120 @@ SCOPE / SECURITY =
   approval decision path from Console = NONE
   current-session evidence is labeled non-durable
   durable evidence source = existing Goal checkpoints
+```
+
+### P8 detailed checklist — current truth
+
+- [x] Create `feature/p8-multi-agent-router-v1` from `main@d0278c4c6ba0f90fd895164fa268bcf7818a1730`
+- [x] Audit current X queue, Antigravity TaskStore, JobManager, Goal Runner, Review Queue, and specialist lifecycle before adding any router
+- [x] Confirm existing specialist lifecycle already supports handoff -> authorization -> Codex JobManager dispatch -> result -> human accept/reject
+- [x] Lock canonical design: `docs/HEARTH-MULTI-AGENT-ROUTER-V1.md`
+- [x] Add strict `hearth-job-v1` generic contract with semantic kinds only: `code_change`, `code_inspect`, `general`
+- [x] Reject unknown fields and caller-supplied worker/agent/provider/workspace/repair-budget authority
+- [x] Redact secret-shaped generic text before routing
+- [x] Deterministically route `code_change` / `code_inspect` to X and `general` to Antigravity
+- [x] Keep Codex outside fresh-job routing; existing specialist lifecycle remains the only Codex execution path in P8 V1
+- [x] Adapt code jobs internally to complete `x-task-v1` with canonical repair/timing/commit policy
+- [x] Derive X workspace root from authoritative Hearth workspace transport; generic payload cannot choose a filesystem root
+- [x] Include normalized generic-job fingerprint in adapted X evidence so same job_id + changed generic payload conflicts through existing X receipt fingerprinting
+- [x] Reuse Electron `ingestXTask` for universal X submit; no P8 X queue/run store
+- [x] Reuse Electron-owned Antigravity TaskStore/runtime with `taskId = hearthjob:<job_id>`
+- [x] Persist Antigravity generic fingerprint in existing `requestId`; same identical job returns existing task, changed payload fails closed
+- [x] Fail closed on cross-route/dual-route ambiguity
+- [x] Add MCP tools `hearth_job_submit` and `hearth_job_status`
+- [x] Route universal MCP calls through Electron-owned HTTP IPC; no direct universal worker execution in MCP child
+- [x] Add transport cancellation so disconnect during approval removes waiter and prevents pre-commit execution
+- [x] Reuse existing X and Antigravity Blocked/Ask/Allow permission boundaries
+- [x] Status reads only existing X receipt / Antigravity TaskStore truth; no P8 status database
+- [x] Focused P8 router/transport/TaskStore suite — 24/24 PASS
+- [x] Fresh HTTP child round-trip exposes universal submit/status through parent IPC
+- [x] stdio tool discovery exposes `hearth_job_submit` + `hearth_job_status`
+- [x] P3 Connections — 18/18 PASS
+- [x] P4 GitHub — 30/30 PASS
+- [x] P5 Supabase — 28/28 PASS
+- [x] P6 Vercel — 31/31 PASS
+- [x] P7 Console — 10/10 PASS
+- [x] Electron/HTTP + X MCP registry — 119/119 PASS
+- [x] Bridge standalone — 46/46 PASS
+- [x] Goal/Review/Remote Goal — all executed suites PASS
+- [x] P2 updater — 149/149 PASS
+- [x] production build + TypeScript — PASS
+- [x] X full regression — 616/617 PASS; sole failure is pre-existing EVT12 source-regex mismatch
+- [x] syntax + `git diff --check` — PASS
+- [ ] Create P8 implementation checkpoint commit
+- [ ] Fast-forward merge validated P8 branch into `main`
+- [ ] Run P8 Main Final Gate
+- [ ] Create validated P8 tag and push `main` + tag
+
+### P8 validation evidence — 2026-09-20 (feature branch, pre-checkpoint)
+
+```text
+BRANCH = feature/p8-multi-agent-router-v1
+BASELINE_MAIN = d0278c4c6ba0f90fd895164fa268bcf7818a1730
+
+npm run test:router
+  PASS = 24/24
+  FAIL = 0
+  COVERAGE = generic contract, no worker authority, X adapter, secret redaction, fresh HTTP IPC, Electron boundary, cancellation wiring, TaskStore Antigravity identity smoke
+
+npm run test:connections
+  PASS = 18/18
+
+npm run test:github
+  PASS = 30/30
+
+npm run test:supabase
+  PASS = 28/28
+
+npm run test:vercel
+  PASS = 31/31
+
+npm run test:console
+  PASS = 10/10
+
+Electron/HTTP + X MCP registry
+  PASS = 119/119
+  FAIL = 0
+
+Bridge standalone
+  PASS = 46/46
+  FAIL = 0
+
+Goal/Review/Remote Goal
+  PASS = all executed suites
+  FAIL = 0
+
+P2 updater
+  PASS = 149/149
+  FAIL = 0
+
+X full regression
+  PASS = 616/617
+  FAIL = 1 PRE-EXISTING BASELINE TEST MISMATCH ONLY
+  PRE_EXISTING = scripts/test-x-terminal-event.mjs EVT12 source-regex expects non-async serverProcess message handler while validated baseline already uses async (message) =>
+
+npm run build
+  PASS
+  TypeScript = PASS
+  Vite production build = PASS
+  stable build metadata restored after validation
+
+MCP discovery
+  stdio source process = PASS and exposes hearth_job_submit/hearth_job_status
+  fresh P8 HTTP child = PASS and round-trips submit/status over parent IPC
+  currently-running port 3001 process = older pre-P8 child; restart required before that live process advertises P8 tools
+
+SECURITY / ARCHITECTURE =
+  new executor/runtime/store = NONE
+  generic durable status database = NONE
+  direct fresh-job Codex route = NONE
+  generic worker/provider selection field = NONE
+  generic workspace-root authority = NONE
+  generic secret-shaped text = redacted before routing
+  X route = existing ingestXTask / X queue authority
+  Antigravity route = existing Electron TaskStore + shared admission authority
+  permission bypass = NONE
+  disconnect during approval = aborts pre-commit waiter
 ```
 
 ### P0 detailed checklist — current truth
@@ -1140,19 +1253,40 @@ NEXT_PHASE = P8_MULTI_AGENT_ROUTER_UNIVERSAL_INGRESS
 NEXT_EXACT_ACTION = audit current task/job/Goal/X/specialist routing and design the smallest generic Hearth job ingress for user-facing ส่งงาน: commands without exposing x-task-v1 as the permanent user contract
 ```
 
-### P8 — Multi-Agent Router + universal ingress
+### P8 — Multi-Agent Router + universal ingress — IMPLEMENTED / VALIDATED ON FEATURE BRANCH
 
-Only after X + Skills + Connections are stable, extend Hearth routing for future specialized workers.
+Canonical design: `docs/HEARTH-MULTI-AGENT-ROUTER-V1.md`.
 
-Desired user-level command remains agent-agnostic:
+User-facing intent remains agent-agnostic:
 
 ```text
 ส่งงาน: <งานที่ต้องการ>
+        |
+        v
+Supervisor authors hearth-job-v1
+        |
+        v
+Hearth deterministic router
+        ├─ code_change / code_inspect -> X
+        └─ general                    -> Antigravity
 ```
 
-Hearth decides the worker. Do not expose `x-task-v1` as the permanent universal user-facing contract. A future generic Hearth job contract may be transformed internally into agent-specific contracts.
+Locked P8 V1 rules:
 
-Do not build GVideo/Search/other agent runtimes before this foundation is ready.
+- `hearth-job-v1` is the universal contract; `x-task-v1` remains X-internal.
+- Generic jobs contain semantic kind, objective, scope/evidence/criteria as needed — never worker/provider selection.
+- Hearth/Electron owns workspace authority and worker resolution.
+- X work reuses existing `ingestXTask`, X queue receipts, shared admission, and Result Gate.
+- General work reuses Electron-owned Antigravity TaskStore/runtime and shared admission.
+- `hearth_job_status` reads existing X receipt/TaskStore truth only.
+- Same job ID is idempotent; changed payload or cross-route collision fails closed.
+- Caller disconnect during approval cannot leave a stale approval that later starts work.
+- Codex is not a fresh-job route; Codex remains behind the validated specialist handoff/authorization/result lifecycle.
+- Future Search/Invest/GVideo workers extend semantic routing later; they do not require replacing this user contract.
+
+```text
+NEXT_EXACT_ACTION = finalize P8 checkpoint/tag/merge on main after final scoped diff review
+```
 
 ### P9 — Full UI redesign **LAST**
 

@@ -65,6 +65,8 @@ let xShuttingDown = false;
 const xQueueInflight = new Map();
 const xQueueRequests = new Map();
 const pendingXApprovals = new Map();
+const hearthJobRequests = new Map();
+const hearthJobGeneralInflight = new Map();
 let xWakeupTimer = null;
 let xGetNextWakeupDeadline = null;
 let xReconcileRuntimeNow = null;
@@ -717,6 +719,306 @@ const handleXQueueEnqueue = async (message, child, launchWorkspace, waiter) => {
   });
 };
 
+const hearthJobError = (code) => Object.assign(new Error(code), { code });
+
+const validateHearthJobId = (jobId) => {
+  if (typeof jobId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(jobId)) {
+    throw hearthJobError('invalid_job_id');
+  }
+  return jobId;
+};
+
+const resolveHearthJobWorkspace = async (reportedWorkspace, launchWorkspace) => {
+  let childRoot, reportedRoot, settingsRoot;
+  try {
+    [childRoot, reportedRoot, settingsRoot] = await Promise.all([
+      fs.promises.realpath(launchWorkspace),
+      fs.promises.realpath(reportedWorkspace),
+      fs.promises.realpath(readSettings().workspace),
+    ]);
+  } catch {
+    throw hearthJobError('workspace_mismatch');
+  }
+  if (childRoot !== reportedRoot || childRoot !== settingsRoot) {
+    throw hearthJobError('workspace_mismatch');
+  }
+  return settingsRoot;
+};
+
+const publicHearthAntigravityStatus = (task) => ({
+  task_id: task.taskId,
+  status: task.status,
+  title: task.title || null,
+  created_at: task.createdAt || null,
+  updated_at: task.updatedAt || null,
+  last_event: task.lastEvent || null,
+  completion: task.completion || null,
+  error: task.error || null,
+  route_reason: task.routeReason || null,
+});
+
+const cancelHearthJobRequest = (transportId) => {
+  const waiter = hearthJobRequests.get(transportId);
+  if (!waiter) return;
+  hearthJobRequests.delete(transportId);
+  waiter.active = false;
+
+  if (waiter.xInflight) {
+    waiter.xInflight.waiters.delete(transportId);
+    if (!waiter.xInflight.committed && waiter.xInflight.waiters.size === 0) {
+      waiter.xInflight.abort.abort();
+    }
+  }
+
+  if (waiter.generalInflight) {
+    waiter.generalInflight.waiters.delete(transportId);
+    if (!waiter.generalInflight.committed && waiter.generalInflight.waiters.size === 0) {
+      waiter.generalInflight.abort.abort();
+    }
+  }
+};
+
+const cancelHearthJobChild = (child) => {
+  for (const [transportId, waiter] of hearthJobRequests.entries()) {
+    if (waiter.child === child) cancelHearthJobRequest(transportId);
+  }
+};
+
+const requestHearthJobAntigravityApproval = (shared, child, action) => new Promise((resolve) => {
+  const requestId = crypto.randomUUID();
+  let settled = false;
+
+  const finish = (allowed, reason) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    shared.abort.signal.removeEventListener('abort', onAbort);
+    localApprovals.delete(requestId);
+    resolve(allowed === true);
+    sendEvent({
+      type: 'approval:resolved',
+      requestId,
+      allowed: allowed === true,
+      reason,
+    });
+  };
+
+  const onAbort = () => finish(false, 'aborted');
+  const timer = setTimeout(() => finish(false, 'timeout'), 60000);
+  localApprovals.set(requestId, (allowed) => finish(allowed, 'user'));
+  shared.abort.signal.addEventListener('abort', onAbort, { once: true });
+
+  if (shared.abort.signal.aborted || xShuttingDown || shared.waiters.size === 0 || serverProcess !== child) {
+    finish(false, xShuttingDown ? 'shutdown' : 'aborted');
+    return;
+  }
+
+  sendEvent({
+    type: 'approval',
+    requestId,
+    permission: 'Antigravity',
+    action,
+  });
+});
+
+const handleHearthJobStatus = async (message, launchWorkspace) => {
+  const jobId = validateHearthJobId(message.jobId);
+  await resolveHearthJobWorkspace(message.workspace, launchWorkspace);
+  const { hearthJobTaskId, hearthJobXRequestId } = await importFromHere('../mcp/router/router.mjs');
+  const requestId = hearthJobXRequestId(jobId);
+  const taskId = hearthJobTaskId(jobId);
+  const xReceipt = xQueueStore?.getReceipt(requestId) || null;
+  const antigravityTask = taskStore?.getTask(taskId) || null;
+
+  if (xReceipt && antigravityTask) throw hearthJobError('ambiguous_job_state');
+  if (xReceipt) {
+    return {
+      found: true,
+      job_id: jobId,
+      route: 'x',
+      status: xReceipt.queueStatus === 'terminal' ? (xReceipt.terminalStatus || 'terminal') : xReceipt.queueStatus,
+      detail: xQueueReceiptStatus(xReceipt),
+    };
+  }
+  if (antigravityTask) {
+    return {
+      found: true,
+      job_id: jobId,
+      route: 'antigravity',
+      status: antigravityTask.status,
+      detail: publicHearthAntigravityStatus(antigravityTask),
+    };
+  }
+  return { found: false, job_id: jobId, reason: 'not_found' };
+};
+
+const handleHearthJobSubmit = async (message, child, launchWorkspace, waiter) => {
+  const {
+    parseHearthJob,
+  } = await importFromHere('../mcp/router/hearth-job-contract.mjs');
+  const {
+    routeHearthJob,
+    adaptHearthJobToXTask,
+    buildAntigravityPrompt,
+    buildAntigravityRequestId,
+    computeHearthJobFingerprint,
+    hearthJobTaskId,
+    hearthJobXRequestId,
+  } = await importFromHere('../mcp/router/router.mjs');
+
+  let job;
+  try {
+    job = parseHearthJob(message.job);
+  } catch (error) {
+    throw hearthJobError(error?.code || 'invalid_hearth_job');
+  }
+
+  const settingsRoot = await resolveHearthJobWorkspace(message.workspace, launchWorkspace);
+  const { route, reason } = routeHearthJob(job);
+  const taskId = hearthJobTaskId(job.job_id);
+  const xRequestId = hearthJobXRequestId(job.job_id);
+  const xReceipt = xQueueStore?.getReceipt(xRequestId) || null;
+  const antigravityTask = taskStore?.getTask(taskId) || null;
+
+  if (xReceipt && antigravityTask) throw hearthJobError('ambiguous_job_state');
+  if (route === 'x' && antigravityTask) throw hearthJobError('job_route_conflict');
+  if (route === 'antigravity' && xReceipt) throw hearthJobError('job_route_conflict');
+
+  if (route === 'x') {
+    const xTask = adaptHearthJobToXTask(job, {
+      workspaceRoot: settingsRoot,
+      repo: path.basename(settingsRoot),
+    });
+    const receipt = await ingestXTask({
+      requestId: xRequestId,
+      task: xTask,
+      settingsRoot,
+      child,
+      waiterId: waiter.transportId,
+      waiterActive: () => waiter.active,
+      isLive: () => serverProcess === child && waiter.active,
+      action: `Submit Hearth coding job: ${job.title || job.objective.slice(0, 80)}`,
+      onInflightRecord: (record) => { waiter.xInflight = record; },
+    });
+    return {
+      accepted: true,
+      job_id: job.job_id,
+      route: 'x',
+      status: receipt.queue_status === 'terminal' ? (receipt.terminal_status || 'terminal') : receipt.queue_status,
+      detail: receipt,
+    };
+  }
+
+  if (!taskStore) throw hearthJobError('task_store_unavailable');
+  const fingerprint = computeHearthJobFingerprint(job);
+  const requestId = buildAntigravityRequestId(job);
+  const current = taskStore.getTask(taskId);
+  if (current) {
+    if (current.requestId !== requestId) throw hearthJobError('job_id_conflict');
+    return {
+      accepted: true,
+      job_id: job.job_id,
+      route: 'antigravity',
+      status: current.status,
+      detail: publicHearthAntigravityStatus(current),
+    };
+  }
+
+  const existingInflight = hearthJobGeneralInflight.get(taskId);
+  if (existingInflight) {
+    if (existingInflight.fingerprint !== fingerprint) throw hearthJobError('job_id_conflict');
+    existingInflight.waiters.add(waiter.transportId);
+    waiter.generalInflight = existingInflight;
+    return existingInflight.promise;
+  }
+
+  const shared = {
+    fingerprint,
+    waiters: new Set([waiter.transportId]),
+    abort: new AbortController(),
+    committed: false,
+    promise: null,
+  };
+  waiter.generalInflight = shared;
+  hearthJobGeneralInflight.set(taskId, shared);
+
+  shared.promise = (async () => {
+    const permission = readSettings().permissions?.Antigravity ?? 'Ask';
+    if (permission === 'Blocked') throw hearthJobError('permission_blocked');
+    if (permission !== 'Allow' && permission !== 'Ask') throw hearthJobError('permission_blocked');
+
+    if (permission === 'Ask') {
+      const allowed = await requestHearthJobAntigravityApproval(
+        shared,
+        child,
+        `Submit Hearth general job: ${job.title || job.objective.slice(0, 80)}`,
+      );
+      if (!allowed) throw hearthJobError('permission_denied');
+    }
+
+    if (shared.abort.signal.aborted || xShuttingDown || shared.waiters.size === 0 || serverProcess !== child) {
+      throw hearthJobError('transport_unavailable');
+    }
+
+    let currentRoot;
+    try {
+      currentRoot = await fs.promises.realpath(readSettings().workspace);
+    } catch {
+      throw hearthJobError('workspace_mismatch');
+    }
+    if (currentRoot !== settingsRoot) throw hearthJobError('workspace_mismatch');
+
+    const afterApproval = taskStore.getTask(taskId);
+    if (afterApproval) {
+      if (afterApproval.requestId !== requestId) throw hearthJobError('job_id_conflict');
+      return {
+        accepted: true,
+        job_id: job.job_id,
+        route: 'antigravity',
+        status: afterApproval.status,
+        detail: publicHearthAntigravityStatus(afterApproval),
+      };
+    }
+
+    // This is the P8 general-route commit boundary. Every permission and
+    // transport/workspace liveness check has passed. From this point onward
+    // the existing Antigravity start transaction owns launch/recovery truth;
+    // a caller disconnect must not retroactively tear down admitted work.
+    shared.committed = true;
+    const { startAntigravityTask, getAntigravityTask } = await importFromHere('../mcp/executors/antigravity.mjs');
+    const { getProductionAntigravityClaimStore } = await importFromHere('../mcp/executors/antigravity-admission.mjs');
+    const result = await startAntigravityTask({
+      workspace: settingsRoot,
+      prompt: buildAntigravityPrompt(job),
+      title: job.title || job.objective.slice(0, 120),
+      userApproved: true,
+      awaitCompletion: false,
+      source: 'local',
+      requestId,
+      requestedRoute: 'auto',
+      resolvedRoute: 'antigravity',
+      routeReason: reason,
+      existingTaskId: taskId,
+      claimStore: getProductionAntigravityClaimStore(),
+    });
+    void monitorTaskTransition(result.taskId);
+    const started = getAntigravityTask(result.taskId);
+    return {
+      accepted: true,
+      job_id: job.job_id,
+      route: 'antigravity',
+      status: started.status,
+      detail: publicHearthAntigravityStatus(started),
+    };
+  })();
+
+  try {
+    return await shared.promise;
+  } finally {
+    if (hearthJobGeneralInflight.get(taskId) === shared) hearthJobGeneralInflight.delete(taskId);
+  }
+};
+
 // Fast-restart X liveness: a single one-shot wakeup, never polling/setInterval.
 // Electron never inspects claim/run truth itself here -- it only ever reads
 // one persisted deadline (getNextXWakeupDeadline) and, on fire, re-runs the
@@ -1110,6 +1412,50 @@ const startServer = async ({ workspace, port }) => {
           catch (sendError) { console.error('[Electron] X queue error ack failed:', sendError); }
         }
       }).finally(() => cancelXQueueRequest(message.transportId));
+    }
+    if (message?.type === 'hearth_job_request_cancel') cancelHearthJobRequest(message.transportId);
+    if (message?.type === 'hearth_job_submit_request' || message?.type === 'hearth_job_status_request') {
+      if (typeof message.transportId !== 'string' || !/^[0-9a-f-]{36}$/i.test(message.transportId)) return;
+      if (message.type === 'hearth_job_submit_request' && hearthJobRequests.has(message.transportId)) return;
+
+      const waiter = message.type === 'hearth_job_submit_request'
+        ? { transportId: message.transportId, child, active: true, xInflight: null, generalInflight: null }
+        : null;
+      if (waiter) hearthJobRequests.set(message.transportId, waiter);
+
+      const operation = message.type === 'hearth_job_submit_request'
+        ? handleHearthJobSubmit(message, child, launchWorkspace, waiter)
+        : handleHearthJobStatus(message, launchWorkspace);
+
+      void operation.then((result) => {
+        if ((!waiter || waiter.active) && serverProcess === child) {
+          try {
+            child.send({
+              type: message.type === 'hearth_job_submit_request' ? 'hearth_job_submit_ack' : 'hearth_job_status_ack',
+              transportId: message.transportId,
+              ok: true,
+              result,
+            });
+          } catch (error) {
+            console.error('[Electron] Hearth job ack failed:', error);
+          }
+        }
+      }, (error) => {
+        if ((!waiter || waiter.active) && serverProcess === child) {
+          try {
+            child.send({
+              type: message.type === 'hearth_job_submit_request' ? 'hearth_job_submit_ack' : 'hearth_job_status_ack',
+              transportId: message.transportId,
+              ok: false,
+              error: error?.code || 'hearth_job_error',
+            });
+          } catch (sendError) {
+            console.error('[Electron] Hearth job error ack failed:', sendError);
+          }
+        }
+      }).finally(() => {
+        if (waiter) cancelHearthJobRequest(message.transportId);
+      });
     }
     if ([
       'github_connections_list_request',
@@ -1559,6 +1905,7 @@ const startServer = async ({ workspace, port }) => {
   });
     serverProcess.once('exit', (code, signal) => {
       cancelXQueueChild(child);
+      cancelHearthJobChild(child);
       if (serverProcess === child) serverProcess = undefined;
       serverState = { running: false, port: selectedPort, pid: null };
       sendEvent({ type: 'state', state: serverState });
@@ -3374,6 +3721,7 @@ app.whenReady().then(async () => {
 app.on('before-quit', () => {
   xShuttingDown = true;
   for (const transportId of xQueueRequests.keys()) cancelXQueueRequest(transportId);
+  for (const transportId of hearthJobRequests.keys()) cancelHearthJobRequest(transportId);
   for (const pending of pendingXApprovals.values()) pending.cancel();
   clearXQueueCapacityWakeup();
   for (const controller of localChatStreams.values()) controller.abort();

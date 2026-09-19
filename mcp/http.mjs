@@ -72,6 +72,15 @@ const queueIngressTransportFor = (response) => {
   };
 };
 
+const hearthJobTransportFor = (response) => {
+  const submitRoundTrip = createRoundTripTransport(response, { cancelType: 'hearth_job_request_cancel' });
+  const statusRoundTrip = createRoundTripTransport(response);
+  return {
+    submit: ({ job }) => submitRoundTrip('hearth_job_submit_request', { job, workspace }),
+    status: ({ jobId }) => statusRoundTrip('hearth_job_status_request', { jobId, workspace }),
+  };
+};
+
 /**
  * Read-only bridge to the LIVE GoalRunner instance Electron main owns --
  * never a second GoalRunner/GoalStorage. Electron main's own
@@ -191,6 +200,16 @@ process.on('message', (message) => {
   if (message?.type === 'x_queue_enqueue_ack' || message?.type === 'x_queue_status_ack') {
     queueReplies.get(message.transportId)?.finish(null, message.ok ? message.receipt : { accepted: false, found: false, reason: message.error });
   }
+  if (message?.type === 'hearth_job_submit_ack' || message?.type === 'hearth_job_status_ack') {
+    queueReplies.get(message.transportId)?.finish(
+      null,
+      message.ok ? message.result : {
+        accepted: false,
+        found: false,
+        reason: message.error || 'hearth_job_request_failed',
+      },
+    );
+  }
   if (message?.type === 'review_queue_list_ack') {
     queueReplies.get(message.transportId)?.finish(null, message.ok ? { items: message.items } : { items: [], reason: message.error });
   }
@@ -227,6 +246,7 @@ app.post('/mcp', async (request, response) => {
   const server = createMcpServer({
     workspace, permissions, requestApproval,
     queueIngressTransport: queueIngressTransportFor(response),
+    hearthJobTransport: hearthJobTransportFor(response),
     reviewQueueTransport: reviewQueueTransportFor(response),
     githubTransport: githubTransportFor(response),
     vercelTransport: vercelTransportFor(response),

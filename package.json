@@ -32,6 +32,7 @@
     "test:supabase": "node --test scripts/test-supabase-project-service.mjs scripts/test-supabase-multi-project-boundary.mjs scripts/test-electron-public-x-auth.mjs",
     "test:vercel": "node --test scripts/test-vercel-client.mjs scripts/test-vercel-connections.mjs scripts/test-vercel-mcp-tools.mjs scripts/test-vercel-main-boundary.mjs scripts/test-vercel-http-transport.mjs",
     "test:console": "node --test scripts/test-p7-console-boundary.mjs",
+    "test:router": "node --test scripts/test-hearth-job-router.mjs scripts/test-hearth-job-main-boundary.mjs scripts/test-hearth-job-http-transport.mjs scripts/test-hearth-job-antigravity-adapter.mjs",
     "test:provider-selection": "node --test scripts/test-provider-selection.mjs",
     "test:local-chat": "node --test scripts/test-local-chat.mjs",
     "test:context-builder": "node --test scripts/test-context-builder.mjs",

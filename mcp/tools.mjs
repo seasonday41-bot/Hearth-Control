@@ -40,6 +40,8 @@ export const toolNames = [
   'x_task',
   'x_enqueue',
   'x_queue_status',
+  'hearth_job_submit',
+  'hearth_job_status',
   'review_queue_list',
   'review_queue_acknowledge',
   'review_queue_resolve',
@@ -697,6 +699,41 @@ export const registerWorkspaceTools = (server, options) => {
     if (!options.queueIngressTransport) return text(JSON.stringify({ found: false, reason: 'transport_unavailable' }));
     try { return text(JSON.stringify(await options.queueIngressTransport.status({ requestId: request_id }))); }
     catch (error) { return text(JSON.stringify({ found: false, reason: error?.code || 'transport_unavailable' })); }
+  });
+
+  server.registerTool('hearth_job_submit', {
+    title: 'Submit Hearth job',
+    description: 'Submit one agent-agnostic hearth-job-v1 payload. Hearth deterministically selects the existing X or Antigravity route; callers cannot select a worker/provider directly.',
+    inputSchema: {
+      job: z.any().describe('A complete hearth-job-v1 payload. Unknown fields and worker/provider selection are rejected by Electron-owned ingress.'),
+    },
+    annotations: { destructiveHint: true },
+  }, async ({ job }) => {
+    if (!options.hearthJobTransport?.submit) {
+      return text(JSON.stringify({ accepted: false, reason: 'transport_unavailable' }));
+    }
+    try {
+      return text(JSON.stringify(await options.hearthJobTransport.submit({ job }), null, 2));
+    } catch (error) {
+      return text(JSON.stringify({ accepted: false, reason: error?.code || 'transport_unavailable' }));
+    }
+  });
+
+  server.registerTool('hearth_job_status', {
+    title: 'Get Hearth job status',
+    description: 'Read normalized status for a previously submitted hearth-job-v1 by job_id from existing X receipt or Antigravity TaskStore truth.',
+    inputSchema: {
+      job_id: z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/),
+    },
+  }, async ({ job_id }) => {
+    if (!options.hearthJobTransport?.status) {
+      return text(JSON.stringify({ found: false, job_id, reason: 'transport_unavailable' }));
+    }
+    try {
+      return text(JSON.stringify(await options.hearthJobTransport.status({ jobId: job_id }), null, 2));
+    } catch (error) {
+      return text(JSON.stringify({ found: false, job_id, reason: error?.code || 'transport_unavailable' }));
+    }
   });
 
   server.registerTool('review_queue_list', {
