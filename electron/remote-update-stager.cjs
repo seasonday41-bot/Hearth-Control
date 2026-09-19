@@ -9,6 +9,13 @@
 // it only prepares the exact directory shape that module's
 // readAndValidateManifest() already expects, for a future handoff.
 const fs = require('node:fs');
+// Electron patches node:fs with ASAR-aware semantics. Keep that behavior for
+// ordinary validation/cleanup, but copy a verified .app bundle through the
+// physical filesystem so Contents/Resources/app.asar remains an opaque file.
+const physicalFs = (() => {
+  try { return require('original-fs'); }
+  catch { return fs; }
+})();
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { execFile } = require('node:child_process');
@@ -123,8 +130,8 @@ async function validateAppCandidate(mountPoint) {
  * merged into).
  */
 async function copyAppBundle(candidatePath, stagedAppPath) {
-  await fs.promises.mkdir(path.dirname(stagedAppPath), { recursive: true });
-  await fs.promises.cp(candidatePath, stagedAppPath, {
+  await physicalFs.promises.mkdir(path.dirname(stagedAppPath), { recursive: true });
+  await physicalFs.promises.cp(candidatePath, stagedAppPath, {
     recursive: true,
     force: false,
     errorOnExist: true,
@@ -205,7 +212,7 @@ async function stageVerifiedUpdate({
 
   // An old incomplete staged directory for this exact build is never trusted;
   // remove it (only within this controlled build directory) before starting.
-  await fs.promises.rm(stagedDir, { recursive: true, force: true });
+  await physicalFs.promises.rm(stagedDir, { recursive: true, force: true });
 
   let mounted = false;
   let stagingError = null;
@@ -241,7 +248,7 @@ async function stageVerifiedUpdate({
   if (stagingError) {
     // Staging itself failed: the staged candidate (if any partial state
     // exists) is never trusted, regardless of what happens to the mount.
-    await fs.promises.rm(stagedDir, { recursive: true, force: true }).catch(() => {});
+    await physicalFs.promises.rm(stagedDir, { recursive: true, force: true }).catch(() => {});
   }
 
   let detachError = null;
@@ -278,7 +285,7 @@ async function stageVerifiedUpdate({
     // A mounted volume must never be left behind silently, and staging must
     // never report success while that is true -- fail closed: discard the
     // staged trusted-candidate state and surface the detach failure.
-    await fs.promises.rm(stagedDir, { recursive: true, force: true }).catch(() => {});
+    await physicalFs.promises.rm(stagedDir, { recursive: true, force: true }).catch(() => {});
     const failClosedErr = new Error(
       `Update image could not be detached after staging succeeded; the staged candidate has been discarded: ${safeReason(detachError.message)}`,
     );
