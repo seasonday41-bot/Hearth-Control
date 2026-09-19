@@ -39,7 +39,19 @@ test('5. updater busy blocks a concurrent install attempt', () => {
   assert.equal(result.code, updater.UPDATE_RUNTIME_BLOCKERS.UPDATER_BUSY);
 });
 
-test('6. no blocker preserves the existing approval/install path and required ordering', async () => {
+test('6. Electron preflight reads the initialized X wakeup deadline function', async () => {
+  const main = await fs.promises.readFile(new URL('../electron/main.cjs', import.meta.url), 'utf8');
+  const start = main.indexOf('const getUpdaterRuntimeBlocker =');
+  const end = main.indexOf('const startRollbackWatchdog =', start);
+  assert.ok(start >= 0 && end > start, 'updater runtime preflight helper must exist');
+  const helper = main.slice(start, end);
+
+  assert.ok(helper.includes("typeof xGetNextWakeupDeadline !== 'function'"));
+  assert.ok(helper.includes('xActive: xGetNextWakeupDeadline() != null'));
+  assert.equal(helper.includes('xGetNextXWakeupDeadline'), false);
+});
+
+test('7. no blocker preserves the existing approval/install path and required ordering', async () => {
   assert.equal(blocker({}), null);
 
   const main = await fs.promises.readFile(new URL('../electron/main.cjs', import.meta.url), 'utf8');
@@ -72,7 +84,7 @@ test('6. no blocker preserves the existing approval/install path and required or
   assert.ok(handler.includes('userApproved: true'), 'existing core approval gate must remain enabled');
 });
 
-test('7. cancelled native approval exits before revalidation or install', async () => {
+test('8. cancelled native approval exits before revalidation or install', async () => {
   const main = await fs.promises.readFile(new URL('../electron/main.cjs', import.meta.url), 'utf8');
   const start = main.indexOf("ipcMain.handle('updater:install'");
   const end = main.indexOf("ipcMain.handle('antigravity:status'", start);
@@ -90,7 +102,7 @@ test('7. cancelled native approval exits before revalidation or install', async 
   assert.ok(install > revalidate);
 });
 
-test('8. remote/MCP/Goal/X inputs cannot supply a preflight bypass flag', async () => {
+test('9. remote/MCP/Goal/X inputs cannot supply a preflight bypass flag', async () => {
   const attemptedBypass = blocker({ xActive: true, bypass: true, ignoreRuntimePreflight: true });
   assert.equal(attemptedBypass.code, updater.UPDATE_RUNTIME_BLOCKERS.X_ACTIVE);
 

@@ -694,13 +694,13 @@ const getInstallUpdateDirectory = () => (
 );
 
 const getUpdaterRuntimeBlocker = ({ ignoreUpdaterBusy = false } = {}) => {
-  if (typeof xGetNextXWakeupDeadline !== 'function' || !goalRunner || !jobManager) {
+  if (typeof xGetNextWakeupDeadline !== 'function' || !goalRunner || !jobManager) {
     return localUpdater.evaluateUpdaterRuntimePreflight({ runtimeAvailable: false });
   }
 
   try {
     return localUpdater.evaluateUpdaterRuntimePreflight({
-      xActive: xGetNextXWakeupDeadline() != null,
+      xActive: xGetNextWakeupDeadline() != null,
       goalActive: goalRunner.is_goal_active(),
       queuedJobCount: jobManager.listJobs({ status: 'queued' }).length,
       runningJobCount: jobManager.listJobs({ status: 'running' }).length,
