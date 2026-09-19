@@ -4,23 +4,22 @@ A local macOS desktop control center, built with Electron, React, TypeScript, an
 
 ## 🚨 READ FIRST — Canonical continuation path
 
-**Last updated: 2026-09-19**
+**Last updated: 2026-09-20**
 
 This section is the project handoff/source of truth for any new ChatGPT/Codex/AI session. **Do not start a fresh architecture plan, choose a different next feature, or rediscover the roadmap from scratch.** Read this section first, verify Git state, and continue only the canonical next action below.
 
 ## CURRENT STATUS
 
 ```text
-PHASE = P4_GITHUB_MULTI_CONNECTION — COMPLETE / VALIDATED / FROZEN
-CURRENT_BRANCH = main
-VALIDATED_MAIN_COMMIT = cf9e24dd4e3d0bd19e68c0ebf71a777e58056148
-VALIDATED_TAG = hearth-p4-validated-0.4.7-20260919
-FINAL_GATE = P4_MAIN_FINAL_GATE_PASS
-STATUS = P4_COMPLETE_VALIDATED
-BLOCKED_BY = none
-LAST_COMPLETED_STEP = P4 GitHub multi-connection V1 validated on main, tagged, and frozen
-NEXT_PHASE = P5_SUPABASE_MULTI_PROJECT
-NEXT_EXACT_ACTION = audit the existing supabase:hearth and supabase:xgen provider/client/auth surfaces and design the smallest P5 multi-project foundation on the frozen P3 registry without collapsing their existing auth boundaries
+PHASE = P5_SUPABASE_MULTI_PROJECT — IMPLEMENTED / VALIDATED ON FEATURE BRANCH
+CURRENT_BRANCH = feature/p5-supabase-multi-project-v1
+BASELINE_MAIN = 2299ce6deff8070fb4e4d73faf51c0ae697e8342
+P4_VALIDATED_TAG = hearth-p4-validated-0.4.7-20260919
+STATUS = P5_IMPLEMENTED_VALIDATED_AWAITING_CHECKPOINT
+BLOCKED_BY = no technical blocker; P5 checkpoint/tag/merge not yet performed
+LAST_COMPLETED_STEP = P5 Supabase multi-project V1 implemented and regression-validated with explicit supabase:hearth / supabase:xgen alias authority while preserving separate sessions and existing clients
+NEXT_PHASE = P5_FINALIZE_CHECKPOINT
+NEXT_EXACT_ACTION = review final diff/status, create P5 checkpoint commit, fast-forward merge to main, run Main Final Gate, create validated tag, update README checkpoint, and push main + tag
 DO_NOT_MODIFY_FROZEN = X v0.1, P2, P3, or P4 unless an actual regression/security issue or an explicitly approved later phase requires a targeted change
 ```
 
@@ -75,7 +74,7 @@ This checklist is the handoff ledger for every future chat/agent. **A phase is n
 - [x] **P2 — Remote One-Click Updater** — VALIDATED / FROZEN
 - [x] **P3 — Connection Registry + Secure Credential Store** — VALIDATED / FROZEN
 - [x] **P4 — GitHub multi-connection (2+)** — VALIDATED / FROZEN
-- [ ] **P5 — Supabase multi-project (2+)**
+- [ ] **P5 — Supabase multi-project (2+)** — IMPLEMENTED / VALIDATED ON FEATURE BRANCH; CHECKPOINT/MERGE PENDING
 - [ ] **P6 — Vercel connection**
 - [ ] **P7 — Console / connection health / approvals / evidence**
 - [ ] **P8 — Multi-Agent Router + universal `ส่งงาน:` ingress**
@@ -178,6 +177,108 @@ PR create = pull_request.create capability + Hearth Git permission + exact appro
 generic push/merge/delete/release/admin = OUT OF SCOPE / ABSENT
 P2 GitHub Releases updater = unchanged / credential-independent
 Connection management UI = deferred to P7; P4 exposes local renderer IPC only
+```
+
+### P5 detailed checklist — current truth
+
+- [x] Push P4 validated `main` + `hearth-p4-validated-0.4.7-20260919`
+- [x] Create `feature/p5-supabase-multi-project-v1` from `main@2299ce6deff8070fb4e4d73faf51c0ae697e8342`
+- [x] Audit existing two-project runtime: `supabase:hearth` Bridge and `supabase:xgen` PublicTasks/Review/Goal are already separate clients/auth domains
+- [x] Lock canonical design: `docs/HEARTH-SUPABASE-MULTI-PROJECT-V1.md`
+- [x] Classify project URL + publishable/legacy-anon key as provider config; user access/refresh session remains P3 encrypted credential
+- [x] Reject `sb_secret_...` and legacy `service_role` keys in P5 V1
+- [x] Add strict hosted-Supabase URL validation and no arbitrary origin/default alias fallback
+- [x] Add `SupabaseProjectService` for explicit alias config/auth/remote health/public snapshot
+- [x] Extend registry Supabase targets with publishable-key config sourced from compatibility settings
+- [x] Migrate Hearth auth wrapper to explicit `supabase:hearth`
+- [x] Migrate Project X auth wrapper to explicit `supabase:xgen`
+- [x] Initialize HearthBridgeClient from Hearth alias config only
+- [x] Initialize PublicTasks/ReviewItems/GoalRequests clients from XGEN alias config only
+- [x] Migrate `hearth_devices` REST calls to Hearth alias config
+- [x] Dispatch `connections:list/refresh` through Supabase provider snapshots/remote health
+- [x] Fix Project X publishable-key live update so PublicTasks/ReviewItems/GoalRequests all receive the same updated XGEN config
+- [x] Preserve legacy settings fields only as compatibility persistence; runtime authority is alias-driven
+- [x] `npm run test:supabase` — 28/28 PASS
+- [x] Bridge — 46/46 PASS
+- [x] PublicTasksClient — 27/27 PASS
+- [x] Review Queue sync/tools — 15/15 PASS
+- [x] Remote Goal ingress — 24/24 PASS
+- [x] P3 Connections — 18/18 PASS
+- [x] P4 GitHub — 30/30 PASS
+- [x] Electron/server integration — 98/98 PASS
+- [x] Goal/Review/Remote Goal — all executed suites PASS
+- [x] P2 updater — 149/149 PASS
+- [x] production build + TypeScript — PASS
+- [x] runtime syntax + `git diff --check` — PASS
+- [x] X full regression — 616/617 PASS; sole failure is pre-existing EVT12 source-regex mismatch
+- [ ] Create P5 implementation checkpoint commit
+- [ ] Fast-forward merge validated P5 branch into `main`
+- [ ] Run P5 Main Final Gate
+- [ ] Create validated P5 tag and push `main` + tag
+
+### P5 validation evidence — 2026-09-20 (feature branch, pre-checkpoint)
+
+```text
+BRANCH = feature/p5-supabase-multi-project-v1
+BASELINE_MAIN = 2299ce6deff8070fb4e4d73faf51c0ae697e8342
+
+npm run test:supabase
+  PASS = 28/28
+  FAIL = 0
+
+Bridge
+  PASS = 46/46
+  FAIL = 0
+
+PublicTasksClient
+  PASS = 27/27
+  FAIL = 0
+
+Review Queue sync/tools
+  PASS = 15/15
+  FAIL = 0
+
+Remote Goal ingress
+  PASS = 24/24
+  FAIL = 0
+
+npm run test:connections
+  PASS = 18/18
+  FAIL = 0
+
+npm run test:github
+  PASS = 30/30
+  FAIL = 0
+
+Electron/main/preload/server integration
+  PASS = 98/98
+  FAIL = 0
+
+Goal/Review/Remote Goal
+  PASS = all executed suites
+  FAIL = 0
+
+P2 updater
+  PASS = 149/149
+  FAIL = 0
+
+X full regression
+  PASS = 616/617
+  FAIL = 1 PRE-EXISTING BASELINE TEST MISMATCH ONLY
+  PRE_EXISTING = scripts/test-x-terminal-event.mjs EVT12 source-regex expects non-async serverProcess message handler while validated baseline already uses async (message) =>
+
+npm run build
+  PASS
+  TypeScript = PASS
+  Vite production build = PASS
+  stable build metadata restored after validation
+
+SECURITY / ISOLATION =
+  supabase:hearth and supabase:xgen project config/session remain separate
+  no default/fallback alias
+  sb_secret_ and service_role forbidden
+  public connection snapshot does not expose publishable key value or session credential
+  runtime auth/client/device operations resolve through alias authority
 ```
 
 ### P0 detailed checklist — current truth
@@ -675,16 +776,36 @@ NEXT_PHASE = P5_SUPABASE_MULTI_PROJECT
 NEXT_EXACT_ACTION = audit existing Supabase project/auth/client surfaces and design the smallest P5 multi-project foundation without collapsing supabase:hearth and supabase:xgen
 ```
 
-### P5 — Supabase multi-project
+### P5 — Supabase multi-project — IMPLEMENTED / VALIDATED ON FEATURE BRANCH
 
-Support at least **2 Supabase projects** simultaneously through aliases, initially:
+Canonical design: `docs/HEARTH-SUPABASE-MULTI-PROJECT-V1.md`.
+
+P5 keeps the two existing Supabase auth domains separate while moving runtime project/config authority behind explicit aliases:
 
 ```text
 supabase:hearth
+  -> HearthBridgeClient
+  -> credential:supabase:hearth
+
 supabase:xgen
+  -> PublicTasksClient / ReviewItemsClient / GoalRequestsClient
+  -> credential:supabase:xgen
 ```
 
-Do not put raw project credentials into X tasks. Do not collapse existing Project X/legacy bridge auth boundaries unless an explicit migration is designed and validated.
+Locked P5 V1 rules:
+
+- hosted `https://<project-ref>.supabase.co` projects only;
+- project URL + publishable/legacy-anon key are provider config;
+- access/refresh sessions remain encrypted credentials;
+- `sb_secret_...` and `service_role` are forbidden;
+- every provider operation resolves an explicit alias; no fallback;
+- existing Bridge and Project X named auth/UI/client flows remain separate;
+- no arbitrary SQL/PostgREST passthrough or admin tooling;
+- full Connections management UI remains P7.
+
+```text
+NEXT_EXACT_ACTION = finalize P5 checkpoint/tag/merge on main after final scoped diff review
+```
 
 ### P6 — Vercel connection
 

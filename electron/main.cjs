@@ -16,6 +16,7 @@ const { SecureCredentialStore } = require('./security/secure-credential-store.cj
 const { ConnectionService } = require('./connections/connection-service.cjs');
 const { GitHubClient } = require('./github/github-client.cjs');
 const { GitHubConnectionService } = require('./github/github-connection-service.cjs');
+const { SupabaseProjectService } = require('./supabase/supabase-project-service.cjs');
 
 const importFromHere = (relativePath) => import(pathToFileURL(path.join(__dirname, relativePath)).href);
 let buildMetadata;
@@ -47,6 +48,7 @@ let connectionRegistry = null;
 let credentialStore = null;
 let connectionService = null;
 let githubConnectionService = null;
+let supabaseProjectService = null;
 let jobManager = null;
 let xQueueCoordinator = null;
 let xQueueStore = null;
@@ -301,11 +303,21 @@ const clearPublicTasksSession = () => {
   connectionService.clearCredential(PUBLIC_TASKS_CONNECTION_ALIAS);
 };
 /** Small, renderer-facing snapshot -- never includes the access/refresh token itself. */
-const getPublicTasksState = () => ({
-  configured: Boolean(readSettings().publicTasksSupabaseAnonKey),
-  signedIn: Boolean(publicTasksSession?.accessToken && publicTasksSession?.ownerId),
-  accountEmail: publicTasksSession?.email || null,
-});
+const getPublicTasksState = () => {
+  let configured = false;
+  try {
+    configured = Boolean(
+      supabaseProjectService
+        ?.getProjectConfig(PUBLIC_TASKS_CONNECTION_ALIAS, { requirePublishableKey: false })
+        ?.publishableKey,
+    );
+  } catch {}
+  return {
+    configured,
+    signedIn: Boolean(publicTasksSession?.accessToken && publicTasksSession?.ownerId),
+    accountEmail: publicTasksSession?.email || null,
+  };
+};
 const sendPublicTasksState = () => sendEvent({ type: 'publicTasks:state', state: getPublicTasksState() });
 const sendEvent = (event) => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('server:event', event); };
 
@@ -336,10 +348,13 @@ const initializeConnectionInfrastructure = async () => {
     connectionService,
     githubClient: new GitHubClient(),
   });
+  supabaseProjectService = new SupabaseProjectService({
+    registry: connectionRegistry,
+    connectionService,
+  });
 
-  // Preserve frozen P3/Supabase startup semantics without pretending a stored
-  // GitHub credential is remotely healthy. GitHub health is provider-owned
-  // and runs only through githubConnectionService.refresh().
+  // Keep startup health local/non-networked. Provider-specific remote health
+  // runs only when connections:refresh is explicitly requested.
   for (const connection of connectionRegistry.list()) {
     if (connection.provider !== 'github') connectionService.refreshHealth(connection.alias);
   }
@@ -837,19 +852,17 @@ const startRollbackWatchdog = ({ token, target, backup, userDataPath }) => {
 };
 
 const supabaseAuthRequest = async (pathName, body) => {
-  const settings = readSettings();
-  if (!settings.supabaseUrl || !settings.supabaseAnonKey) throw new Error('Supabase is not configured.');
-  const response = await fetch(`${settings.supabaseUrl}/auth/v1/${pathName}`, {
-    method: 'POST',
-    headers: {
-      apikey: settings.supabaseAnonKey,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data?.msg || data?.message || 'Supabase authentication failed.');
-  return data;
+  if (!supabaseProjectService) throw new Error('Supabase project service is unavailable.');
+  if (pathName === 'signup') {
+    return supabaseProjectService.signUp(BRIDGE_CONNECTION_ALIAS, body?.email, body?.password);
+  }
+  if (pathName === 'token?grant_type=password') {
+    return supabaseProjectService.signIn(BRIDGE_CONNECTION_ALIAS, body?.email, body?.password);
+  }
+  if (pathName === 'token?grant_type=refresh_token') {
+    return supabaseProjectService.refreshSession(BRIDGE_CONNECTION_ALIAS, body?.refresh_token);
+  }
+  throw new Error('Unsupported Supabase auth operation.');
 };
 
 const applyBridgeSession = (data) => {
@@ -877,29 +890,22 @@ const ensureBridgeSession = async () => {
   return applyBridgeSession(refreshed);
 };
 
-// Project X's OWN auth request/session/refresh helpers -- an exact mirror of
-// supabaseAuthRequest/applyBridgeSession/ensureBridgeSession above, but
-// against publicTasksSupabaseUrl/publicTasksSupabaseAnonKey and
-// publicTasksSession, NEVER the legacy bridge's settings/session. Kept as a
-// deliberate duplication of this small, already-proven pattern rather than
-// a shared parameterized helper, so the two projects' credentials can never
-// accidentally cross-wire through a shared code path.
+// Project X keeps its OWN explicit auth wrapper and session application
+// side effects. P5 centralizes only project/config authority behind the
+// explicit supabase:xgen alias; it never shares or falls back to Hearth's
+// session/project.
 const supabasePublicTasksAuthRequest = async (pathName, body) => {
-  const settings = readSettings();
-  if (!settings.publicTasksSupabaseUrl || !settings.publicTasksSupabaseAnonKey) {
-    throw new Error('Project X is not configured. Enter its publishable key first.');
+  if (!supabaseProjectService) throw new Error('Project X Supabase service is unavailable.');
+  if (pathName === 'signup') {
+    return supabaseProjectService.signUp(PUBLIC_TASKS_CONNECTION_ALIAS, body?.email, body?.password);
   }
-  const response = await fetch(`${settings.publicTasksSupabaseUrl}/auth/v1/${pathName}`, {
-    method: 'POST',
-    headers: {
-      apikey: settings.publicTasksSupabaseAnonKey,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data?.msg || data?.message || 'Project X authentication failed.');
-  return data;
+  if (pathName === 'token?grant_type=password') {
+    return supabaseProjectService.signIn(PUBLIC_TASKS_CONNECTION_ALIAS, body?.email, body?.password);
+  }
+  if (pathName === 'token?grant_type=refresh_token') {
+    return supabaseProjectService.refreshSession(PUBLIC_TASKS_CONNECTION_ALIAS, body?.refresh_token);
+  }
+  throw new Error('Unsupported Project X auth operation.');
 };
 
 const applyPublicTasksSession = (data) => {
@@ -1756,11 +1762,15 @@ app.whenReady().then(async () => {
   ipcMain.handle('settings:get', () => publicSettingsSnapshot());
   const listPublicConnections = () => {
     if (!connectionService || !connectionRegistry) return [];
-    return connectionRegistry.list().map((connection) =>
-      connection.provider === 'github' && githubConnectionService
-        ? githubConnectionService.publicSnapshot(connection)
-        : connectionService.toPublic(connection)
-    );
+    return connectionRegistry.list().map((connection) => {
+      if (connection.provider === 'github' && githubConnectionService) {
+        return githubConnectionService.publicSnapshot(connection);
+      }
+      if (connection.provider === 'supabase' && supabaseProjectService) {
+        return supabaseProjectService.publicSnapshot(connection.alias);
+      }
+      return connectionService.toPublic(connection);
+    });
   };
   ipcMain.handle('connections:list', () => listPublicConnections());
   ipcMain.handle('connections:refresh', async (_event, alias) => {
@@ -1771,6 +1781,10 @@ app.whenReady().then(async () => {
       if (connection.provider === 'github') {
         if (!githubConnectionService) throw new Error('github_connection_service_unavailable');
         return githubConnectionService.refresh(connectionAlias);
+      }
+      if (connection.provider === 'supabase') {
+        if (!supabaseProjectService) throw new Error('supabase_project_service_unavailable');
+        return supabaseProjectService.refreshHealth(connectionAlias);
       }
       return connectionService.refreshHealth(connectionAlias);
     };
@@ -2454,20 +2468,23 @@ app.whenReady().then(async () => {
     const { ReviewItemsClient, resyncPendingReviewItems, syncReviewItemToRemote } = await importFromHere('../mcp/bridge/review-queue-sync.mjs');
     const { GoalRequestsClient } = await importFromHere('../mcp/bridge/goal-requests-client.mjs');
     const settings = readSettings();
+    if (!supabaseProjectService) throw new Error('supabase_project_service_unavailable');
+    const hearthProject = supabaseProjectService.getProjectConfig(BRIDGE_CONNECTION_ALIAS, { requirePublishableKey: false });
+    const xgenProject = supabaseProjectService.getProjectConfig(PUBLIC_TASKS_CONNECTION_ALIAS, { requirePublishableKey: false });
     loadBridgeSecrets();
     loadPublicTasksSecrets();
     const deviceId = getOrCreateDeviceId(app.getPath('userData'));
     bridgeState.deviceId = deviceId;
     bridgeState.enabled = Boolean(settings.bridgeEnabled);
-    bridgeState.configured = Boolean(settings.supabaseUrl && settings.supabaseAnonKey);
+    bridgeState.configured = Boolean(hearthProject.url && hearthProject.publishableKey);
     bridgeState.signedIn = Boolean(bridgeSession?.accessToken && bridgeSession?.ownerId);
     bridgeState.accountEmail = bridgeSession?.email || null;
     bridgeState.pairingReady = Boolean(bridgePairingSecret);
 
     bridgeClientInstance = new HearthBridgeClient({
       deviceId,
-      supabaseUrl: settings.supabaseUrl || '',
-      supabaseAnonKey: settings.supabaseAnonKey || '',
+      supabaseUrl: hearthProject.url || '',
+      supabaseAnonKey: hearthProject.publishableKey || '',
       pollIntervalMs: 5000,
     });
     bridgeClientInstance.setSession({
@@ -2482,8 +2499,8 @@ app.whenReady().then(async () => {
     // not-ready -- syncPublicXTasks/bridge:approve-task below fail closed
     // (skip / throw a clear error) rather than ever guessing credentials.
     publicTasksClientInstance = new PublicTasksClient({
-      supabaseUrl: settings.publicTasksSupabaseUrl || '',
-      supabaseAnonKey: settings.publicTasksSupabaseAnonKey || '',
+      supabaseUrl: xgenProject.url || '',
+      supabaseAnonKey: xgenProject.publishableKey || '',
     });
     publicTasksClientInstance.setSession({
       accessToken: publicTasksSession?.accessToken || null,
@@ -2508,8 +2525,8 @@ app.whenReady().then(async () => {
     // publicTasksSession wherever that session changes (sign-in/sign-out);
     // this constructor call only covers the initial value at startup.
     reviewItemsClientInstance = new ReviewItemsClient({
-      supabaseUrl: settings.publicTasksSupabaseUrl || '',
-      supabaseAnonKey: settings.publicTasksSupabaseAnonKey || '',
+      supabaseUrl: xgenProject.url || '',
+      supabaseAnonKey: xgenProject.publishableKey || '',
     });
     reviewItemsClientInstance.setSession({
       accessToken: publicTasksSession?.accessToken || null,
@@ -2518,8 +2535,8 @@ app.whenReady().then(async () => {
     // Same session-sharing pattern as reviewItemsClientInstance above; see
     // goalRequestsClientInstance's own declaration comment.
     goalRequestsClientInstance = new GoalRequestsClient({
-      supabaseUrl: settings.publicTasksSupabaseUrl || '',
-      supabaseAnonKey: settings.publicTasksSupabaseAnonKey || '',
+      supabaseUrl: xgenProject.url || '',
+      supabaseAnonKey: xgenProject.publishableKey || '',
     });
     goalRequestsClientInstance.setSession({
       accessToken: publicTasksSession?.accessToken || null,
@@ -2580,10 +2597,11 @@ app.whenReady().then(async () => {
       }
       const { hashPairingSecret } = await importFromHere('../mcp/bridge/identity.mjs');
       const currentSettings = readSettings();
-      const response = await fetch(`${currentSettings.supabaseUrl}/rest/v1/hearth_devices?on_conflict=device_id`, {
+      const hearthProjectConfig = supabaseProjectService.getProjectConfig(BRIDGE_CONNECTION_ALIAS);
+      const response = await fetch(`${hearthProjectConfig.url}/rest/v1/hearth_devices?on_conflict=device_id`, {
         method: 'POST',
         headers: {
-          apikey: currentSettings.supabaseAnonKey,
+          apikey: hearthProjectConfig.publishableKey,
           Authorization: `Bearer ${session.accessToken}`,
           'Content-Type': 'application/json',
           Prefer: 'resolution=merge-duplicates,return=representation',
@@ -2604,11 +2622,11 @@ app.whenReady().then(async () => {
 
     const setRemoteBridgeEnabled = async (enabled) => {
       const session = await ensureBridgeSession();
-      const currentSettings = readSettings();
-      const response = await fetch(`${currentSettings.supabaseUrl}/rest/v1/hearth_devices?device_id=eq.${encodeURIComponent(deviceId)}`, {
+      const hearthProjectConfig = supabaseProjectService.getProjectConfig(BRIDGE_CONNECTION_ALIAS);
+      const response = await fetch(`${hearthProjectConfig.url}/rest/v1/hearth_devices?device_id=eq.${encodeURIComponent(deviceId)}`, {
         method: 'PATCH',
         headers: {
-          apikey: currentSettings.supabaseAnonKey,
+          apikey: hearthProjectConfig.publishableKey,
           Authorization: `Bearer ${session.accessToken}`,
           'Content-Type': 'application/json',
           Prefer: 'return=representation',
@@ -2781,8 +2799,15 @@ app.whenReady().then(async () => {
 
     ipcMain.handle('publicTasks:save-anon-key', async (_event, anonKey) => {
       if (typeof anonKey !== 'string' || !anonKey.trim()) throw new Error('Enter Project X\'s publishable (anon) key.');
-      saveSettings({ publicTasksSupabaseAnonKey: anonKey.trim() });
-      publicTasksClientInstance.supabaseAnonKey = anonKey.trim();
+      if (!supabaseProjectService) throw new Error('supabase_project_service_unavailable');
+      const publishableKey = anonKey.trim();
+      supabaseProjectService.updateProjectConfig(PUBLIC_TASKS_CONNECTION_ALIAS, { publishableKey });
+      // Compatibility persistence: existing UI/settings recovery still sees
+      // the same field, while the registry alias is now runtime authority.
+      saveSettings({ publicTasksSupabaseAnonKey: publishableKey });
+      publicTasksClientInstance?.setSession({ supabaseAnonKey: publishableKey });
+      reviewItemsClientInstance?.setSession({ supabaseAnonKey: publishableKey });
+      goalRequestsClientInstance?.setSession({ supabaseAnonKey: publishableKey });
       sendPublicTasksState();
       return getPublicTasksState();
     });

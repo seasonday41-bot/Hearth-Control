@@ -105,7 +105,10 @@ export const builtinConnectionDefinitions = (settings = {}) => ([
     alias: 'supabase:hearth',
     provider: 'supabase',
     label: 'Hearth Supabase',
-    target: { url: settings.supabaseUrl || null },
+    target: {
+      url: settings.supabaseUrl || null,
+      ...(settings.supabaseAnonKey ? { publishableKey: settings.supabaseAnonKey } : {}),
+    },
     auth: { type: 'supabase_session', credentialRef: 'credential:supabase:hearth' },
     capabilities: ['auth', 'bridge.read', 'bridge.write'],
     status: 'UNKNOWN',
@@ -115,7 +118,10 @@ export const builtinConnectionDefinitions = (settings = {}) => ([
     alias: 'supabase:xgen',
     provider: 'supabase',
     label: 'Project X Supabase',
-    target: { url: settings.publicTasksSupabaseUrl || null },
+    target: {
+      url: settings.publicTasksSupabaseUrl || null,
+      ...(settings.publicTasksSupabaseAnonKey ? { publishableKey: settings.publicTasksSupabaseAnonKey } : {}),
+    },
     auth: { type: 'supabase_session', credentialRef: 'credential:supabase:xgen' },
     capabilities: ['auth', 'goals.read', 'goals.write', 'reviews.write', 'tasks.read', 'tasks.write'],
     status: 'UNKNOWN',

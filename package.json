@@ -29,6 +29,7 @@
     "test:local-provider": "node --test scripts/test-local-provider.mjs",
     "test:connections": "node --test scripts/test-connection-registry.mjs scripts/test-secure-credential-store.mjs scripts/test-connection-service.mjs scripts/test-connection-main-boundary.mjs",
     "test:github": "node --test scripts/test-github-client.mjs scripts/test-github-connections.mjs scripts/test-github-mcp-tools.mjs scripts/test-github-main-boundary.mjs scripts/test-github-http-transport.mjs",
+    "test:supabase": "node --test scripts/test-supabase-project-service.mjs scripts/test-supabase-multi-project-boundary.mjs scripts/test-electron-public-x-auth.mjs",
     "test:provider-selection": "node --test scripts/test-provider-selection.mjs",
     "test:local-chat": "node --test scripts/test-local-chat.mjs",
     "test:context-builder": "node --test scripts/test-context-builder.mjs",

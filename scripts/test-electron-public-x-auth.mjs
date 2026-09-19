@@ -32,8 +32,46 @@ function buildAuthHarness({ settings = {}, fetchImpl } = {}) {
     ...settings,
   };
   const readSettings = () => settingsState;
-  const credentialState = new Map();
+  const requestFetch = fetchImpl || (async () => { throw new Error('fetch must not be called in this test'); });
   const PUBLIC_TASKS_CONNECTION_ALIAS = 'supabase:xgen';
+  const supabaseProjectService = {
+    getProjectConfig(alias, { requirePublishableKey = true } = {}) {
+      assert.equal(alias, PUBLIC_TASKS_CONNECTION_ALIAS, 'Project X auth harness must never resolve another Supabase alias');
+      const publishableKey = settingsState.publicTasksSupabaseAnonKey || null;
+      if (requirePublishableKey && !publishableKey) {
+        throw new Error('Project X is not configured. Enter its publishable key first.');
+      }
+      return {
+        alias,
+        url: settingsState.publicTasksSupabaseUrl,
+        publishableKey,
+      };
+    },
+    async request(alias, pathName, body) {
+      const config = this.getProjectConfig(alias);
+      const response = await requestFetch(`${config.url}/auth/v1/${pathName}`, {
+        method: 'POST',
+        headers: {
+          apikey: config.publishableKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.msg || data?.message || 'Project X authentication failed.');
+      return data;
+    },
+    signUp(alias, email, password) {
+      return this.request(alias, 'signup', { email, password });
+    },
+    signIn(alias, email, password) {
+      return this.request(alias, 'token?grant_type=password', { email, password });
+    },
+    refreshSession(alias, refreshToken) {
+      return this.request(alias, 'token?grant_type=refresh_token', { refresh_token: refreshToken });
+    },
+  };
+  const credentialState = new Map();
   const connectionService = {
     getCredential(alias) { return credentialState.get(alias) || null; },
     setCredential(alias, value) { credentialState.set(alias, structuredClone(value)); },
@@ -63,9 +101,29 @@ function buildAuthHarness({ settings = {}, fetchImpl } = {}) {
       getSession: () => publicTasksSession,
     };
   `;
-  const factory = new Function('readSettings', 'saveSettings', 'sendEvent', 'publicTasksClientInstance', 'reviewItemsClientInstance', 'goalRequestsClientInstance', 'connectionService', 'readConnectionCredential', 'fetch', factorySource);
-  const api = factory(readSettings, saveSettings, () => {}, publicTasksClientInstance, reviewItemsClientInstance, goalRequestsClientInstance, connectionService, readConnectionCredential,
-    fetchImpl || (async () => { throw new Error('fetch must not be called in this test'); }));
+  const factory = new Function(
+    'readSettings',
+    'saveSettings',
+    'sendEvent',
+    'publicTasksClientInstance',
+    'reviewItemsClientInstance',
+    'goalRequestsClientInstance',
+    'connectionService',
+    'readConnectionCredential',
+    'supabaseProjectService',
+    factorySource,
+  );
+  const api = factory(
+    readSettings,
+    saveSettings,
+    () => {},
+    publicTasksClientInstance,
+    reviewItemsClientInstance,
+    goalRequestsClientInstance,
+    connectionService,
+    readConnectionCredential,
+    supabaseProjectService,
+  );
   return {
     ...api,
     settingsState,
