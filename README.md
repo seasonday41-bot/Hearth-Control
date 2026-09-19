@@ -11,19 +11,19 @@ This section is the project handoff/source of truth for any new ChatGPT/Codex/AI
 ## CURRENT STATUS
 
 ```text
-PHASE = P3_CONNECTION_REGISTRY_SECURE_CREDENTIAL_STORE — COMPLETE / VALIDATED / FROZEN
-CURRENT_BRANCH = main
-VALIDATED_MAIN_COMMIT = 474a4f6f3994d13136d467bf6105a2a1486aad6b
-VALIDATED_TAG = hearth-p3-validated-0.4.7-20260919
-STATUS = P3_COMPLETE_VALIDATED
+PHASE = P4_GITHUB_MULTI_CONNECTION — AUDIT / DESIGN COMPLETE
+CURRENT_BRANCH = feature/p4-github-multi-connection-v1
+BASELINE_MAIN = 99c2b91c4843e1268c472c31859966df9623ce2b
+P3_VALIDATED_TAG = hearth-p3-validated-0.4.7-20260919
+STATUS = P4_DESIGN_LOCKED_READY_TO_IMPLEMENT
 BLOCKED_BY = none
-LAST_COMPLETED_STEP = P3 Connection Registry + Secure Credential Store validated on main, tagged, and frozen
-NEXT_PHASE = P4_GITHUB_MULTI_CONNECTION
-NEXT_EXACT_ACTION = audit current GitHub integration/auth surfaces and design the smallest P4 implementation for at least two simultaneous GitHub connections using the P3 Connection Registry without changing frozen X/P2/P3 behavior
-DO_NOT_MODIFY_FROZEN = X v0.1 or P2 implementation unless an actual regression, security issue, or explicitly approved new phase requires it
+LAST_COMPLETED_STEP = P4 GitHub surfaces audited; canonical multi-connection auth/client/tool design locked in docs/HEARTH-GITHUB-MULTI-CONNECTION-V1.md
+NEXT_PHASE = P4_IMPLEMENTATION
+NEXT_EXACT_ACTION = implement P4.1 GitHub fixed-origin REST client and focused tests only; no connect UI, MCP write tool, git push transport, or P2 updater changes yet
+DO_NOT_MODIFY_FROZEN = X v0.1, P2, or P3 unless an actual regression/security issue or an explicitly approved P4 extension requires a targeted change
 ```
 
-**Continuation rule:** Git/source is authoritative over chat history. Verify branch, HEAD, tag, and worktree before editing. Do not modify frozen X/P2 behavior unless a regression or security issue is proven. Continue only `NEXT_EXACT_ACTION`.
+**Continuation rule:** Git/source is authoritative over chat history. Verify branch, HEAD, tag, and worktree before editing. Do not modify frozen X/P2/P3 behavior unless a regression/security issue or the approved P4 design requires a targeted extension. Continue only `NEXT_EXACT_ACTION`.
 
 ### Current validated/stable direction
 
@@ -72,12 +72,35 @@ This checklist is the handoff ledger for every future chat/agent. **A phase is n
 - [x] **P1 — Wire Skill Registry into X**
 - [x] **P2 — Remote One-Click Updater** — VALIDATED / FROZEN
 - [x] **P3 — Connection Registry + Secure Credential Store** — VALIDATED / FROZEN
-- [ ] **P4 — GitHub multi-connection (2+)**
+- [ ] **P4 — GitHub multi-connection (2+)** — AUDIT / DESIGN COMPLETE; IMPLEMENTATION NEXT
 - [ ] **P5 — Supabase multi-project (2+)**
 - [ ] **P6 — Vercel connection**
 - [ ] **P7 — Console / connection health / approvals / evidence**
 - [ ] **P8 — Multi-Agent Router + universal `ส่งงาน:` ingress**
 - [ ] **P9 — Full UI redesign LAST**
+
+### P4 detailed checklist — current truth
+
+- [x] Push P3 validated `main` checkpoint to `origin/main`
+- [x] Push annotated tag `hearth-p3-validated-0.4.7-20260919`
+- [x] Verify remote `main` = `99c2b91c4843e1268c472c31859966df9623ce2b`
+- [x] Verify remote P3 tag dereferences to validated implementation commit `474a4f6f3994d13136d467bf6105a2a1486aad6b`
+- [x] Create `feature/p4-github-multi-connection-v1`
+- [x] Audit existing GitHub surfaces: no GitHub REST client/auth/tools in Hearth; P2 updater is public/fixed-trust only
+- [x] Confirm P3 already seeds `github:personal` and `github:work` with separate credential refs
+- [x] Confirm machine has GitHub CLI + macOS keyring auth, but global active-account state is unsuitable as Hearth multi-connection authority
+- [x] Lock P4 V1 auth to local fine-grained PAT per alias; never import/copy `gh` token state
+- [x] Lock GitHub API authority to fixed `https://api.github.com`; no arbitrary base URL in V1
+- [x] Lock explicit alias requirement for every GitHub data/action tool; no default/fallback account
+- [x] Lock P2 updater isolation from P4 credentials
+- [x] Lock generic Git push/merge/delete/release/admin out of P4 V1 token path
+- [x] Author canonical design: `docs/HEARTH-GITHUB-MULTI-CONNECTION-V1.md`
+- [ ] P4.1 — GitHub fixed-origin REST client + focused tests
+- [ ] P4.2 — local connect/disconnect + remote health
+- [ ] P4.3 — dual-account isolation tests
+- [ ] P4.4 — read-only MCP tools with explicit connection alias
+- [ ] P4.5 — first approved mutation (`github_pull_request_create`) only after read path is stable
+- [ ] P4.6 — full regression / checkpoint / freeze
 
 ### P0 detailed checklist — current truth
 
@@ -525,11 +548,33 @@ Requirements:
 
 Do not hardcode one GitHub account, one Supabase project, or provider secrets into X.
 
-### P4 — GitHub multi-connection
+### P4 — GitHub multi-connection — AUDIT / DESIGN COMPLETE
 
-Use the Connection Registry foundation. X/Hearth must support at least **2 GitHub connections** simultaneously without disconnect/reconnect churn.
+Canonical design: `docs/HEARTH-GITHUB-MULTI-CONNECTION-V1.md`.
 
-Keep push/merge/delete/deploy-style mutations aligned with Hearth approval policy. Read/inspect capability and write capability must remain distinguishable.
+Use the frozen P3 Connection Registry foundation. Hearth must support at least **2 GitHub connections** simultaneously without disconnect/reconnect churn:
+
+```text
+github:personal
+github:work
+```
+
+Locked P4 V1 rules:
+
+- Hearth owns the connection credential; X never does.
+- Use a locally entered fine-grained PAT per alias, stored only in the P3 Secure Credential Store.
+- Do not import token material from GitHub CLI/keychain or switch the global `gh` active account.
+- Use fixed `https://api.github.com` authority and explicit GitHub REST API versioning.
+- Every GitHub MCP/data/action call requires an explicit connection alias.
+- No cross-alias fallback.
+- P2 public GitHub Releases updater remains credential-independent and unchanged.
+- Read path is implemented before any GitHub mutation.
+- Generic push/merge/delete/release/admin actions are out of P4 V1.
+- The first mutation candidate is `github_pull_request_create`, gated by connection capability + Hearth Git permission + exact local approval.
+
+```text
+NEXT_EXACT_ACTION = implement P4.1 GitHub fixed-origin REST client + focused tests only
+```
 
 ### P5 — Supabase multi-project
 
