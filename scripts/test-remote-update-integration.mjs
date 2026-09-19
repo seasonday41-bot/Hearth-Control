@@ -18,6 +18,7 @@ const preloadSource = fs.readFileSync(new URL('../electron/preload.cjs', import.
 const appSource = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
 const remoteSource = fs.readFileSync(new URL('../electron/remote-updater.cjs', import.meta.url), 'utf8');
 const stagerSource = fs.readFileSync(new URL('../electron/remote-update-stager.cjs', import.meta.url), 'utf8');
+const remoteStateSource = fs.readFileSync(new URL('../electron/remote-update-state.cjs', import.meta.url), 'utf8');
 
 const TEST_KEY_ID = 'hearth-integration-test';
 const { publicKey: testPublicKey, privateKey: testPrivateKey } = crypto.generateKeyPairSync('ed25519');
@@ -163,7 +164,8 @@ test('4. valid newer signed manifest reaches update_available decision', async (
   remote.validatePlatformAndArch(manifest, { expectedPlatform: 'darwin', expectedArch: 'arm64' });
   assert.equal(updater.isManifestNewer({ manifest, currentVersion: CURRENT_VERSION, currentBuiltAt: CURRENT_BUILT_AT }), true);
   const checkHandler = mainSource.slice(mainSource.indexOf("ipcMain.handle('updater:check'"), mainSource.indexOf("ipcMain.handle('updater:prepare'"));
-  assert.ok(checkHandler.includes("state: 'update_available'"));
+  assert.ok(checkHandler.includes('remoteUpdateState.checkRemoteUpdate({'));
+  assert.ok(remoteStateSource.includes("state: 'update_available'"));
 });
 
 test('5. verified remote download + staging reaches existing local updater update_ready', async () => {
@@ -249,24 +251,31 @@ test('8. wrong platform or arch fails before staging', async () => {
 });
 
 test('9. bad artifact size or SHA cannot reach staging', async () => {
-  const bytes = Buffer.from('actual-download');
-  const base = unsignedManifest({ appSha: 'f'.repeat(64), artifactBytes: bytes });
-  const badSize = signManifest({ ...base, artifact: { ...base.artifact, size: bytes.length + 1 } });
-  await assert.rejects(
-    () => remote.fetchAndVerifyUpdate(productionRemoteOptions({
-      fetchFn: mappedFetch({ [MANIFEST_URL]: response(JSON.stringify(badSize)), [ARTIFACT_URL]: response(bytes) }),
-    })),
-    /size mismatch/i,
-  );
-  const badShaUnsigned = unsignedManifest({ appSha: 'f'.repeat(64), artifactBytes: bytes });
-  badShaUnsigned.artifact.sha256 = '0'.repeat(64);
-  const badSha = signManifest(badShaUnsigned);
-  await assert.rejects(
-    () => remote.fetchAndVerifyUpdate(productionRemoteOptions({
-      fetchFn: mappedFetch({ [MANIFEST_URL]: response(JSON.stringify(badSha)), [ARTIFACT_URL]: response(bytes) }),
-    })),
-    /SHA-256 mismatch/i,
-  );
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'hearth-integration-bad-artifact-'));
+  try {
+    const bytes = Buffer.from('actual-download');
+    const base = unsignedManifest({ appSha: 'f'.repeat(64), artifactBytes: bytes });
+    const badSize = signManifest({ ...base, artifact: { ...base.artifact, size: bytes.length + 1 } });
+    await assert.rejects(
+      () => remote.fetchAndVerifyUpdate(productionRemoteOptions({
+        updatesDir: root,
+        fetchFn: mappedFetch({ [MANIFEST_URL]: response(JSON.stringify(badSize)), [ARTIFACT_URL]: response(bytes) }),
+      })),
+      /size mismatch/i,
+    );
+    const badShaUnsigned = unsignedManifest({ appSha: 'f'.repeat(64), artifactBytes: bytes });
+    badShaUnsigned.artifact.sha256 = '0'.repeat(64);
+    const badSha = signManifest(badShaUnsigned);
+    await assert.rejects(
+      () => remote.fetchAndVerifyUpdate(productionRemoteOptions({
+        updatesDir: root,
+        fetchFn: mappedFetch({ [MANIFEST_URL]: response(JSON.stringify(badSha)), [ARTIFACT_URL]: response(bytes) }),
+      })),
+      /SHA-256 mismatch/i,
+    );
+  } finally {
+    await fs.promises.rm(root, { recursive: true, force: true });
+  }
 });
 
 test('10. staged application tree mismatch cannot become update_ready', async () => {
@@ -323,6 +332,7 @@ test('12. explicit github.com -> release-assets.githubusercontent.com redirect p
 test('13. remote preparation code never calls installUpdate directly', () => {
   assert.equal(stripComments(remoteSource).includes('installUpdate('), false);
   assert.equal(stripComments(stagerSource).includes('installUpdate('), false);
+  assert.equal(stripComments(remoteStateSource).includes('installUpdate('), false);
   const remoteHandlers = mainSource.slice(mainSource.indexOf("ipcMain.handle('updater:check'"), mainSource.indexOf("ipcMain.handle('updater:install'"));
   assert.equal(stripComments(remoteHandlers).includes('installUpdate('), false);
 });

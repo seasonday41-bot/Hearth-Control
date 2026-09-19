@@ -9,6 +9,7 @@ const crypto = require('node:crypto');
 const localUpdater = require('./updater.cjs');
 const remoteUpdater = require('./remote-updater.cjs');
 const remoteUpdateStager = require('./remote-update-stager.cjs');
+const remoteUpdateState = require('./remote-update-state.cjs');
 const updateTrust = require('./update-trust-config.cjs');
 const { createTaskNotifier } = require('./task-notifications.cjs');
 
@@ -654,15 +655,6 @@ const getUpdaterInfo = () => ({
   updateDirectory: readSettings().updateDirectory,
   isPackaged: app.isPackaged,
 });
-
-const publicRemoteManifest = (manifest) => manifest ? ({
-  version: manifest.version,
-  buildId: manifest.buildId,
-  builtAt: manifest.builtAt,
-  platform: manifest.platform,
-  arch: manifest.arch,
-  dmgPath: null,
-}) : null;
 
 const safeRemoteUpdateError = (error) => {
   const message = String(error?.message || '');
@@ -1950,19 +1942,16 @@ app.whenReady().then(async () => {
   ipcMain.handle('updater:check', async (event) => {
     if (!mainWindow || event.sender.id !== mainWindow.webContents.id) throw new Error('Update checks must come from the local Hearth window.');
     const info = getUpdaterInfo();
-    remoteUpdateSession = null;
-    if (info.isPackaged === false) {
-      return { state: localUpdater.UPDATE_STATES.UP_TO_DATE, currentVersion: info.currentVersion, currentBuildId: info.currentBuildId, available: null, error: null, devMode: true };
-    }
     try {
-      const manifest = await remoteUpdater.fetchRemoteManifest(remoteUpdateOptions());
-      remoteUpdater.validatePlatformAndArch(manifest, { expectedPlatform: process.platform, expectedArch: process.arch });
-      if (!localUpdater.isManifestNewer({ manifest, currentVersion: info.currentVersion, currentBuiltAt: info.builtAt })) {
-        return { state: localUpdater.UPDATE_STATES.UP_TO_DATE, currentVersion: info.currentVersion, currentBuildId: info.currentBuildId, available: null, error: null };
-      }
-      remoteUpdateSession = { state: 'update_available', manifest };
-      return { state: 'update_available', currentVersion: info.currentVersion, currentBuildId: info.currentBuildId, available: publicRemoteManifest(manifest), error: null };
+      const checked = await remoteUpdateState.checkRemoteUpdate({
+        currentSession: remoteUpdateSession,
+        info,
+        remoteOptions: remoteUpdateOptions(),
+      });
+      remoteUpdateSession = checked.session;
+      return checked.result;
     } catch (error) {
+      remoteUpdateSession = null;
       return { state: localUpdater.UPDATE_STATES.ERROR, currentVersion: info.currentVersion, currentBuildId: info.currentBuildId, available: null, error: safeRemoteUpdateError(error) };
     }
   });

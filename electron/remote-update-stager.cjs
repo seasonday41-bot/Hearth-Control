@@ -46,6 +46,16 @@ const defaultDelayFn = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const isCleanBuildIdSegment = (value) =>
   typeof value === 'string' && value.length > 0 && !value.includes('/') && !value.includes('\\') && value !== '.' && value !== '..';
 
+function resolveStagedDirectory({ buildId, updatesDir } = {}) {
+  if (!isCleanBuildIdSegment(buildId)) throw new Error('Manifest buildId is invalid for staging.');
+  const baseDir = resolveUpdatesDirectory({ updatesDir });
+  const buildDir = path.join(baseDir, buildId);
+  if (!isInside(baseDir, buildDir)) {
+    throw new Error('Build directory would escape the trusted updates root.');
+  }
+  return path.join(buildDir, STAGED_DIR_NAME);
+}
+
 /**
  * Mounts a verified DMG read-only, non-interactively, at a caller-controlled
  * mount point. Uses the fixed absolute hdiutil path (no PATH lookup, no
@@ -197,17 +207,11 @@ async function stageVerifiedUpdate({
   delayFn,
 } = {}) {
   if (!manifest || typeof manifest !== 'object') throw new Error('A verified remote manifest is required.');
-  if (!isCleanBuildIdSegment(manifest.buildId)) throw new Error('Manifest buildId is invalid for staging.');
   if (!dmgPath || typeof dmgPath !== 'string') throw new Error('A verified DMG path is required.');
 
-  const baseDir = resolveUpdatesDirectory({ updatesDir });
-  const buildDir = path.join(baseDir, manifest.buildId);
-  if (!isInside(baseDir, buildDir)) {
-    throw new Error('Build directory would escape the trusted updates root.');
-  }
-
+  const stagedDir = resolveStagedDirectory({ buildId: manifest.buildId, updatesDir });
+  const buildDir = path.dirname(stagedDir);
   const mountPoint = path.join(buildDir, MOUNT_DIR_NAME);
-  const stagedDir = path.join(buildDir, STAGED_DIR_NAME);
   const stagedAppPath = path.join(stagedDir, PRODUCT_NAME);
 
   // An old incomplete staged directory for this exact build is never trusted;
@@ -305,5 +309,6 @@ module.exports = {
   validateAppCandidate,
   copyAppBundle,
   buildLocalManifestFromRemote,
+  resolveStagedDirectory,
   stageVerifiedUpdate,
 };
