@@ -4,48 +4,61 @@ A local macOS desktop control center, built with Electron, React, TypeScript, an
 
 ## 🚨 READ FIRST — Canonical continuation path
 
-**Last updated: 2026-09-18**
+**Last updated: 2026-09-19**
 
-This section is the project handoff/source of truth for any new ChatGPT/Codex/AI session. **Do not start a fresh architecture plan, choose a different next feature, or rediscover the roadmap from scratch.** Read this section first, inspect only the files needed for the current phase, and continue the first incomplete priority below.
+This section is the project handoff/source of truth for any new ChatGPT/Codex/AI session. **Do not start a fresh architecture plan, choose a different next feature, or rediscover the roadmap from scratch.** Read this section first, verify Git state, and continue only the canonical next action below.
+
+## CURRENT STATUS
 
 ```text
-CURRENT_PHASE = P2_REMOTE_ONE_CLICK_UPDATER
-NEXT_PHASE = P3_CONNECTION_REGISTRY
-STATUS = READY_FOR_P2
-BASELINE_MAIN = afdf3578f1e31c52f86bd12bc41fe18d171b4bd0
-ACTIVE_BRANCH = main
-MAC_RUNTIME_VALIDATION = PASS
+PHASE = P2_REMOTE_ONE_CLICK_UPDATER — COMPLETE / VALIDATED
+CURRENT_BRANCH = main
+VALIDATED_MAIN_COMMIT = 301e64fa216e10bb9a29566e3e3dff29a5620b91
+VALIDATED_TAG = hearth-p2-validated-20260919
+FINAL_GATE = P2_MAIN_FINAL_GATE_PASS
+STATUS = P2_COMPLETE_VALIDATED
 BLOCKED_BY = none
-LAST_COMPLETED_STEP = P1 Skill Registry integration closed, validated, installed, Smoke 007 passed, remote sync verified, baseline frozen and merged to main
-NEXT_EXACT_ACTION = read docs/REMOTE-ONE-CLICK-UPDATER-V1.md and create the P2 branch from current main
-VALIDATION_REQUIRED = P1 complete: 294/294 regression PASS; installed Main Smoke 007 PASS; remote Goal projection PASS
-DO_NOT_START = P3/P4/P5/P6/P7/P8/P9 until P2 is completed
+LAST_COMPLETED_STEP = P2 Remote One-Click Updater V1 validated, checkpointed, fast-forwarded to main, and Final Gate passed on main
+NEXT_PHASE = P3_CONNECTION_REGISTRY_SECURE_CREDENTIAL_STORE
+NEXT_EXACT_ACTION = Audit current Hearth connection/credential architecture and design the smallest P3 foundation for provider connections and secure credential storage without modifying frozen X/P2 behavior.
+DO_NOT_MODIFY_FROZEN = X v0.1 or P2 implementation unless an actual regression, security issue, or explicitly approved new phase requires it
 ```
 
-**Continuation rule:** if `BLOCKED_BY` is still true, do not invent substitute feature work. Wait for the blocker to clear, then execute `NEXT_EXACT_ACTION`. After every meaningful completed step, update `LAST_COMPLETED_STEP`, `NEXT_EXACT_ACTION`, checklist state, and evidence before switching chats.
+**Continuation rule:** Git/source is authoritative over chat history. Verify branch, HEAD, tag, and worktree before editing. Do not modify frozen X/P2 behavior unless a regression or security issue is proven. Continue only `NEXT_EXACT_ACTION`.
 
 ### Current validated/stable direction
 
-Hearth is the trusted execution/control layer. X is the local coding executor. Supabase is task/goal transport and persisted remote state. Existing durable runtime, claims, continuation/recovery, Goal Runner, approval boundaries, and local updater install/rollback path are established components and must not be casually redesigned.
+Hearth is the trusted execution/control plane. X is the local coding worker. External services are consumed through Hearth-controlled connections and permission boundaries. Existing durable runtime, claims, continuation/recovery, Goal Runner, approval boundaries, frozen X v0.1, and validated P2 install/rollback path are established components and must not be casually redesigned.
 
-The project direction is:
+The role split is:
 
 ```text
-Chat / Supervisor
-  -> Hearth ingress / Router
-  -> X + Skills
-  -> Hearth-owned Connections
-  -> validation/evidence/result gate
+ChatGPT / Supervisor
+  -> planning, diagnosis, task design, acceptance criteria
 
-Future specialized agents reuse Hearth-owned Skills/Connections.
-UI redesign happens only after the backend/control path is complete.
+Hearth
+  -> trusted execution/control plane
+  -> permissions, runtime state, evidence, routing
+  -> connection and credential authority
+
+X
+  -> local coder worker
+
+GitHub / Supabase / Vercel / AI providers
+  -> external integrations through Hearth-controlled connections
 ```
 
-### Current active branch — what already exists
+### Current active branch — validated baseline
 
-`main` contains the merged and validated P0 (Skill v1) and P1 (X Skill Integration + Remote Sync Fix) baselines.
+`main` is the canonical branch and currently points at the validated P2 checkpoint:
 
-P2 work will be authored on a dedicated branch created from `main` (`feature/remote-one-click-updater-v1`).
+```text
+MAIN_HEAD = 301e64fa216e10bb9a29566e3e3dff29a5620b91
+P2_TAG = hearth-p2-validated-20260919
+P2_FINAL_GATE = P2_MAIN_FINAL_GATE_PASS
+```
+
+P0, P1, X v0.1, and P2 histories are preserved in Git. P2 implementation is frozen unless a real regression/security issue or explicitly approved later phase requires a targeted change.
 
 ---
 
@@ -57,8 +70,8 @@ This checklist is the handoff ledger for every future chat/agent. **A phase is n
 
 - [x] **P0 — Validate and merge Hearth Skill v1**
 - [x] **P1 — Wire Skill Registry into X**
-- [ ] **P2 — Remote One-Click Updater** ← CURRENT
-- [ ] **P3 — Connection Registry + Secure Credential Store**
+- [x] **P2 — Remote One-Click Updater** — VALIDATED / FROZEN
+- [ ] **P3 — Connection Registry + Secure Credential Store** ← NEXT
 - [ ] **P4 — GitHub multi-connection (2+)**
 - [ ] **P5 — Supabase multi-project (2+)**
 - [ ] **P6 — Vercel connection**
@@ -188,6 +201,52 @@ NEXT_PHASE = P2
 NEXT_EXACT_ACTION = read docs/REMOTE-ONE-CLICK-UPDATER-V1.md before implementation
 ```
 
+```text
+PHASE_COMPLETED = P2_REMOTE_ONE_CLICK_UPDATER
+STATUS = PASS / VALIDATED / FROZEN
+COMPLETED_AT = 2026-09-19
+VALIDATED_MAIN_COMMIT = 301e64fa216e10bb9a29566e3e3dff29a5620b91
+TAG = hearth-p2-validated-20260919
+FINAL_GATE = P2_MAIN_FINAL_GATE_PASS
+VALIDATION = remote integration 18/18; startup health 4/4; runtime preflight 8/8; local updater 33/33; remote updater P2A/B/C 94/94; Electron lifecycle 12/12; TypeScript PASS; syntax PASS; git diff --check PASS
+KNOWN_LIMITATIONS = no blocker remaining for P2 V1; release publication remains a separately authorized operation
+NEXT_PHASE = P3_CONNECTION_REGISTRY_SECURE_CREDENTIAL_STORE
+NEXT_EXACT_ACTION = audit current Hearth connection/credential architecture and design the smallest P3 foundation without modifying frozen X/P2 behavior
+```
+
+### Frozen baselines
+
+```text
+X v0.1 = FROZEN / VALIDATED
+X_TAG = hearth-x-v0.1-validated-20260918
+
+P2 Remote One-Click Updater V1 = FROZEN / VALIDATED
+P2_TAG = hearth-p2-validated-20260919
+```
+
+Do not modify frozen X/P2 implementation unless an actual regression, security issue, or explicitly approved new phase requires it.
+
+### Secure MCP / Direct Coder status
+
+```text
+Secure MCP Tunnel = VALIDATED
+ChatGPT -> Hearth read-only = VALIDATED
+ChatGPT -> Hearth Direct Coder = VALIDATED
+Background tunnel service = VALIDATED
+```
+
+No API keys, tunnel credentials, private signing keys, secret hashes, or other secret material belong in this README.
+
+### New chat continuation contract
+
+For a new session:
+
+1. Read this README canonical checkpoint first.
+2. Verify current branch, HEAD, validated tag, and `git status`.
+3. Treat Git/source as truth over chat history.
+4. Do not modify frozen X/P2 unless a regression or security issue is proven.
+5. Continue `NEXT_EXACT_ACTION` only.
+
 ### Session handoff checklist — update before changing chats
 
 Before ending a substantial session or moving to another chat, the current agent must verify:
@@ -210,9 +269,9 @@ Before ending a substantial session or moving to another chat, the current agent
 
 ## Canonical priority order
 
-### P0 — Validate and merge Hearth Skill v1 branch **NOW**
+### P0 — Validate and merge Hearth Skill v1 branch — COMPLETE
 
-Do this first when the Mac is available. Do not add more features before this branch is validated.
+Historical completed phase. Validation and merge evidence are preserved below.
 
 Required actions:
 
@@ -239,9 +298,9 @@ git diff --check PASS
 no unintended generated/source changes
 ```
 
-After evidence is clean, merge this branch to `main`. Update this README phase marker to `P1_X_SKILL_INTEGRATION`.
+This phase is complete; historical acceptance evidence is preserved below.
 
-### P1 — Wire Skill Registry into X
+### P1 — Wire Skill Registry into X — COMPLETE
 
 After P0 is merged, integrate the declarative Skill Registry with X using the smallest safe hook.
 
@@ -259,27 +318,91 @@ Canonical Skill spec: `docs/HEARTH-SKILL-V1.md`.
 
 Completion means X can load the appropriate current Skill definition, intersect requested tools with allowed tools, execute through existing safe tool layers, and return evidence without bypassing current task/approval constraints.
 
-### P2 — Remote One-Click Updater
-
-This is next because manual DMG drag/Replace creates friction on every iteration.
-
-Create a **new branch from then-current `main`** after P1 is complete (or after P1 is safely merged if work is split). Do not implement Remote Updater on the current Skill branch.
+### P2 — Remote One-Click Updater — COMPLETE / VALIDATED
 
 Canonical design: `docs/REMOTE-ONE-CLICK-UPDATER-V1.md`.
 
-Locked architecture:
+Validated P2 V1 includes:
+
+- signed remote update manifests;
+- Ed25519 trust verification;
+- GitHub Releases public distribution authority;
+- secure HTTPS delivery with bounded redirects;
+- DNS/private-IP protection and DNS-rebinding-resistant pinned connections;
+- DMG exact-size + SHA-256 verification;
+- safe read-only DMG staging;
+- staged application-tree verification;
+- the existing local updater as the final install authority;
+- explicit local Electron-main approval;
+- runtime preflight blocking active X, Goal, queued/running durable jobs, and concurrent updater install;
+- backup / restart flow;
+- startup-success health marker;
+- detached rollback watchdog;
+- user-data isolation;
+- remote manifest / GitHub / MCP / Goal / X cannot directly authorize final installation.
+
+Validated production flow:
 
 ```text
-remote signed manifest
- -> secure download + DMG verification/staging (new layer)
- -> existing electron/updater.cjs
- -> existing install/backup/restart
- -> existing updater-helper.cjs rollback watchdog
+GitHub Release
+ -> signed manifest
+ -> Ed25519 verification
+ -> platform / architecture / version
+ -> secure DMG download
+ -> size + SHA verification
+ -> safe read-only staging
+ -> app-tree verification
+ -> existing local updater inspection
+ -> update_ready
+ -> runtime preflight
+ -> native local approval
+ -> candidate revalidation
+ -> late runtime preflight
+ -> existing installUpdate()
+ -> backup / restart
+ -> startup-health marker
+ -> rollback watchdog
 ```
 
-Do **not** replace the existing local updater. Do not allow X, Goal, MCP, Supabase, remote tasks, or a manifest to trigger installation directly. Final install remains an explicit local-user action.
+#### Release distribution authority
 
-### P3 — Hearth Connection Registry + Secure Credential Store
+```text
+PRIVATE_SOURCE_REPOSITORY = seasonday41-bot/Hearth-Control
+PUBLIC_RELEASE_REPOSITORY = seasonday41-bot/Hearth-Control-Releases
+STABLE_MANIFEST_URL = https://github.com/seasonday41-bot/Hearth-Control-Releases/releases/latest/download/manifest.json
+SIGNING_KEY_ID = hearth-release-2026-01
+```
+
+The production **public** signing key is embedded in the application main-process trust configuration. The production **private** signing key is stored outside the Git repository in owner-only local release-signing storage. Never place private signing material in source, README, logs, application bundles, or GitHub Release assets.
+
+#### Validated P2 Final Gate baseline — 2026-09-19
+
+```text
+Remote integration        = 18/18 PASS
+Startup Health            = 4/4 PASS
+Runtime Preflight         = 8/8 PASS
+Local updater             = 33/33 PASS
+Remote updater P2A/B/C    = 94/94 PASS
+Electron lifecycle        = 12/12 PASS
+TypeScript --noEmit       = PASS
+Syntax checks             = PASS
+git diff --check          = PASS
+```
+
+Validated checkpoint:
+
+```text
+MAIN_COMMIT = 301e64fa216e10bb9a29566e3e3dff29a5620b91
+TAG = hearth-p2-validated-20260919
+FINAL_GATE = P2_MAIN_FINAL_GATE_PASS
+```
+
+### P3 — Hearth Connection Registry + Secure Credential Store — NEXT
+
+```text
+NEXT_PHASE = P3_CONNECTION_REGISTRY_SECURE_CREDENTIAL_STORE
+NEXT_EXACT_ACTION = Audit current Hearth connection/credential architecture and design the smallest P3 foundation for provider connections and secure credential storage without modifying frozen X/P2 behavior.
+```
 
 Connections belong to **Hearth**, not to X. Build one registry that future agents can reuse.
 
