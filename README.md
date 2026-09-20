@@ -11,19 +11,19 @@ This section is the project handoff/source of truth for any new ChatGPT/Codex/AI
 ## CURRENT STATUS
 
 ```text
-PHASE = P9_FULL_UI_REDESIGN — COMPLETE / VALIDATED
+PHASE = MARKET_SPECIALISTS_V1 — COMPLETE / PRODUCTION VALIDATED
 CURRENT_BRANCH = main
-VALIDATED_MAIN_COMMIT = 1de00f330bb60bc3e6faaf2399d4ef5d6c0cef51
-RELEASE_VERSION = 0.4.9
-RELEASE_BUILD = 0.4.9-20260920153122-5186af
-RELEASE_TAG = v0.4.9-20260920153122-5186af
-FINAL_GATE = MAIN_0.4.9_PRODUCTION_E2E_PASS
-STATUS = P9_COMPLETE_AND_UPDATER_0.4.9_PRODUCTION_VALIDATED
+VALIDATED_MAIN_COMMIT = 82e96c31ea615c52227de437ebe7c8e262665b9f
+RELEASE_VERSION = 0.4.10
+RELEASE_BUILD = 0.4.10-20260920162505-dfdcdf
+RELEASE_TAG = v0.4.10-20260920162505-dfdcdf
+FINAL_GATE = MAIN_0.4.10_PRODUCTION_E2E_PASS
+STATUS = MARKET_SPECIALISTS_V1_COMPLETE_AND_UPDATER_0.4.10_PRODUCTION_VALIDATED
 BLOCKED_BY = none
-LAST_COMPLETED_STEP = One-Click Updater production E2E validated: 0.4.8 -> 0.4.9, download/verify/stage/recovery/install/restart/UP_TO_DATE all PASS
-NEXT_PHASE = MARKET_SPECIALISTS_V1
-NEXT_EXACT_ACTION = compare feature/market-specialists-v1 against current main, preserve the validated 0.4.9 updater baseline, then continue approved Invest/MT5 work
-DO_NOT_MODIFY_FROZEN = X v0.1, P2 updater core, P3-P9 validated behavior unless an actual regression/security issue or explicitly approved work requires a targeted change
+LAST_COMPLETED_STEP = Market Specialists V1 merged to main and One-Click Updater production E2E validated: 0.4.9 -> 0.4.10, download/verify/stage/install/restart/UP_TO_DATE all PASS
+NEXT_PHASE = INVEST_OUTCOME_TRACKING_V1
+NEXT_EXACT_ACTION = add deterministic WIN/LOSS/NEUTRAL outcome tracking on top of the existing Signal Journal before any demo trade executor
+DO_NOT_MODIFY_FROZEN = X v0.1, P2 updater core, P3-P9 validated behavior, Market Specialists V1 validated behavior unless an actual regression/security issue or explicitly approved work requires a targeted change
 ```
 
 **Continuation rule:** Git/source is authoritative over chat history. Verify branch, HEAD, tag, and worktree before editing. Do not modify frozen X/P2/P3/P4/P5/P6/P7/P8 behavior unless a regression/security issue or the approved current phase requires a targeted extension. Continue only `NEXT_EXACT_ACTION`.
@@ -85,7 +85,7 @@ This checklist is the handoff ledger for every future chat/agent. **A phase is n
 - [x] **P6 — Vercel connection** — VALIDATED / FROZEN
 - [x] **P7 — Console / connection health / approvals / evidence** — VALIDATED / FROZEN
 - [x] **P8 — Multi-Agent Router + universal `ส่งงาน:` ingress** — VALIDATED / FROZEN
-- [ ] **P9 — Full UI redesign LAST**
+- [x] **P9 — Full UI redesign LAST** — COMPLETE / VALIDATED
 
 ### P4 detailed checklist — current truth
 
@@ -1442,4 +1442,51 @@ CFBundleVersion = 0.4.9
 Known UX follow-up:
 - Download/Prepare works, but progress should later expose percentage/MB plus Verifying and Preparing states.
 - This UX follow-up must not redesign the validated updater trust/install core.
+
+---
+
+## 0.4.10 Market Specialists + Production One-Click Updater E2E Checkpoint — 2026-09-20
+
+```text
+MARKET_MAIN_MERGE = 194d1c77d69223a0aeabc51eb4d1b5f9190491b2
+RELEASE_PREP_COMMIT = 700a0498efebe09ddb381867301a53c2b075379f
+MAIN_RELEASE_MERGE = 82e96c31ea615c52227de437ebe7c8e262665b9f
+RELEASE_VERSION = 0.4.10
+BUILD_ID = 0.4.10-20260920162505-dfdcdf
+RELEASE_TAG = v0.4.10-20260920162505-dfdcdf
+RELEASE_ARTIFACT = Hearth.Control-0.4.10-arm64.dmg
+DMG_SHA256 = 603e49ca1c695a1a232fcca14952515166719584a9c66e153de9c1dbc771ba61
+SIGNATURE = PASS
+SIZE_SHA_MATCH = PASS
+PRODUCTION_E2E = PASS
+
+Validated runtime path:
+0.4.9
+ -> remote 0.4.10 detected
+ -> signed manifest accepted
+ -> download completed
+ -> artifact size/SHA verified
+ -> application staged
+ -> explicit local Install Update
+ -> backup/install/restart completed
+ -> installed app reports v0.4.10
+ -> installed build reports 0.4.10-20260920162505-dfdcdf
+ -> updater reports UP_TO_DATE
+
+Market Specialists V1 delivered in this release:
+Search AI
+Invest Engine
+MT5 read-only bridge
+OFF / MONITOR / DEMO_AUTO controller
+H1 monitor loop
+Signal Journal
+macOS notifications
+Invest UI
+No live trade execution
+```
+
+Next approved slice:
+- Invest Outcome Tracking V1
+- Resolve journaled signals deterministically as WIN / LOSS / NEUTRAL from subsequent H1 bars.
+- Do not add demo/live order execution until outcome evidence exists.
 
