@@ -703,7 +703,7 @@ export const registerWorkspaceTools = (server, options) => {
 
   server.registerTool('hearth_job_submit', {
     title: 'Submit Hearth job',
-    description: 'Submit one agent-agnostic hearth-job-v1 payload. Hearth deterministically selects the existing X or Antigravity route; callers cannot select a worker/provider directly.',
+    description: 'Submit one agent-agnostic hearth-job-v1 payload. Hearth deterministically selects the existing X, Antigravity, or XAU/USD Market Specialist route; callers cannot select a worker/provider directly.',
     inputSchema: {
       job: z.any().describe('A complete hearth-job-v1 payload. Unknown fields and worker/provider selection are rejected by Electron-owned ingress.'),
     },
@@ -721,7 +721,7 @@ export const registerWorkspaceTools = (server, options) => {
 
   server.registerTool('hearth_job_status', {
     title: 'Get Hearth job status',
-    description: 'Read normalized status for a previously submitted hearth-job-v1 by job_id from existing X receipt or Antigravity TaskStore truth.',
+    description: 'Read normalized status for a previously submitted hearth-job-v1 by job_id from existing X receipt or shared TaskStore truth (Antigravity or XAU/USD Market Specialist).',
     inputSchema: {
       job_id: z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/),
     },

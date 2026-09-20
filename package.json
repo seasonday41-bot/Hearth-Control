@@ -33,6 +33,8 @@
     "test:vercel": "node --test scripts/test-vercel-client.mjs scripts/test-vercel-connections.mjs scripts/test-vercel-mcp-tools.mjs scripts/test-vercel-main-boundary.mjs scripts/test-vercel-http-transport.mjs",
     "test:console": "node --test scripts/test-p7-console-boundary.mjs",
     "test:router": "node --test scripts/test-hearth-job-router.mjs scripts/test-hearth-job-main-boundary.mjs scripts/test-hearth-job-http-transport.mjs scripts/test-hearth-job-antigravity-adapter.mjs",
+    "test:market": "node --test scripts/test-market-specialists.mjs scripts/test-market-pipeline.mjs scripts/test-market-live-runtime.mjs scripts/test-market-lean-synthesis.mjs scripts/test-market-mt5-e2e.mjs scripts/test-market-router.mjs scripts/test-market-main-boundary.mjs scripts/test-invest-mode-controller.mjs scripts/test-mt5-bridge-server.mjs scripts/test-mt5-bridge-main-boundary.mjs scripts/test-mt5-ea-source.mjs scripts/test-mt5-setup-detection.mjs",
+    "mt5:setup": "node scripts/setup-mt5-bridge.mjs",
     "test:p9-ui": "node --test scripts/test-p9-ui-boundary.mjs scripts/test-p9-github-ux.mjs",
     "test:provider-selection": "node --test scripts/test-provider-selection.mjs",
     "test:local-chat": "node --test scripts/test-local-chat.mjs",
@@ -73,6 +75,7 @@
       "dist/**/*",
       "electron/**/*",
       "mcp/**/*",
+      "mql5/**/*",
       "package.json"
     ],
     "directories": {

@@ -46,6 +46,8 @@ let serverProcess;
 let serverState = { running: false, port: 3001, pid: null };
 let goalRunner = null;
 let taskStore = null;
+let mt5BridgeServer = null;
+let investModeController = null;
 let connectionRegistry = null;
 let credentialStore = null;
 let connectionService = null;
@@ -67,6 +69,7 @@ const xQueueRequests = new Map();
 const pendingXApprovals = new Map();
 const hearthJobRequests = new Map();
 const hearthJobGeneralInflight = new Map();
+const hearthJobMarketInflight = new Map();
 let xWakeupTimer = null;
 let xGetNextWakeupDeadline = null;
 let xReconcileRuntimeNow = null;
@@ -757,6 +760,31 @@ const publicHearthAntigravityStatus = (task) => ({
   route_reason: task.routeReason || null,
 });
 
+const hearthMarketKindFromTask = (task) => {
+  const match = /^hearthmarket:(market_search|investment_analysis):/.exec(task?.requestId || '');
+  return match?.[1] || null;
+};
+
+const publicHearthMarketStatus = (task) => {
+  let result = null;
+  if (typeof task?.lastAnswer === 'string' && task.lastAnswer.trim()) {
+    try { result = JSON.parse(task.lastAnswer); } catch { result = null; }
+  }
+  return {
+    task_id: task.taskId,
+    kind: hearthMarketKindFromTask(task),
+    status: task.status,
+    title: task.title || null,
+    created_at: task.createdAt || null,
+    updated_at: task.updatedAt || null,
+    last_event: task.lastEvent || null,
+    completion: task.completion || null,
+    error: task.error || null,
+    route_reason: task.routeReason || null,
+    result,
+  };
+};
+
 const cancelHearthJobRequest = (transportId) => {
   const waiter = hearthJobRequests.get(transportId);
   if (!waiter) return;
@@ -776,6 +804,13 @@ const cancelHearthJobRequest = (transportId) => {
       waiter.generalInflight.abort.abort();
     }
   }
+
+  if (waiter.marketInflight) {
+    waiter.marketInflight.waiters.delete(transportId);
+    if (!waiter.marketInflight.committed && waiter.marketInflight.waiters.size === 0) {
+      waiter.marketInflight.abort.abort();
+    }
+  }
 };
 
 const cancelHearthJobChild = (child) => {
@@ -784,7 +819,7 @@ const cancelHearthJobChild = (child) => {
   }
 };
 
-const requestHearthJobAntigravityApproval = (shared, child, action) => new Promise((resolve) => {
+const requestHearthJobPermissionApproval = (shared, child, permission, action) => new Promise((resolve) => {
   const requestId = crypto.randomUUID();
   let settled = false;
 
@@ -816,7 +851,7 @@ const requestHearthJobAntigravityApproval = (shared, child, action) => new Promi
   sendEvent({
     type: 'approval',
     requestId,
-    permission: 'Antigravity',
+    permission,
     action,
   });
 });
@@ -828,9 +863,9 @@ const handleHearthJobStatus = async (message, launchWorkspace) => {
   const requestId = hearthJobXRequestId(jobId);
   const taskId = hearthJobTaskId(jobId);
   const xReceipt = xQueueStore?.getReceipt(requestId) || null;
-  const antigravityTask = taskStore?.getTask(taskId) || null;
+  const storedTask = taskStore?.getTask(taskId) || null;
 
-  if (xReceipt && antigravityTask) throw hearthJobError('ambiguous_job_state');
+  if (xReceipt && storedTask) throw hearthJobError('ambiguous_job_state');
   if (xReceipt) {
     return {
       found: true,
@@ -840,13 +875,14 @@ const handleHearthJobStatus = async (message, launchWorkspace) => {
       detail: xQueueReceiptStatus(xReceipt),
     };
   }
-  if (antigravityTask) {
+  if (storedTask) {
+    const marketKind = hearthMarketKindFromTask(storedTask);
     return {
       found: true,
       job_id: jobId,
-      route: 'antigravity',
-      status: antigravityTask.status,
-      detail: publicHearthAntigravityStatus(antigravityTask),
+      route: marketKind ? 'market' : 'antigravity',
+      status: storedTask.status,
+      detail: marketKind ? publicHearthMarketStatus(storedTask) : publicHearthAntigravityStatus(storedTask),
     };
   }
   return { found: false, job_id: jobId, reason: 'not_found' };
@@ -878,11 +914,13 @@ const handleHearthJobSubmit = async (message, child, launchWorkspace, waiter) =>
   const taskId = hearthJobTaskId(job.job_id);
   const xRequestId = hearthJobXRequestId(job.job_id);
   const xReceipt = xQueueStore?.getReceipt(xRequestId) || null;
-  const antigravityTask = taskStore?.getTask(taskId) || null;
+  const storedTask = taskStore?.getTask(taskId) || null;
+  const storedMarketKind = hearthMarketKindFromTask(storedTask);
 
-  if (xReceipt && antigravityTask) throw hearthJobError('ambiguous_job_state');
-  if (route === 'x' && antigravityTask) throw hearthJobError('job_route_conflict');
-  if (route === 'antigravity' && xReceipt) throw hearthJobError('job_route_conflict');
+  if (xReceipt && storedTask) throw hearthJobError('ambiguous_job_state');
+  if (route === 'x' && storedTask) throw hearthJobError('job_route_conflict');
+  if (route === 'antigravity' && (xReceipt || storedMarketKind)) throw hearthJobError('job_route_conflict');
+  if (route === 'market' && (xReceipt || (storedTask && !storedMarketKind))) throw hearthJobError('job_route_conflict');
 
   if (route === 'x') {
     const xTask = adaptHearthJobToXTask(job, {
@@ -910,6 +948,188 @@ const handleHearthJobSubmit = async (message, child, launchWorkspace, waiter) =>
   }
 
   if (!taskStore) throw hearthJobError('task_store_unavailable');
+
+  if (route === 'market') {
+    const fingerprint = computeHearthJobFingerprint(job);
+    const marketRequestId = `hearthmarket:${job.kind}:${job.job_id}:${fingerprint}`;
+    const current = taskStore.getTask(taskId);
+    if (current) {
+      if (current.requestId !== marketRequestId) throw hearthJobError('job_id_conflict');
+      return {
+        accepted: true,
+        job_id: job.job_id,
+        route: 'market',
+        status: current.status,
+        detail: publicHearthMarketStatus(current),
+      };
+    }
+
+    const existingInflight = hearthJobMarketInflight.get(taskId);
+    if (existingInflight) {
+      if (existingInflight.fingerprint !== fingerprint) throw hearthJobError('job_id_conflict');
+      existingInflight.waiters.add(waiter.transportId);
+      waiter.marketInflight = existingInflight;
+      return existingInflight.promise;
+    }
+
+    const shared = {
+      fingerprint,
+      waiters: new Set([waiter.transportId]),
+      abort: new AbortController(),
+      committed: false,
+      promise: null,
+    };
+    waiter.marketInflight = shared;
+    hearthJobMarketInflight.set(taskId, shared);
+
+    shared.promise = (async () => {
+      const permission = readSettings().permissions?.Browser ?? 'Ask';
+      if (permission === 'Blocked') throw hearthJobError('permission_blocked');
+      if (permission !== 'Allow' && permission !== 'Ask') throw hearthJobError('permission_blocked');
+
+      if (permission === 'Ask') {
+        const allowed = await requestHearthJobPermissionApproval(
+          shared,
+          child,
+          'Browser',
+          `Allow live XAU/USD market research for: ${job.title || job.objective.slice(0, 80)}`,
+        );
+        if (!allowed) throw hearthJobError('permission_denied');
+      }
+
+      if (shared.abort.signal.aborted || xShuttingDown || shared.waiters.size === 0 || serverProcess !== child) {
+        throw hearthJobError('transport_unavailable');
+      }
+
+      let currentRoot;
+      try {
+        currentRoot = await fs.promises.realpath(readSettings().workspace);
+      } catch {
+        throw hearthJobError('workspace_mismatch');
+      }
+      if (currentRoot !== settingsRoot) throw hearthJobError('workspace_mismatch');
+
+      const afterApproval = taskStore.getTask(taskId);
+      if (afterApproval) {
+        if (afterApproval.requestId !== marketRequestId) throw hearthJobError('job_id_conflict');
+        return {
+          accepted: true,
+          job_id: job.job_id,
+          route: 'market',
+          status: afterApproval.status,
+          detail: publicHearthMarketStatus(afterApproval),
+        };
+      }
+
+      shared.committed = true;
+      const startedAt = new Date().toISOString();
+      const startEvent = {
+        stepIndex: 1,
+        type: 'MARKET_SPECIALIST_START',
+        status: 'RUNNING',
+        createdAt: startedAt,
+        summary: job.kind === 'market_search'
+          ? 'XAU/USD Search AI started.'
+          : 'XAU/USD Search AI -> MT5 -> Invest AI pipeline started.',
+      };
+      const runningTask = {
+        taskId,
+        conversationId: null,
+        workspace: settingsRoot,
+        title: job.title || (job.kind === 'market_search' ? 'XAU/USD Search AI' : 'XAU/USD Invest AI'),
+        source: 'local',
+        requestId: marketRequestId,
+        status: 'running',
+        createdAt: startedAt,
+        updatedAt: startedAt,
+        lastAnswer: null,
+        error: null,
+        lastEvent: startEvent,
+        recentEvents: [startEvent],
+        completion: null,
+        requestedRoute: 'auto',
+        resolvedRoute: 'mcp',
+        routeReason: reason,
+      };
+      taskStore.saveTask(runningTask);
+
+      try {
+        const { runLiveXauSearch, runLiveXauInvestment } = await importFromHere('../mcp/market/live-runtime.mjs');
+        const result = job.kind === 'market_search'
+          ? await runLiveXauSearch({ signal: shared.abort.signal })
+          : await runLiveXauInvestment({ signal: shared.abort.signal });
+        const completedAt = new Date().toISOString();
+        const resultJson = JSON.stringify(result);
+        const summary = job.kind === 'market_search'
+          ? `XAU/USD Search AI completed with ${Array.isArray(result?.sources) ? result.sources.length : 0} sourced records.`
+          : `XAU/USD Invest AI completed: ${result?.analysis?.direction || 'NEUTRAL'} at ${result?.analysis?.confidence ?? 'n/a'}% confidence.`;
+        const doneEvent = {
+          stepIndex: 2,
+          type: 'MARKET_SPECIALIST_COMPLETE',
+          status: 'DONE',
+          createdAt: completedAt,
+          summary,
+        };
+        const saved = taskStore.saveTask({
+          ...runningTask,
+          status: 'done',
+          updatedAt: completedAt,
+          lastAnswer: resultJson,
+          lastEvent: doneEvent,
+          recentEvents: [startEvent, doneEvent],
+          completion: {
+            status: 'done',
+            normalizedStatus: 'completed',
+            summary,
+            error: null,
+            checks: { build: 'not_run', tests: 'not_run' },
+            artifacts: [],
+          },
+        });
+        return {
+          accepted: true,
+          job_id: job.job_id,
+          route: 'market',
+          status: saved.status,
+          detail: publicHearthMarketStatus(saved),
+        };
+      } catch (error) {
+        const failedAt = new Date().toISOString();
+        const message = String(error?.message || 'market_job_failed').slice(0, 2000);
+        const errorEvent = {
+          stepIndex: 2,
+          type: 'MARKET_SPECIALIST_ERROR',
+          status: 'ERROR',
+          createdAt: failedAt,
+          summary: message,
+        };
+        taskStore.saveTask({
+          ...runningTask,
+          status: 'error',
+          updatedAt: failedAt,
+          error: message,
+          lastEvent: errorEvent,
+          recentEvents: [startEvent, errorEvent],
+          completion: {
+            status: 'error',
+            normalizedStatus: 'error',
+            summary: 'XAU/USD market specialist failed.',
+            error: message,
+            checks: { build: 'not_run', tests: 'not_run' },
+            artifacts: [],
+          },
+        });
+        throw hearthJobError('market_job_failed');
+      }
+    })();
+
+    try {
+      return await shared.promise;
+    } finally {
+      if (hearthJobMarketInflight.get(taskId) === shared) hearthJobMarketInflight.delete(taskId);
+    }
+  }
+
   const fingerprint = computeHearthJobFingerprint(job);
   const requestId = buildAntigravityRequestId(job);
   const current = taskStore.getTask(taskId);
@@ -948,9 +1168,10 @@ const handleHearthJobSubmit = async (message, child, launchWorkspace, waiter) =>
     if (permission !== 'Allow' && permission !== 'Ask') throw hearthJobError('permission_blocked');
 
     if (permission === 'Ask') {
-      const allowed = await requestHearthJobAntigravityApproval(
+      const allowed = await requestHearthJobPermissionApproval(
         shared,
         child,
+        'Antigravity',
         `Submit Hearth general job: ${job.title || job.objective.slice(0, 80)}`,
       );
       if (!allowed) throw hearthJobError('permission_denied');
@@ -1419,7 +1640,7 @@ const startServer = async ({ workspace, port }) => {
       if (message.type === 'hearth_job_submit_request' && hearthJobRequests.has(message.transportId)) return;
 
       const waiter = message.type === 'hearth_job_submit_request'
-        ? { transportId: message.transportId, child, active: true, xInflight: null, generalInflight: null }
+        ? { transportId: message.transportId, child, active: true, xInflight: null, generalInflight: null, marketInflight: null }
         : null;
       if (waiter) hearthJobRequests.set(message.transportId, waiter);
 
@@ -1992,6 +2213,31 @@ app.whenReady().then(async () => {
   }
 
   try {
+    const { InvestModeController, InvestModeFileStore } = await importFromHere('../mcp/market/invest-mode-controller.mjs');
+    const investModePath = path.join(app.getPath('userData'), 'invest-mode.json');
+    investModeController = new InvestModeController({
+      store: new InvestModeFileStore({ storagePath: investModePath }),
+    });
+    const investModeState = investModeController.restore();
+    console.info(`[InvestMode] Started in ${investModeState.mode}; restart mode is ${investModeState.startup_mode}.`);
+  } catch (err) {
+    investModeController = null;
+    console.error('[InvestMode] Failed to initialize controller:', err?.message || err);
+  }
+
+  try {
+    const { createMt5SocketBridge } = await importFromHere('../mcp/market/mt5-bridge-server.mjs');
+    mt5BridgeServer = createMt5SocketBridge();
+    const bridgeState = await mt5BridgeServer.start();
+    console.info(
+      `[MT5Bridge] Listening on http://${bridgeState.host}:${bridgeState.http_port} and TCP ${bridgeState.host}:${bridgeState.ingest_port}.`,
+    );
+  } catch (err) {
+    mt5BridgeServer = null;
+    console.error('[MT5Bridge] Failed to start local bridge:', err?.message || err);
+  }
+
+  try {
     const { JobManager, setJobManager } = await importFromHere('../mcp/runtime/job-manager.mjs');
     const {
       getAntigravityTask,
@@ -2171,6 +2417,18 @@ app.whenReady().then(async () => {
   }
 
   ipcMain.handle('settings:get', () => publicSettingsSnapshot());
+  ipcMain.handle('invest-mode:get', () => {
+    if (!investModeController) throw new Error('invest_mode_controller_unavailable');
+    return investModeController.getState();
+  });
+  ipcMain.handle('invest-mode:set', (_event, mode) => {
+    if (!investModeController) throw new Error('invest_mode_controller_unavailable');
+    return investModeController.setMode(mode);
+  });
+  ipcMain.handle('invest-mode:kill-switch', () => {
+    if (!investModeController) throw new Error('invest_mode_controller_unavailable');
+    return investModeController.killSwitch();
+  });
   const listPublicConnections = () => {
     if (!connectionService || !connectionRegistry) return [];
     return connectionRegistry.list().map((connection) => {
@@ -3756,6 +4014,11 @@ app.on('before-quit', () => {
   if (serverProcess) serverProcess.kill('SIGTERM');
   else if (serverState.pid) { try { process.kill(serverState.pid, 'SIGTERM'); } catch {} }
   if (bridgeClientInstance) bridgeClientInstance.stopPolling();
+  if (mt5BridgeServer) {
+    const bridge = mt5BridgeServer;
+    mt5BridgeServer = null;
+    void bridge.stop().catch((error) => console.error('[MT5Bridge] Failed to stop local bridge:', error));
+  }
   for (const timer of taskMonitors.values()) clearInterval(timer);
   taskMonitors.clear();
   taskNotifier.setDockBadge('idle');
