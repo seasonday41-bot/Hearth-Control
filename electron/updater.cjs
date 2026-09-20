@@ -161,11 +161,31 @@ async function readAndValidateManifest(updateDirectory, expectedPlatform = proce
   if (manifest.appPath !== PRODUCT_NAME || !isInside(trustedDirectory, appPath) || path.basename(appPath) !== PRODUCT_NAME) {
     throw new Error('Update artifact location is not trusted.');
   }
-  const stat = await fs.promises.lstat(appPath).catch(() => null);
+  let stat;
+  try {
+    stat = await fs.promises.lstat(appPath);
+  } catch (error) {
+    if (process.env.HEARTH_UPDATER_DEBUG === '1') {
+      console.info(
+        '[Updater] app_lstat_raw',
+        error?.code,
+        error?.message,
+      );
+    }
+    stat = null;
+  }
   if (!stat?.isDirectory() || stat.isSymbolicLink()) throw new Error('Update application artifact is missing.');
   let actualChecksum;
   try { actualChecksum = await sha256Directory(appPath); }
-  catch (error) { throw new Error(safeReason(error?.message, 'Update application artifact could not be read.')); }
+  catch (error) {
+    if (process.env.HEARTH_UPDATER_DEBUG === '1') {
+      console.info(
+        '[Updater] tree_hash_raw',
+        error?.message,
+      );
+    }
+    throw new Error(safeReason(error?.message, 'Update application artifact could not be read.'));
+  }
   if (actualChecksum !== manifest.sha256.toLowerCase()) throw new Error('Update artifact checksum did not match.');
   return { ...manifest, appPath, manifestPath, sha256: actualChecksum };
 }
@@ -215,6 +235,9 @@ async function inspectUpdate({ updateDirectory, currentVersion, currentBuildId, 
       error: null,
     };
   } catch (error) {
+    if (process.env.HEARTH_UPDATER_DEBUG === '1') {
+      console.info('[Updater] inspect_raw', error?.message);
+    }
     return { state: UPDATE_STATES.ERROR, currentVersion, currentBuildId, available: null, error: safeReason(error.message) };
   }
 }

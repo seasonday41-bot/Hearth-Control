@@ -2,7 +2,7 @@
   "name": "hearth-control",
   "productName": "Hearth Control",
   "private": true,
-  "version": "0.4.8",
+  "version": "0.4.9",
   "type": "module",
   "description": "A local macOS control center for a desktop MCP workflow.",
   "author": "Hearth Control",
@@ -86,15 +86,28 @@
       "category": "public.app-category.developer-tools",
       "icon": "build/icon.png",
       "target": [
-        { "target": "dmg", "arch": ["arm64"] }
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
       ]
     },
     "dmg": {
       "title": "Hearth Control ${version}",
       "iconSize": 96,
       "contents": [
-        { "x": 140, "y": 220 },
-        { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
+        {
+          "x": 140,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
       ]
     }
   }
