@@ -1094,6 +1094,11 @@ const getUpdaterInfo = () => ({
   isPackaged: app.isPackaged,
 });
 
+const updaterDebug = (phase, detail) => {
+  if (process.env.HEARTH_UPDATER_DEBUG !== '1') return;
+  console.info(`[Updater] ${phase}`, detail ?? '');
+};
+
 const safeRemoteUpdateError = (error) => {
   const message = String(error?.message || '');
   if (/status 404\b/i.test(message)) return 'No published update is currently available.';
@@ -2635,6 +2640,7 @@ app.whenReady().then(async () => {
       remoteUpdateSession = checked.session;
       return checked.result;
     } catch (error) {
+      updaterDebug('check_failed', error?.message);
       remoteUpdateSession = null;
       return { state: localUpdater.UPDATE_STATES.ERROR, currentVersion: info.currentVersion, currentBuildId: info.currentBuildId, available: null, error: safeRemoteUpdateError(error) };
     }
@@ -2643,7 +2649,14 @@ app.whenReady().then(async () => {
     if (!mainWindow || event.sender.id !== mainWindow.webContents.id) throw new Error('Update preparation must come from the local Hearth window.');
     const info = getUpdaterInfo();
     const expectedBuildId = remoteUpdateSession?.state === 'update_available' ? remoteUpdateSession.manifest?.buildId : null;
-    if (!expectedBuildId) throw new Error('Check for a remote update before preparing it.');
+    if (!expectedBuildId) {
+      updaterDebug(
+        'prepare_rejected',
+        `session_state=${remoteUpdateSession?.state ?? 'none'}`,
+      );
+      throw new Error('Check for a remote update before preparing it.');
+    }
+    let phase = 'fetch';
     try {
       remoteUpdateSession = { ...remoteUpdateSession, state: 'downloading' };
       const fetched = await remoteUpdater.fetchAndVerifyUpdate({
@@ -2652,20 +2665,40 @@ app.whenReady().then(async () => {
         currentBuiltAt: info.builtAt,
         isPackaged: info.isPackaged,
       });
+      updaterDebug(
+        'fetch_ok',
+        `build=${fetched.manifest?.buildId ?? 'none'} available=${fetched.updateAvailable}`,
+      );
       if (!fetched.updateAvailable) {
+        updaterDebug('fetch_not_newer', fetched.reason ?? '');
         remoteUpdateSession = null;
         return { state: localUpdater.UPDATE_STATES.UP_TO_DATE, currentVersion: info.currentVersion, currentBuildId: info.currentBuildId, available: null, error: null };
       }
       if (fetched.manifest.buildId !== expectedBuildId) {
+        updaterDebug(
+          'release_changed',
+          `expected=${expectedBuildId} actual=${fetched.manifest.buildId}`,
+        );
         remoteUpdateSession = null;
         return { state: localUpdater.UPDATE_STATES.ERROR, currentVersion: info.currentVersion, currentBuildId: info.currentBuildId, available: null, error: 'The published release changed. Check for updates again.' };
       }
       remoteUpdateSession = { state: 'verifying', manifest: fetched.manifest };
+      phase = 'stage';
       const staged = await remoteUpdateStager.stageVerifiedUpdate({
         manifest: fetched.manifest,
         dmgPath: fetched.dmgPath,
       });
+      updaterDebug('stage_ok', fetched.manifest.buildId);
+      phase = 'local_validate';
       const check = await inspectLocalUpdateDirectory(staged.stagedDir, info);
+      updaterDebug(
+        'local_compare',
+        `manifest=${fetched.manifest.version}@${fetched.manifest.builtAt} current=${info.currentVersion}@${info.builtAt}`,
+      );
+      updaterDebug(
+        'local_validate_state',
+        `${check.state} ${check.error || ''}`,
+      );
       if (check.state !== localUpdater.UPDATE_STATES.UPDATE_READY) {
         throw new Error(check.error || 'The staged update did not pass local updater validation.');
       }
@@ -2674,8 +2707,13 @@ app.whenReady().then(async () => {
         manifest: fetched.manifest,
         stagedDir: staged.stagedDir,
       };
+      updaterDebug('update_ready', fetched.manifest.buildId);
       return check;
     } catch (error) {
+      updaterDebug(
+        `prepare_failed@${phase}`,
+        error?.message,
+      );
       remoteUpdateSession = null;
       return { state: localUpdater.UPDATE_STATES.ERROR, currentVersion: info.currentVersion, currentBuildId: info.currentBuildId, available: null, error: safeRemoteUpdateError(error) };
     }
