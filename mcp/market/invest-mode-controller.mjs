@@ -12,13 +12,14 @@ export const INVEST_MODES = Object.freeze({
 const VALID_MODES = new Set(Object.values(INVEST_MODES));
 const SAFE_STARTUP_MODES = new Set([INVEST_MODES.OFF, INVEST_MODES.MONITOR]);
 
-const stateSnapshot = ({ mode, startupMode, restoreReason }) => Object.freeze({
+const stateSnapshot = ({ mode, startupMode, restoreReason, demoSessionId }) => Object.freeze({
   version: INVEST_MODE_DOCUMENT_VERSION,
   mode,
   startup_mode: startupMode,
   automatic_analysis_enabled: mode !== INVEST_MODES.OFF,
   demo_auto_enabled: mode === INVEST_MODES.DEMO_AUTO,
-  trade_execution_enabled: false,
+  trade_execution_enabled: mode === INVEST_MODES.DEMO_AUTO,
+  demo_session_id: mode === INVEST_MODES.DEMO_AUTO ? demoSessionId : null,
   restore_reason: restoreReason,
 });
 
@@ -53,14 +54,17 @@ export class InvestModeFileStore {
 }
 
 export class InvestModeController {
-  constructor({ store = null } = {}) {
+  constructor({ store = null, randomUUID = crypto.randomUUID } = {}) {
     if (store && (typeof store.load !== 'function' || typeof store.save !== 'function')) {
       throw new Error('invest_mode_store_invalid');
     }
+    if (typeof randomUUID !== 'function') throw new Error('invest_mode_random_uuid_required');
     this.store = store;
+    this.randomUUID = randomUUID;
     this.mode = INVEST_MODES.OFF;
     this.startupMode = INVEST_MODES.OFF;
     this.restoreReason = 'default_off';
+    this.demoSessionId = null;
   }
 
   restore() {
@@ -71,6 +75,7 @@ export class InvestModeController {
       this.mode = INVEST_MODES.OFF;
       this.startupMode = INVEST_MODES.OFF;
       this.restoreReason = 'storage_error_off';
+      this.demoSessionId = null;
       return this.getState();
     }
 
@@ -83,6 +88,7 @@ export class InvestModeController {
 
     this.mode = startupMode;
     this.startupMode = startupMode;
+    this.demoSessionId = null;
     this.restoreReason = document == null
       ? 'default_off'
       : persistedMode === startupMode
@@ -97,6 +103,7 @@ export class InvestModeController {
     if (SAFE_STARTUP_MODES.has(nextMode)) {
       this.mode = nextMode;
       this.startupMode = nextMode;
+      this.demoSessionId = null;
       this.restoreReason = 'runtime_transition';
       this.store?.save({
         version: INVEST_MODE_DOCUMENT_VERSION,
@@ -105,12 +112,16 @@ export class InvestModeController {
       return this.getState();
     }
 
+    if (this.mode !== INVEST_MODES.DEMO_AUTO || !this.demoSessionId) {
+      this.demoSessionId = `demo:${this.randomUUID()}`;
+    }
     this.mode = nextMode;
     this.restoreReason = 'runtime_transition';
     return this.getState();
   }
 
   killSwitch() {
+    this.demoSessionId = null;
     return this.setMode(INVEST_MODES.OFF);
   }
 
@@ -119,6 +130,7 @@ export class InvestModeController {
       mode: this.mode,
       startupMode: this.startupMode,
       restoreReason: this.restoreReason,
+      demoSessionId: this.demoSessionId,
     });
   }
 }

@@ -1579,7 +1579,7 @@ export default function App() {
               <div>
                 <p className="kicker">XAU/USD INVEST</p>
                 <h1>Invest control.</h1>
-                <p className="intro">Monitor each new XAU/USD H1 bar, save its signal, and notify you on this Mac. Trade execution is not enabled.</p>
+                <p className="intro">Monitor XAU/USD, keep evidence, and control the demo-only execution boundary. Live-account execution is blocked.</p>
               </div>
               <div className={`connection-pill ${investStatus?.mode.mode !== 'OFF' ? 'online' : ''}`}><span /> {investStatus?.mode.mode.replace('_', ' ') || 'Loading'}</div>
             </header>
@@ -1588,6 +1588,7 @@ export default function App() {
               <article><span className={`invest-status-dot ${investStatus?.mt5_bridge.snapshots.length ? 'ready' : ''}`} /><div><small>MT5 BRIDGE</small><strong>{investStatus?.mt5_bridge.snapshots.length ? 'Connected' : investStatus?.mt5_bridge.running ? 'Waiting for price' : 'Offline'}</strong><p>{investStatus?.mt5_bridge.snapshots.length ? `${investStatus.mt5_bridge.snapshots[0].broker_symbol} · ${investStatus.mt5_bridge.snapshots.map((item) => item.timeframe).join(', ')}` : 'Open the MT5 EA to stream XAUUSD data.'}</p></div></article>
               <article><span className={`invest-status-dot ${investStatus?.search_ai.ready ? 'ready' : ''}`} /><div><small>SEARCH AI</small><strong>{investStatus?.search_ai.ready ? investStatus.search_ai.approval_required ? 'Ask before research' : 'Ready' : 'Blocked'}</strong><p>Uses fixed-origin market sources. It does not require Browser automation.</p></div></article>
               <article><span className={`invest-status-dot ${investStatus?.invest_ai.ready ? 'ready' : ''}`} /><div><small>INVEST AI</small><strong>{investStatus?.monitor.state === 'analyzing' ? 'Analyzing' : investStatus?.invest_ai.ready ? 'Ready' : 'Unavailable'}</strong><p>AI narrative cannot change direction, confidence, entry, stop loss, or take profit.</p></div></article>
+              <article><span className={`invest-status-dot ${investStatus?.execution.transport_ready && investStatus?.execution.enabled && investStatus?.execution.executor_account_type === 'demo' ? 'ready' : ''}`} /><div><small>DEMO EXECUTOR</small><strong>{investStatus?.execution.enabled ? investStatus.execution.transport_ready ? investStatus.execution.executor_account_type === 'demo' ? 'Armed' : 'Blocked: live account' : 'Waiting for V3 EA' : 'Inactive'}</strong><p>Only internal READY + Risk-approved V2 signals may use the demo command channel. No renderer order button exists.</p></div></article>
             </section>
 
             <section className="soft-panel invest-controller" aria-labelledby="invest-mode-title">
@@ -1597,7 +1598,7 @@ export default function App() {
               </div>
               <div className="invest-mode-explanation">
                 <strong>{investStatus?.mode.mode === 'MONITOR' ? 'Monitor selected' : investStatus?.mode.mode === 'DEMO_AUTO' ? 'Demo Auto selected for this session' : 'Invest is off'}</strong>
-                <p>{investStatus?.mode.mode === 'MONITOR' ? `Watching ${investStatus.monitor.timeframe} for a new MT5 bar. ${investStatus.monitor.state === 'waiting_for_permission' ? 'Waiting for Market Research approval.' : investStatus.monitor.state === 'permission_denied' ? 'Research was denied for this bar.' : investStatus.monitor.state === 'permission_blocked' ? 'Market Research is blocked.' : investStatus.monitor.state === 'waiting_for_price' ? 'Waiting for MT5 price data.' : investStatus.monitor.state === 'analyzing' ? 'Search AI and Invest AI are analyzing now.' : 'A Mac notification will appear after a new signal is saved.'}` : investStatus?.mode.mode === 'DEMO_AUTO' ? 'Signals and notifications are active, but no trades can be sent. DEMO AUTO is never restored after restart.' : 'Market data may still arrive, but Invest will not start analysis or trading.'}</p>
+                <p>{investStatus?.mode.mode === 'MONITOR' ? `Watching ${investStatus.monitor.timeframe} for a new MT5 bar. ${investStatus.monitor.state === 'waiting_for_permission' ? 'Waiting for Market Research approval.' : investStatus.monitor.state === 'permission_denied' ? 'Research was denied for this bar.' : investStatus.monitor.state === 'permission_blocked' ? 'Market Research is blocked.' : investStatus.monitor.state === 'waiting_for_price' ? 'Waiting for MT5 price data.' : investStatus.monitor.state === 'analyzing' ? 'Search AI and Invest AI are analyzing now.' : 'A Mac notification will appear after a new signal is saved.'}` : investStatus?.mode.mode === 'DEMO_AUTO' ? 'The demo execution latch is enabled only for this session. Orders still require an internal READY V2 signal bound to an APPROVE/RESIZE Risk decision and a connected demo-only V3 EA. Automatic V2 coordinator routing is not wired yet.' : 'Market data may still arrive, but Invest will not start analysis or trading.'}</p>
               </div>
 
               <div className="invest-permission-control">
@@ -1608,7 +1609,7 @@ export default function App() {
               </div>
 
               <div className="invest-safety-row">
-                <div><strong>Startup safety is active</strong><p>DEMO AUTO always falls back to OFF after restart. Real trade execution remains disabled.</p></div>
+                <div><strong>Startup safety is active</strong><p>DEMO AUTO always falls back to OFF after restart. KILL SWITCH blocks new demo orders but does not close an already-open position. Live accounts are rejected.</p></div>
                 <button type="button" className="invest-kill-switch" disabled={investBusy || investStatus?.mode.mode === 'OFF'} onClick={() => void useInvestKillSwitch()}>KILL SWITCH</button>
               </div>
               {investError && <p className="invest-error" role="alert">{investError}</p>}
@@ -1622,6 +1623,15 @@ export default function App() {
                 {signal.summary && <p>{signal.summary}</p>}
                 {signal.risks[0] && <small>Risk: {signal.risks[0]}</small>}
               </article>)}</div> : <div className="invest-journal-empty"><strong>No signals yet</strong><p>Set Market Research to Allow or approve the request, select MONITOR, and keep the MT5 EA streaming XAUUSD H1 data.</p></div>}
+            </section>
+
+            <section className="soft-panel invest-journal" aria-labelledby="invest-execution-title">
+              <div className="panel-title"><div><p className="section-kicker">EXECUTION JOURNAL</p><h2 id="invest-execution-title">Demo execution evidence</h2></div><span className="invest-session-label">{investStatus?.executions.length || 0} saved</span></div>
+              {investStatus?.executions.length ? <div className="invest-signal-list">{investStatus.executions.map((execution) => <article key={execution.request_id}>
+                <div className="invest-signal-heading"><span className={`invest-direction direction-${execution.side === 'BUY' ? 'up' : 'down'}`}>{execution.side}</span><strong>{execution.state}</strong><time>{new Date(execution.updated_at).toLocaleString()}</time></div>
+                <div className="invest-signal-levels"><span>Strategy <strong>{execution.strategy}</strong></span><span>Volume <strong>{execution.request.volume}</strong></span><span>SL <strong>{execution.request.stop_loss}</strong></span><span>TP <strong>{execution.request.take_profit}</strong></span></div>
+                <small>{execution.receipt?.reason || execution.error || execution.request_id}</small>
+              </article>)}</div> : <div className="invest-journal-empty"><strong>No demo executions yet</strong><p>Execution evidence appears here only after the internal V2 coordinator submits a READY, Risk-approved signal to the demo-only executor.</p></div>}
             </section>
           </div>
         ) : activeNav === 'Console' ? (

@@ -21,14 +21,26 @@ test('MT5 Bridge Main V1.3 bridge is stopped during Hearth shutdown', () => {
   assert.match(main, /void bridge\.stop\(\)\.catch/);
 });
 
-test('MT5 Bridge Main V1.4 bridge module is loopback data-plane only', () => {
+test('MT5 Bridge Main V1.4 bridge stays loopback-only and exposes no HTTP order-write endpoint', () => {
   const bridge = fs.readFileSync(new URL('../mcp/market/mt5-bridge-server.mjs', import.meta.url), 'utf8');
   assert.match(bridge, /const LOOPBACK_HOST = '127\.0\.0\.1'/);
   assert.doesNotMatch(bridge, /listen\([^\n]*0\.0\.0\.0/);
-  assert.doesNotMatch(bridge, /order_send|positions_get|account_info|trade/i);
+  assert.match(bridge, /executeDemoOrder/);
+  assert.match(bridge, /if \(req\.method !== 'GET'\)/);
+  assert.doesNotMatch(bridge, /\/v1\/demo-order['"]/);
+  assert.doesNotMatch(bridge, /OrderSend|CTrade|PositionOpen|PositionClose/);
 });
 
 test('MT5 Bridge Main V1.5 packaged release includes the MQL5 EA source', () => {
   const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
   assert.ok(pkg.build.files.includes('mql5/**/*'));
+});
+
+test('MT5 Bridge Main V1.6 V3 execution source is packaged alongside read-only V1/V2 sources', () => {
+  const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  assert.ok(pkg.build.files.includes('mql5/**/*'));
+  const v3 = fs.readFileSync(new URL('../mql5/HearthXauDemoExecutorV3.mq5', import.meta.url), 'utf8');
+  assert.match(v3, /ACCOUNT_TRADE_MODE_DEMO/);
+  assert.match(v3, /OrderCheck\(/);
+  assert.match(v3, /OrderSend\(/);
 });

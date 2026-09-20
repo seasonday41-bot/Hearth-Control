@@ -26,7 +26,8 @@ interface InvestModeState {
   startup_mode: 'OFF' | 'MONITOR';
   automatic_analysis_enabled: boolean;
   demo_auto_enabled: boolean;
-  trade_execution_enabled: false;
+  trade_execution_enabled: boolean;
+  demo_session_id: string | null;
   restore_reason: string;
 }
 interface InvestMonitorState {
@@ -37,6 +38,31 @@ interface InvestMonitorState {
   last_signal_at: string | null;
   last_bar_as_of: string | null;
   last_error: string | null;
+}
+interface DemoExecutionState {
+  state: 'idle' | 'executing' | 'unavailable';
+  demo_session_id: string | null;
+  enabled: boolean;
+  transport_ready: boolean;
+  executor_account_type: 'demo' | 'live' | null;
+  last_execution_at: string | null;
+  last_error: string | null;
+}
+interface DemoExecutionRecord {
+  version: 'demo-execution-journal-v1';
+  request_id: string;
+  proposal_id: string;
+  risk_decision_id: string;
+  demo_session_id: string;
+  strategy: 'SMC_IDM' | 'HARMONIC_PRZ';
+  side: 'BUY' | 'SELL';
+  state: 'PREPARED' | 'SENT' | 'FILLED' | 'REJECTED' | 'DUPLICATE' | 'UNCERTAIN';
+  attempts: number;
+  created_at: string;
+  updated_at: string;
+  request: { volume: number; reference_price: number; stop_loss: number; take_profit: number };
+  receipt: null | { status: 'FILLED' | 'REJECTED' | 'DUPLICATE'; reason: string; fill_price: number | null; volume: number | null };
+  error: string | null;
 }
 interface InvestSignal {
   version: 'invest-signal-journal-v1';
@@ -58,7 +84,20 @@ interface InvestStatus {
   mode: InvestModeState;
   monitor: InvestMonitorState;
   signals: InvestSignal[];
-  mt5_bridge: { running: boolean; host?: string; http_port?: number; ingest_port?: number; snapshots: Array<{ timeframe: string; broker_symbol: string; as_of: string; age_ms: number; bar_count: number }> };
+  execution: DemoExecutionState;
+  executions: DemoExecutionRecord[];
+  mt5_bridge: {
+    running: boolean;
+    host?: string;
+    http_port?: number;
+    ingest_port?: number;
+    snapshots: Array<{ timeframe: string; broker_symbol: string; as_of: string; age_ms: number; bar_count: number }>;
+    risk_snapshot?: { account_type: 'demo' | 'live'; broker_symbol: string; as_of: string; age_ms: number; open_risk_complete: boolean } | null;
+    executor_ready?: boolean;
+    executor_account_type?: 'demo' | 'live' | null;
+    executor_broker_symbol?: string | null;
+    executor_age_ms?: number | null;
+  };
   search_ai: { permission: PermissionValue; ready: boolean; approval_required: boolean };
   invest_ai: { ready: boolean };
 }

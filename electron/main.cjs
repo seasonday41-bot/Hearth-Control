@@ -50,6 +50,8 @@ let mt5BridgeServer = null;
 let investModeController = null;
 let investMonitor = null;
 let investSignalJournal = null;
+let demoAutoExecutor = null;
+let demoExecutionJournal = null;
 let connectionRegistry = null;
 let credentialStore = null;
 let connectionService = null;
@@ -341,6 +343,16 @@ const publicInvestStatus = () => {
       last_signal_at: null, last_bar_as_of: null, last_error: null,
     },
     signals: investSignalJournal?.list?.() ?? [],
+    execution: demoAutoExecutor?.getState?.() ?? {
+      state: 'unavailable',
+      demo_session_id: investModeController.getState().demo_session_id,
+      enabled: false,
+      transport_ready: false,
+      executor_account_type: null,
+      last_execution_at: null,
+      last_error: null,
+    },
+    executions: demoExecutionJournal?.list?.() ?? [],
     mt5_bridge: bridge,
     search_ai: { permission, ready: permission !== 'Blocked', approval_required: permission === 'Ask' },
     invest_ai: { ready: true },
@@ -2296,6 +2308,36 @@ app.whenReady().then(async () => {
   }
 
   try {
+    if (!mt5BridgeServer) throw new Error('mt5_bridge_unavailable');
+    const {
+      DemoAutoExecutor,
+      DemoExecutionJournal,
+      DemoExecutionJournalFileStore,
+    } = await importFromHere('../mcp/market/demo-auto-executor.mjs');
+    demoExecutionJournal = new DemoExecutionJournal({
+      store: new DemoExecutionJournalFileStore({
+        storagePath: path.join(app.getPath('userData'), 'demo-executions.json'),
+      }),
+    });
+    demoExecutionJournal.load();
+    demoAutoExecutor = new DemoAutoExecutor({
+      getMode: () => investModeController?.getState?.() ?? {
+        mode: 'OFF',
+        demo_auto_enabled: false,
+        trade_execution_enabled: false,
+        demo_session_id: null,
+      },
+      transport: mt5BridgeServer,
+      journal: demoExecutionJournal,
+    });
+    console.info('[DemoExecutor] Execution core initialized; DEMO_AUTO remains session-scoped.');
+  } catch (err) {
+    demoAutoExecutor = null;
+    demoExecutionJournal = null;
+    console.error('[DemoExecutor] Failed to initialize:', err?.message || err);
+  }
+
+  try {
     const { InvestMonitor, InvestSignalJournal, InvestSignalJournalFileStore } = await importFromHere('../mcp/market/invest-monitor.mjs');
     const { runLiveXauInvestment } = await importFromHere('../mcp/market/live-runtime.mjs');
     investSignalJournal = new InvestSignalJournal({
@@ -2507,12 +2549,14 @@ app.whenReady().then(async () => {
     if (!investModeController) throw new Error('invest_mode_controller_unavailable');
     const state = investModeController.setMode(mode);
     investMonitor?.syncMode?.();
+    sendInvestUpdate();
     return state;
   });
   ipcMain.handle('invest-mode:kill-switch', () => {
     if (!investModeController) throw new Error('invest_mode_controller_unavailable');
     const state = investModeController.killSwitch();
     investMonitor?.syncMode?.();
+    sendInvestUpdate();
     return state;
   });
   ipcMain.handle('invest-status:get', () => publicInvestStatus());
@@ -4135,6 +4179,8 @@ app.on('before-quit', () => {
   if (serverProcess) serverProcess.kill('SIGTERM');
   else if (serverState.pid) { try { process.kill(serverState.pid, 'SIGTERM'); } catch {} }
   if (bridgeClientInstance) bridgeClientInstance.stopPolling();
+  demoAutoExecutor = null;
+  demoExecutionJournal = null;
   if (mt5BridgeServer) {
     const bridge = mt5BridgeServer;
     mt5BridgeServer = null;

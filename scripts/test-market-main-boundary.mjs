@@ -66,7 +66,7 @@ test('Market Main V1.6 Invest Mode Controller restores before exposing bounded l
   assert.match(preload, /investStatusGet: \(\) => ipcRenderer\.invoke\('invest-status:get'\)/);
 });
 
-test('Market Main V1.7 monitor journals before notifying and remains execution-free', () => {
+test('Market Main V1.7 monitor remains separate from the session-bound demo executor', () => {
   assert.match(main, /new InvestSignalJournal/);
   assert.match(main, /new InvestMonitor/);
   assert.match(main, /invest-signals\.json/);
@@ -74,5 +74,17 @@ test('Market Main V1.7 monitor journals before notifying and remains execution-f
   assert.match(main, /requestPermission: requestInvestMonitorPermission/);
   assert.match(main, /investMonitor\?\.syncMode\?\.\(\)/);
   assert.match(main, /investMonitor\.stop\(\)/);
-  assert.doesNotMatch(main, /sendOrder|placeOrder|executeTrade/);
+  assert.match(main, /new DemoExecutionJournal/);
+  assert.match(main, /demo-executions\.json/);
+  assert.match(main, /new DemoAutoExecutor/);
+  assert.match(main, /transport: mt5BridgeServer/);
+  assert.doesNotMatch(main, /ipcMain\.handle\(['"](?:demo-order|invest-execute|trade-execute)/);
+  assert.doesNotMatch(preload, /sendOrder|placeOrder|executeTrade|demoOrder|investExecute/);
+});
+
+test('Market Main V1.8 DEMO_AUTO execution session is visible in status but no direct renderer execution API exists', () => {
+  assert.match(main, /demoAutoExecutor\?\.getState/);
+  assert.match(main, /demoExecutionJournal\?\.list/);
+  assert.match(main, /sendInvestUpdate\(\)/);
+  assert.doesNotMatch(preload, /executeDemoOrder|demoExecutionSubmit|riskDecisionSubmit/);
 });

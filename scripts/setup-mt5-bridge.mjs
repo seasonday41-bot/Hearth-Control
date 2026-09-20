@@ -3,7 +3,23 @@ import os from 'node:os';
 import path from 'node:path';
 
 const home = os.homedir();
-const source = path.resolve('mql5/HearthXauBridge.mq5');
+const sources = [
+  {
+    name: 'HearthXauBridge.mq5',
+    path: path.resolve('mql5/HearthXauBridge.mq5'),
+    role: 'market_only_v1',
+  },
+  {
+    name: 'HearthXauBridgeV2.mq5',
+    path: path.resolve('mql5/HearthXauBridgeV2.mq5'),
+    role: 'market_plus_read_only_demo_risk_telemetry',
+  },
+  {
+    name: 'HearthXauDemoExecutorV3.mq5',
+    path: path.resolve('mql5/HearthXauDemoExecutorV3.mq5'),
+    role: 'demo_only_execution_plus_market_and_risk_telemetry',
+  },
+];
 const mobileBundle = '/Applications/MetaTrader 5.app/Wrapper/MetaTrader5Terminal.app';
 const officialInstaller =
   'https://download.terminal.free/cdn/web/metaquotes.ltd/mt5/MetaTrader5.pkg.zip';
@@ -44,8 +60,13 @@ const walk = (root, maxDepth = 10) => {
   return found;
 };
 
-if (!fs.existsSync(source)) {
-  console.error(JSON.stringify({ ok: false, error: 'mt5_ea_source_missing', source }));
+const missingSources = sources.filter((item) => !fs.existsSync(item.path));
+if (missingSources.length > 0) {
+  console.error(JSON.stringify({
+    ok: false,
+    error: 'mt5_ea_source_missing',
+    missing_sources: missingSources,
+  }));
   process.exit(2);
 }
 
@@ -79,42 +100,51 @@ if (expertsDirs.length === 0) {
 
 const results = [];
 for (const expertsDir of expertsDirs) {
-  const destination = path.join(expertsDir, 'HearthXauBridge.mq5');
-  if (fs.existsSync(destination)) {
-    if (!sameFile(source, destination)) {
+  for (const source of sources) {
+    const destination = path.join(expertsDir, source.name);
+    if (fs.existsSync(destination)) {
+      if (!sameFile(source.path, destination)) {
+        results.push({
+          experts_dir: expertsDir,
+          source: source.path,
+          role: source.role,
+          status: 'conflict',
+          destination,
+        });
+        continue;
+      }
       results.push({
         experts_dir: expertsDir,
-        status: 'conflict',
+        source: source.path,
+        role: source.role,
+        status: 'already_installed',
         destination,
       });
       continue;
     }
+
+    fs.copyFileSync(source.path, destination, fs.constants.COPYFILE_EXCL);
     results.push({
       experts_dir: expertsDir,
-      status: 'already_installed',
+      source: source.path,
+      role: source.role,
+      status: 'installed',
       destination,
     });
-    continue;
   }
-
-  fs.copyFileSync(source, destination, fs.constants.COPYFILE_EXCL);
-  results.push({
-    experts_dir: expertsDir,
-    status: 'installed',
-    destination,
-  });
 }
 
 const conflicts = results.filter((item) => item.status === 'conflict');
 console.log(JSON.stringify({
   ok: conflicts.length === 0,
-  source,
+  sources,
   results,
   manual_steps: [
-    'Open MetaEditor and compile HearthXauBridge.mq5.',
+    'Open MetaEditor and compile HearthXauDemoExecutorV3.mq5 for DEMO_AUTO execution, or HearthXauBridgeV2.mq5 for read-only Invest V2 telemetry.',
     'In MetaTrader 5 Desktop: Tools > Options > Expert Advisors, add 127.0.0.1 to allowed addresses.',
-    'Open your broker XAUUSD/Gold chart and attach HearthXauBridge.',
-    'Keep Hearth Control running; the EA pushes read-only market bars to TCP 127.0.0.1:8766.',
+    'Open your broker XAUUSD/Gold chart and attach exactly one HearthXauDemoExecutorV3 for demo execution; use HearthXauBridgeV2 when you want read-only telemetry only.',
+    'Use HearthXauBridge.mq5 only when you want the original market-only V1 behavior.',
+    'Keep Hearth Control running; the V2 EA pushes market bars plus read-only demo risk telemetry to TCP 127.0.0.1:8766.',
   ],
 }, null, 2));
 

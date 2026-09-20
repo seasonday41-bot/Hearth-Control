@@ -20,9 +20,18 @@ test('MT5 Setup V1.2 searches only known MetaQuotes Desktop data roots', () => {
 test('MT5 Setup V1.3 will not overwrite a conflicting EA file', () => {
   assert.match(source, /COPYFILE_EXCL/);
   assert.match(source, /status: 'conflict'/);
-  assert.match(source, /sameFile\(source, destination\)/);
+  assert.match(source, /sameFile\(source\.path, destination\)/);
 });
 
 test('MT5 Setup V1.4 points only to the official MetaQuotes Desktop installer host', () => {
   assert.match(source, /https:\/\/download\.terminal\.free\/cdn\/web\/metaquotes\.ltd\/mt5\/MetaTrader5\.pkg\.zip/);
+});
+
+test('MT5 Setup V2.5 installs V1, read-only V2, and demo-only V3 without overwriting conflicts', () => {
+  assert.match(source, /HearthXauBridge\.mq5/);
+  assert.match(source, /HearthXauBridgeV2\.mq5/);
+  assert.match(source, /HearthXauDemoExecutorV3\.mq5/);
+  assert.match(source, /market_only_v1/);
+  assert.match(source, /market_plus_read_only_demo_risk_telemetry/);
+  assert.match(source, /demo_only_execution_plus_market_and_risk_telemetry/);
 });
