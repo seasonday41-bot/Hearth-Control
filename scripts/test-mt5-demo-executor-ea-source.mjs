@@ -49,3 +49,19 @@ test('MT5 Demo EA V3.6 there is no live-account override or remote HTTP executio
   assert.doesNotMatch(source, /LIVE_AUTO|allow_live|force_live|WebRequest\(/i);
   assert.match(source, /ACCOUNT_TRADE_MODE_DEMO/);
 });
+
+test('MT5 Demo EA V3.7 streams fixed H1/M15/M5 snapshots for the V2 coordinator', () => {
+  assert.match(source, /BuildMarketSnapshotJson\(PERIOD_H1\)/);
+  assert.match(source, /BuildMarketSnapshotJson\(PERIOD_M15\)/);
+  assert.match(source, /BuildMarketSnapshotJson\(PERIOD_M5\)/);
+  assert.match(source, /CopyRates\(_Symbol, timeframeValue/);
+  assert.doesNotMatch(source, /InpTimeframe/);
+});
+
+test('MT5 Demo EA V3.8 normalizes broker timestamps to UTC and checks command expiry in GMT', () => {
+  assert.match(source, /BrokerUtcOffsetSeconds\(\)/);
+  assert.match(source, /ToUtcEpoch\(rates\[index\]\.time\)/);
+  assert.match(source, /"as_of\\":%I64d/);
+  assert.match(source, /\(long\)TimeGMT\(\)/);
+  assert.match(source, /if\(TimeGMT\(\) > \(datetime\)expiresEpoch\)/);
+});

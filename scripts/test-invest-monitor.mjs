@@ -32,7 +32,12 @@ const makeMonitor = ({ permission = 'Allow', automatic = true, run = async () =>
   const monitor = new InvestMonitor({
     getMode: () => ({ automatic_analysis_enabled: automatic }),
     getPermission: () => permission,
-    getBridgeStatus: () => ({ snapshots: [{ timeframe: 'H1', as_of: '2026-09-20T15:00:00.000Z' }] }),
+    getBridgeStatus: () => ({ snapshots: [{
+      timeframe: 'H1',
+      as_of: '2026-09-20T15:00:10.000Z',
+      latest_bar_time: '2026-09-20T16:00:00.000Z',
+      latest_closed_bar_time: '2026-09-20T15:00:00.000Z',
+    }] }),
     requestPermission: request,
     runInvestment: run,
     journal,
@@ -134,4 +139,27 @@ test('Invest Monitor V1.7 malformed stored entries cannot break the journal UI c
   assert.deepEqual(signals[0].entry_zone, []);
   assert.deepEqual(signals[0].targets, []);
   assert.deepEqual(signals[0].risks, ['valid']);
+});
+
+
+test('Invest Monitor V1.8 push-time changes inside one H1 bar do not trigger duplicate analysis', async () => {
+  let runs = 0;
+  let pushTime = '2026-09-20T15:00:10.000Z';
+  const fixture = makeMonitor({ run: async () => { runs += 1; return result('2026-09-20T15:00:00.000Z'); } });
+  fixture.monitor.getBridgeStatus = () => ({
+    snapshots: [{
+      timeframe: 'H1',
+      as_of: pushTime,
+      latest_bar_time: '2026-09-20T16:00:00.000Z',
+      latest_closed_bar_time: '2026-09-20T15:00:00.000Z',
+    }],
+  });
+
+  await fixture.monitor.tick();
+  pushTime = '2026-09-20T15:38:37.000Z';
+  await fixture.monitor.tick();
+
+  assert.equal(runs, 1);
+  assert.equal(fixture.journal.list().length, 1);
+  assert.equal(fixture.monitor.getState().last_bar_as_of, '2026-09-20T15:00:00.000Z');
 });

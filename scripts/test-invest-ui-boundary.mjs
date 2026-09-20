@@ -18,16 +18,20 @@ test('Invest UI exposes the three bounded modes and kill switch', () => {
   assert.doesNotMatch(app, /sendOrder|placeOrder|executeTrade|executeDemoOrder/);
 });
 
-test('Invest UI exposes monitor, demo-executor status, journals, and restart safety', () => {
+test('Invest UI separates V1 analysis, V2 setups, explicit Risk, and execution evidence', () => {
   assert.match(app, /demo-only execution boundary/);
   assert.match(app, /A Mac notification will appear after a new signal is saved/);
   assert.match(app, /DEMO EXECUTOR/);
   assert.match(app, /No renderer order button exists/);
-  assert.match(app, /SIGNAL JOURNAL/);
+  assert.match(app, /V2 TECHNICAL SETUPS/);
+  assert.match(app, /H1 context · M15 setup · M5 trigger/);
+  assert.match(app, /DEMO RISK RULES/);
+  assert.match(app, /Hearth does not create hidden risk defaults/);
+  assert.match(app, /V1 ANALYSIS · INFORMATION ONLY/);
   assert.match(app, /EXECUTION JOURNAL/);
-  assert.match(app, /investStatus\.signals\.map/);
+  assert.match(app, /investStatus\.signals/);
   assert.match(app, /investStatus\.executions\.map/);
-  assert.match(app, /Automatic V2 coordinator routing is not wired yet/);
+  assert.match(app, /window\.controlApp\.investRiskConfigSet/);
   assert.match(app, /KILL SWITCH blocks new demo orders/);
   assert.match(app, /Live accounts are rejected/);
 });
@@ -46,5 +50,13 @@ test('Invest page includes responsive status and controller styling', () => {
   assert.match(css, /\.invest-mode-buttons/);
   assert.match(css, /\.invest-kill-switch/);
   assert.match(css, /\.invest-signal-list/);
+  assert.match(css, /\.invest-v2-grid/);
+  assert.match(css, /\.invest-risk-grid/);
   assert.match(css, /@media \(max-width: 700px\)/);
+});
+
+test('Invest UI shows one latest V1 card by default and keeps older analysis behind History', () => {
+  assert.ok(app.includes('showV1History ? investStatus.signals : investStatus.signals.slice(0, 1)'));
+  assert.ok(app.includes('History ('));
+  assert.ok(app.includes('Hide history'));
 });

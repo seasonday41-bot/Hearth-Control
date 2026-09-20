@@ -85,6 +85,8 @@ test('MT5 Bridge V1.3 TCP ingest becomes HTTP /v1/bars snapshot', async () => {
     const health = await fetch('http://127.0.0.1:18765/health').then((res) => res.json());
     assert.equal(health.ok, true);
     assert.equal(health.snapshots[0].bar_count, 40);
+    assert.equal(health.snapshots[0].latest_bar_time, new Date((baseEpoch + (60 * 60 * 39)) * 1000).toISOString());
+    assert.equal(health.snapshots[0].latest_closed_bar_time, new Date((baseEpoch + (60 * 60 * 38)) * 1000).toISOString());
   } finally {
     await bridge.stop();
   }

@@ -88,3 +88,24 @@ test('Market Main V1.8 DEMO_AUTO execution session is visible in status but no d
   assert.match(main, /sendInvestUpdate\(\)/);
   assert.doesNotMatch(preload, /executeDemoOrder|demoExecutionSubmit|riskDecisionSubmit/);
 });
+
+test('Market Main V1.9 Live V2 coordinator and explicit risk config stay internal to Hearth main', () => {
+  assert.match(main, /new DemoRiskConfigController/);
+  assert.match(main, /demo-risk-config\.json/);
+  assert.match(main, /new LiveV2Coordinator/);
+  assert.match(main, /new Mt5LoopbackAdapter/);
+  assert.match(main, /new Mt5RiskLoopbackAdapter/);
+  assert.match(main, /getRiskConfig: \(\) => demoRiskConfigController/);
+  assert.match(main, /executionJournal: demoExecutionJournal/);
+  assert.match(main, /ipcMain\.handle\('invest-risk-config:get'/);
+  assert.match(main, /ipcMain\.handle\('invest-risk-config:set'/);
+  assert.match(preload, /investRiskConfigGet/);
+  assert.match(preload, /investRiskConfigSet/);
+  assert.doesNotMatch(preload, /executeDemoOrder|evaluateXauRisk|technicalSignalSubmit/);
+});
+
+
+test('Market Main V1.10 V1 monitor is closed-H1 only and cannot key analysis from EA push time', () => {
+  assert.match(main, /runLiveXauInvestment/);
+  assert.match(main, /closedBarsOnly: true/);
+});

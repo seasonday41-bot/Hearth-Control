@@ -203,3 +203,53 @@ test('Market Live V1.4 live investment executes Search -> MT5 -> Invest', async 
   assert.equal(result.analysis.direction, 'UP');
   assert.equal(result.narrative.risks.length, 1);
 });
+
+
+test('Market Live V1.5 closedBarsOnly excludes the forming H1 candle and anchors analysis time to the last close', async () => {
+  const bars = Array.from({ length: 60 }, (_, index) => {
+    const close = 2500 + index;
+    return {
+      time: new Date(Date.UTC(2026, 8, 20, index, 0, 0)).toISOString(),
+      open: close - 1,
+      high: close + 2,
+      low: close - 2,
+      close,
+      volume: 1000 + index,
+    };
+  });
+  const mt5 = {
+    async getBars() {
+      return {
+        symbol: 'XAUUSD',
+        timeframe: 'H1',
+        as_of: '2026-09-22T12:34:56.000Z',
+        source: 'MT5',
+        bars,
+      };
+    },
+  };
+  const narrator = {
+    async explain() {
+      return {
+        summary: 'Closed-bar analysis.',
+        bull_case: 'Measured.',
+        base_case: 'Measured.',
+        bear_case: 'Measured.',
+        risks: [],
+      };
+    },
+  };
+
+  const result = await runLiveXauInvestment({
+    searchProvider: rawSearchProvider,
+    synthesizer,
+    mt5,
+    narrator,
+    generatedAt: iso,
+    closedBarsOnly: true,
+  });
+
+  assert.equal(result.market.bar_count, 59);
+  assert.equal(result.market.as_of, bars.at(-2).time);
+  assert.equal(result.analysis.as_of, bars.at(-2).time);
+});

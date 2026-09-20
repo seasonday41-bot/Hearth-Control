@@ -292,6 +292,8 @@ export const createMt5SocketBridge = ({
       broker_symbol: entry.snapshot.broker_symbol,
       timeframe: entry.snapshot.timeframe,
       as_of: entry.snapshot.as_of,
+      latest_bar_time: entry.snapshot.bars.at(-1)?.time ?? null,
+      latest_closed_bar_time: entry.snapshot.bars.at(-2)?.time ?? null,
       received_at: new Date(entry.receivedAt).toISOString(),
       age_ms: Math.max(0, now() - entry.receivedAt),
       bar_count: entry.snapshot.bars.length,

@@ -114,6 +114,7 @@ export const runLiveXauInvestment = async ({
   generatedAt = new Date().toISOString(),
   timeframe = 'H1',
   barLimit = 250,
+  closedBarsOnly = false,
   signal,
 } = {}) => {
   const research = await runLiveXauSearch({
@@ -123,12 +124,20 @@ export const runLiveXauInvestment = async ({
     generatedAt,
     signal,
   });
-  const market = await mt5.getBars({
+  const rawMarket = await mt5.getBars({
     symbol: 'XAUUSD',
     timeframe,
     limit: barLimit,
     signal,
   });
+  const market = closedBarsOnly
+    ? {
+        ...rawMarket,
+        as_of: rawMarket.bars.at(-2)?.time || rawMarket.as_of,
+        bars: rawMarket.bars.slice(0, -1),
+      }
+    : rawMarket;
+  if (closedBarsOnly && market.bars.length < 20) throw new Error('mt5_insufficient_closed_bars');
   const result = await runXauInvestSpecialist({
     market,
     research,

@@ -1,6 +1,6 @@
 # Hearth Invest V2 — XAU/USD Multi-Timeframe Technical + Independent Risk
 
-Status: skill foundation + Shared Swing Core + SMC/IDM + Harmonic PRZ + technical-signal-v1 + Outcome Tracker + Independent Risk Gate + Demo Broker/Account Data Plane + DEMO_AUTO Execution Core implemented; live V2 coordinator and real MT5 demo smoke remain pending.
+Status: skill foundation + Shared Swing Core + SMC/IDM + Harmonic PRZ + technical-signal-v1 + Outcome Tracker + Independent Risk Gate + Demo Broker/Account Data Plane + DEMO_AUTO Execution Core + Live V2 Coordinator implemented; explicit user risk configuration and real MT5 demo execution smoke remain operational gates.
 
 ## Objective
 
@@ -387,13 +387,23 @@ A high technical score is not permission to exceed risk policy.
 - KILL SWITCH disables the current execution session and blocks new orders; it deliberately does not auto-close already-open positions;
 - synthetic end-to-end validation covers READY signal -> Risk Gate -> session-bound executor -> MT5 command -> FILLED receipt.
 
-### Slice 8B — Live V2 Coordinator ⏳
-- do not route the legacy H1 Invest V1 signal journal into the executor;
-- add a deterministic live coordinator that requires H1 context + M15 setup + M5 trigger and only submits `READY technical-signal-v1`;
-- load explicit demo risk configuration before evaluating Risk; do not invent hidden risk defaults;
-- read V2 broker/account telemetry immediately before Risk and again require fresh quote state at execution;
-- keep SMC/IDM and Harmonic independent, dedupe by stable technical signal ID, and use the execution journal to prevent repeat orders;
-- complete a real MetaEditor compile plus broker DEMO smoke before considering Slice 8 fully operational.
+### Slice 8B — Live V2 Coordinator ✅
+- implemented in `mcp/market/live-v2-coordinator.mjs`;
+- the legacy V1 H1 analysis journal remains informational and has no route to the executor;
+- V2 reads H1, M15, and M5 independently and removes the currently-forming bar from every timeframe before analysis;
+- a cycle runs only when the latest confirmed M5 bar changes, preventing repeated evaluation of the same close;
+- SMC/IDM and Harmonic remain independent engines and are shown separately as INVALID / PRE_SIGNAL / READY;
+- only a normalized `READY technical-signal-v1` can proceed toward Risk;
+- if both strategies become READY on the same cycle, execution fails closed with `multiple_ready_setups` rather than inventing a priority;
+- `mcp/market/demo-risk-config.mjs` persists explicit user-owned demo risk rules; no hidden defaults are created;
+- missing or invalid risk configuration blocks execution while technical monitoring continues;
+- fresh MT5 account/broker telemetry is fetched immediately before deterministic Risk evaluation;
+- Risk APPROVE/RESIZE is required before the session-bound demo executor is called;
+- any proposal already present in the persistent execution journal is not submitted again;
+- an uncertain executor failure trips an in-memory coordinator circuit breaker and blocks further automatic submissions;
+- V3 EA now streams fixed H1/M15/M5 snapshots over the existing loopback socket while preserving the demo-only order boundary;
+- MetaEditor compile of the updated V3 source passes 0 errors / 0 warnings;
+- the remaining operational gate is a real broker DEMO smoke after the updated EA is reloaded and explicit demo risk rules are saved.
 
 Live-account automation is a separate future decision and is not implied by DEMO_AUTO.
 
@@ -422,6 +432,50 @@ expires_at / expires_epoch
 The V3 EA returns `execution_receipt v1` with `FILLED`, `REJECTED`, or `DUPLICATE`, plus retcode/ticket/fill evidence. A receipt that says live account is rejected by Hearth even if all local checks previously passed.
 
 No renderer IPC or HTTP endpoint can submit an order. The only execution transport is the in-process bridge object owned by Hearth main.
+## V1 closed-bar journal policy
+
+The legacy V1 analysis monitor is informational only and now evaluates each confirmed H1 bar at most once.
+
+- the bridge health status exposes both the newest received bar and the newest confirmed/closed bar;
+- V1 deduplication keys use the closed H1 timestamp, not the EA snapshot push timestamp;
+- V1 investment analysis removes the currently-forming H1 candle before the deterministic engine runs;
+- repeated EA pushes inside the same H1 candle do not create new analysis entries;
+- the Invest page shows only the newest V1 analysis card by default, with older saved entries available behind the History control.
+
+This prevents several near-identical V1 cards from appearing during one H1 candle and keeps V1 visually separate from V2 setup/execution state.
+
+## Live V2 coordinator policy
+
+The coordinator is intentionally separate from the legacy V1 analysis monitor.
+
+```text
+V1:
+H1 -> Search/Invest narrative -> local analysis journal
+                               -> never execution
+
+V2:
+confirmed H1 context
+ + confirmed M15 setup
+ + confirmed M5 trigger
+ -> SMC/IDM + Harmonic
+ -> technical-signal-v1
+ -> explicit demo Risk policy
+ -> APPROVE / RESIZE
+ -> DEMO_AUTO executor
+```
+
+The current forming H1/M15/M5 candle is excluded before either technical engine runs. This prevents close-confirmation rules from acting on an unfinished bar.
+
+Risk configuration is stored separately as `demo-risk-config-v1`. Until the user explicitly saves every required risk boundary, DEMO_AUTO may be armed but the coordinator returns `risk_config_required` and does not submit an order.
+
+The UI now separates:
+
+- V1 Analysis — informational only;
+- V2 Technical Setups — SMC/IDM and Harmonic states;
+- Demo Risk Rules — explicit user-owned limits;
+- Risk Decision — APPROVE / RESIZE / REJECT;
+- Execution Journal — broker command/receipt evidence.
+
 ## Success criteria
 
 V2 foundation is correct when:

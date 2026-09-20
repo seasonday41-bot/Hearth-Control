@@ -181,6 +181,20 @@ export default function App() {
   const [investStatus, setInvestStatus] = useState<InvestStatus | null>(null);
   const [investBusy, setInvestBusy] = useState(false);
   const [investError, setInvestError] = useState('');
+  const [demoRiskDirty, setDemoRiskDirty] = useState(false);
+  const [showV1History, setShowV1History] = useState(false);
+  const [demoRiskForm, setDemoRiskForm] = useState({
+    riskPerTradePct: '',
+    maxDailyLossPct: '',
+    maxDrawdownPct: '',
+    maxOpenRiskPct: '',
+    maxPositions: '',
+    maxSpreadPoints: '',
+    maxSlippagePoints: '',
+    minStopPoints: '',
+    maxStopPoints: '',
+    requestedVolume: '',
+  });
 
   // Bridge states
   const [bridgeState, setBridgeState] = useState<BridgeState | null>(null);
@@ -395,6 +409,23 @@ export default function App() {
     });
     return () => { active = false; };
   }, [activeNav]);
+
+  useEffect(() => {
+    const config = investStatus?.risk_config.config;
+    if (!config || demoRiskDirty) return;
+    setDemoRiskForm({
+      riskPerTradePct: String(config.risk_fraction_per_trade * 100),
+      maxDailyLossPct: String(config.max_daily_loss_fraction * 100),
+      maxDrawdownPct: String(config.max_drawdown_fraction * 100),
+      maxOpenRiskPct: String(config.max_total_open_risk_fraction * 100),
+      maxPositions: String(config.max_positions),
+      maxSpreadPoints: String(config.max_spread_points),
+      maxSlippagePoints: String(config.max_slippage_points),
+      minStopPoints: String(config.min_stop_points),
+      maxStopPoints: String(config.max_stop_points),
+      requestedVolume: config.requested_volume == null ? '' : String(config.requested_volume),
+    });
+  }, [investStatus?.risk_config.config, demoRiskDirty]);
 
   useEffect(() => {
     if (activeNav !== 'Local Chat') return;
@@ -745,6 +776,38 @@ export default function App() {
       const next = await window.controlApp.investModeKillSwitch();
       setInvestStatus((current) => current ? { ...current, mode: next } : null);
       flash('Invest stopped and returned to OFF');
+    } catch (error) {
+      setInvestError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setInvestBusy(false);
+    }
+  };
+
+  const saveDemoRiskConfig = async () => {
+    if (investBusy) return;
+    setInvestBusy(true);
+    setInvestError('');
+    try {
+      const number = (value: string, field: string) => {
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed)) throw new Error(`${field} is required`);
+        return parsed;
+      };
+      const next = await window.controlApp.investRiskConfigSet({
+        risk_fraction_per_trade: number(demoRiskForm.riskPerTradePct, 'Risk per trade') / 100,
+        max_daily_loss_fraction: number(demoRiskForm.maxDailyLossPct, 'Max daily loss') / 100,
+        max_drawdown_fraction: number(demoRiskForm.maxDrawdownPct, 'Max drawdown') / 100,
+        max_total_open_risk_fraction: number(demoRiskForm.maxOpenRiskPct, 'Max open risk') / 100,
+        max_positions: number(demoRiskForm.maxPositions, 'Max positions'),
+        max_spread_points: number(demoRiskForm.maxSpreadPoints, 'Max spread points'),
+        max_slippage_points: number(demoRiskForm.maxSlippagePoints, 'Max slippage points'),
+        min_stop_points: number(demoRiskForm.minStopPoints, 'Min stop points'),
+        max_stop_points: number(demoRiskForm.maxStopPoints, 'Max stop points'),
+        requested_volume: demoRiskForm.requestedVolume.trim() ? number(demoRiskForm.requestedVolume, 'Requested volume') : null,
+      });
+      setInvestStatus((current) => current ? { ...current, risk_config: next } : current);
+      setDemoRiskDirty(false);
+      flash('Demo risk rules saved');
     } catch (error) {
       setInvestError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -1598,7 +1661,7 @@ export default function App() {
               </div>
               <div className="invest-mode-explanation">
                 <strong>{investStatus?.mode.mode === 'MONITOR' ? 'Monitor selected' : investStatus?.mode.mode === 'DEMO_AUTO' ? 'Demo Auto selected for this session' : 'Invest is off'}</strong>
-                <p>{investStatus?.mode.mode === 'MONITOR' ? `Watching ${investStatus.monitor.timeframe} for a new MT5 bar. ${investStatus.monitor.state === 'waiting_for_permission' ? 'Waiting for Market Research approval.' : investStatus.monitor.state === 'permission_denied' ? 'Research was denied for this bar.' : investStatus.monitor.state === 'permission_blocked' ? 'Market Research is blocked.' : investStatus.monitor.state === 'waiting_for_price' ? 'Waiting for MT5 price data.' : investStatus.monitor.state === 'analyzing' ? 'Search AI and Invest AI are analyzing now.' : 'A Mac notification will appear after a new signal is saved.'}` : investStatus?.mode.mode === 'DEMO_AUTO' ? 'The demo execution latch is enabled only for this session. Orders still require an internal READY V2 signal bound to an APPROVE/RESIZE Risk decision and a connected demo-only V3 EA. Automatic V2 coordinator routing is not wired yet.' : 'Market data may still arrive, but Invest will not start analysis or trading.'}</p>
+                <p>{investStatus?.mode.mode === 'MONITOR' ? `Watching ${investStatus.monitor.timeframe} for a new MT5 bar. ${investStatus.monitor.state === 'waiting_for_permission' ? 'Waiting for Market Research approval.' : investStatus.monitor.state === 'permission_denied' ? 'Research was denied for this bar.' : investStatus.monitor.state === 'permission_blocked' ? 'Market Research is blocked.' : investStatus.monitor.state === 'waiting_for_price' ? 'Waiting for MT5 price data.' : investStatus.monitor.state === 'analyzing' ? 'Search AI and Invest AI are analyzing now.' : 'A Mac notification will appear after a new signal is saved.'}` : investStatus?.mode.mode === 'DEMO_AUTO' ? 'The demo execution latch is enabled only for this session. V2 watches confirmed H1/M15/M5 bars and only a READY setup may continue to Risk and the demo-only executor.' : 'Market data may still arrive, but Invest will not start analysis or trading.'}</p>
               </div>
 
               <div className="invest-permission-control">
@@ -1615,9 +1678,47 @@ export default function App() {
               {investError && <p className="invest-error" role="alert">{investError}</p>}
             </section>
 
+            <section className="soft-panel invest-journal" aria-labelledby="invest-v2-title">
+              <div className="panel-title"><div><p className="section-kicker">V2 TECHNICAL SETUPS</p><h2 id="invest-v2-title">H1 context · M15 setup · M5 trigger</h2></div><span className="invest-session-label">{investStatus?.v2.last_closed_m5 ? `M5 ${new Date(investStatus.v2.last_closed_m5).toLocaleTimeString()}` : 'Waiting for M5'}</span></div>
+              <div className="invest-v2-grid">
+                {(['SMC_IDM', 'HARMONIC_PRZ'] as const).map((key) => {
+                  const setup = investStatus?.v2.strategies[key];
+                  return <article key={key} className="invest-v2-card">
+                    <div className="invest-signal-heading"><span className={`invest-v2-state state-${(setup?.state || 'NO_SETUP').toLowerCase()}`}>{setup?.state || 'NO SETUP'}</span><strong>{key === 'SMC_IDM' ? 'SMC + IDM' : 'Harmonic PRZ'}</strong><span className={`invest-direction direction-${setup?.direction === 'BUY' ? 'up' : setup?.direction === 'SELL' ? 'down' : 'neutral'}`}>{setup?.direction || '—'}</span></div>
+                    <div className="invest-signal-levels"><span>Entry <strong>{setup?.entry_zone ? setup.entry_zone.join('–') : '—'}</strong></span><span>SL <strong>{setup?.invalidation ?? '—'}</strong></span><span>TP1 <strong>{setup?.targets[0] ?? '—'}</strong></span><span>Signal <strong>{setup?.signal_id ? setup.signal_id.slice(-8) : '—'}</strong></span></div>
+                    <small>{setup?.reason_codes.length ? setup.reason_codes.join(' · ') : setup?.state === 'READY' ? 'Technical setup confirmed.' : 'Waiting for a valid setup.'}</small>
+                  </article>;
+                })}
+              </div>
+              <div className="invest-v2-risk-summary">
+                <div><small>V2 COORDINATOR</small><strong>{investStatus?.v2.state || 'unavailable'}</strong><p>{investStatus?.v2.execution_blocked_reason ? `Execution: ${investStatus.v2.execution_blocked_reason.replaceAll('_', ' ')}` : 'Execution path has no active blocker.'}</p></div>
+                <div><small>RISK DECISION</small><strong>{investStatus?.v2.risk.decision || (investStatus?.risk_config.configured ? 'Waiting for READY' : 'Not configured')}</strong><p>{investStatus?.v2.risk.approved_volume != null ? `Approved volume: ${investStatus.v2.risk.approved_volume}` : 'No lot size is selected unless Risk approves a READY setup.'}</p></div>
+              </div>
+            </section>
+
+            <section className="soft-panel invest-journal" aria-labelledby="invest-risk-title">
+              <div className="panel-title"><div><p className="section-kicker">DEMO RISK RULES</p><h2 id="invest-risk-title">Explicit execution limits</h2></div><span className="invest-session-label">{investStatus?.risk_config.configured ? 'CONFIGURED' : 'EXECUTION BLOCKED'}</span></div>
+              <p className="invest-risk-help">These values are yours. Hearth does not create hidden risk defaults. Until every required field is saved, V2 can analyze setups but cannot submit a demo order.</p>
+              <div className="invest-risk-grid">
+                {[
+                  ['riskPerTradePct', 'Risk / trade (%)'],
+                  ['maxDailyLossPct', 'Max daily loss (%)'],
+                  ['maxDrawdownPct', 'Max drawdown (%)'],
+                  ['maxOpenRiskPct', 'Max total open risk (%)'],
+                  ['maxPositions', 'Max positions'],
+                  ['maxSpreadPoints', 'Max spread (points)'],
+                  ['maxSlippagePoints', 'Max slippage (points)'],
+                  ['minStopPoints', 'Min stop (points)'],
+                  ['maxStopPoints', 'Max stop (points)'],
+                  ['requestedVolume', 'Requested volume (optional)'],
+                ].map(([field, label]) => <label key={field}><span>{label}</span><input type="number" min="0" step="any" value={demoRiskForm[field as keyof typeof demoRiskForm]} placeholder={field === 'requestedVolume' ? 'Calculated by Risk' : 'Required'} onChange={(event) => { setDemoRiskDirty(true); setDemoRiskForm((current) => ({ ...current, [field]: event.target.value })); }} /></label>)}
+              </div>
+              <div className="invest-risk-actions"><span>{investStatus?.risk_config.error ? `Stored config error: ${investStatus.risk_config.error}` : investStatus?.risk_config.configured ? 'Saved risk rules are active for DEMO_AUTO only.' : 'No demo risk rules saved yet.'}</span><button type="button" className="subtle-action" disabled={investBusy} onClick={() => void saveDemoRiskConfig()}>Save Demo Risk Rules</button></div>
+            </section>
+
             <section className="soft-panel invest-journal" aria-labelledby="invest-journal-title">
-              <div className="panel-title"><div><p className="section-kicker">SIGNAL JOURNAL</p><h2 id="invest-journal-title">Latest analysis</h2></div><span className="invest-session-label">{investStatus?.signals.length || 0} saved</span></div>
-              {investStatus?.signals.length ? <div className="invest-signal-list">{investStatus.signals.map((signal) => <article key={signal.id}>
+              <div className="panel-title"><div><p className="section-kicker">V1 ANALYSIS · INFORMATION ONLY</p><h2 id="invest-journal-title">Latest analysis</h2></div><div className="invest-journal-actions"><span className="invest-session-label">{investStatus?.signals.length || 0} saved</span>{(investStatus?.signals.length || 0) > 1 && <button type="button" className="subtle-action" onClick={() => setShowV1History((value) => !value)}>{showV1History ? 'Hide history' : `History (${(investStatus?.signals.length || 0) - 1})`}</button>}</div></div>
+              {investStatus?.signals.length ? <div className="invest-signal-list">{(showV1History ? investStatus.signals : investStatus.signals.slice(0, 1)).map((signal) => <article key={signal.id}>
                 <div className="invest-signal-heading"><span className={`invest-direction direction-${signal.direction.toLowerCase()}`}>{signal.direction}</span><strong>{signal.confidence}%</strong><time>{new Date(signal.created_at).toLocaleString()}</time></div>
                 <div className="invest-signal-levels"><span>Entry <strong>{signal.entry_zone.length ? signal.entry_zone.join('–') : '—'}</strong></span><span>SL <strong>{signal.stop_loss ?? '—'}</strong></span><span>TP <strong>{signal.targets[0] ?? '—'}</strong></span><span>Risk <strong>{signal.risk_level}</strong></span></div>
                 {signal.summary && <p>{signal.summary}</p>}

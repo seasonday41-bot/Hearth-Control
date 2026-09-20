@@ -5,7 +5,6 @@
 
 input string InpHost = "127.0.0.1";
 input uint InpPort = 8766;
-input ENUM_TIMEFRAMES InpTimeframe = PERIOD_H1;
 input int InpBars = 250;
 input int InpPushEverySeconds = 2;
 input double InpEstimatedSlippagePoints = 2.0;
@@ -13,6 +12,16 @@ input double InpEstimatedSlippagePoints = 2.0;
 int g_socket = INVALID_HANDLE;
 string g_receive_buffer = "";
 string g_last_request_id = "";
+
+long BrokerUtcOffsetSeconds()
+  {
+   return (long)TimeCurrent() - (long)TimeGMT();
+  }
+
+long ToUtcEpoch(const datetime serverTime)
+  {
+   return (long)serverTime - BrokerUtcOffsetSeconds();
+  }
 
 string TimeframeLabel(const ENUM_TIMEFRAMES timeframe)
   {
@@ -216,9 +225,9 @@ double MarginPerLot(const double ask)
    return margin;
   }
 
-string BuildMarketSnapshotJson()
+string BuildMarketSnapshotJson(const ENUM_TIMEFRAMES timeframeValue)
   {
-   const string timeframe = TimeframeLabel(InpTimeframe);
+   const string timeframe = TimeframeLabel(timeframeValue);
    if(timeframe == "")
       return "";
 
@@ -226,7 +235,7 @@ string BuildMarketSnapshotJson()
    MqlRates rates[];
    ArraySetAsSeries(rates, true);
 
-   const int copied = CopyRates(_Symbol, InpTimeframe, 0, requested, rates);
+   const int copied = CopyRates(_Symbol, timeframeValue, 0, requested, rates);
    if(copied < 20)
       return "";
 
@@ -234,7 +243,7 @@ string BuildMarketSnapshotJson()
       "{\"type\":\"snapshot\",\"version\":1,\"canonical_symbol\":\"XAUUSD\",\"broker_symbol\":\"%s\",\"timeframe\":\"%s\",\"as_of\":%I64d,\"bars\":[",
       JsonEscape(_Symbol),
       timeframe,
-      (long)TimeCurrent()
+      (long)TimeGMT()
    );
 
    for(int index = copied - 1; index >= 0; index--)
@@ -244,7 +253,7 @@ string BuildMarketSnapshotJson()
 
       json += StringFormat(
          "{\"time\":%I64d,\"open\":%s,\"high\":%s,\"low\":%s,\"close\":%s,\"volume\":%I64d}",
-         (long)rates[index].time,
+         ToUtcEpoch(rates[index].time),
          DoubleToString(rates[index].open, _Digits),
          DoubleToString(rates[index].high, _Digits),
          DoubleToString(rates[index].low, _Digits),
@@ -312,7 +321,7 @@ string BuildRiskSnapshotJson()
       "\"broker\":{\"bid\":%s,\"ask\":%s,\"point_size\":%s,\"tick_size\":%s,\"tick_value_per_lot\":%s,"
       "\"volume_min\":%s,\"volume_max\":%s,\"volume_step\":%s,\"margin_per_lot\":%s,\"estimated_slippage_points\":%s}}",
       JsonEscape(_Symbol),
-      (long)now,
+      (long)TimeGMT(),
       accountType,
       JsonEscape(AccountInfoString(ACCOUNT_CURRENCY)),
       DoubleToString(equity, 2),
@@ -345,7 +354,7 @@ string BuildExecutorHelloJson()
       "{\"type\":\"executor_hello\",\"version\":1,\"canonical_symbol\":\"XAUUSD\",\"broker_symbol\":\"%s\",\"account_type\":\"%s\",\"as_of\":%I64d}",
       JsonEscape(_Symbol),
       accountType,
-      (long)TimeCurrent()
+      (long)TimeGMT()
    );
   }
 
@@ -481,7 +490,7 @@ void SendReceipt(
       DoubleToString(volume, 8),
       DoubleToString(stopLoss, _Digits),
       DoubleToString(takeProfit, _Digits),
-      (long)TimeCurrent()
+      (long)TimeGMT()
    );
    SendUtf8Line(payload);
   }
@@ -528,7 +537,7 @@ void ExecuteDemoCommand(const string json)
       return;
      }
 
-   if(TimeCurrent() > (datetime)expiresEpoch)
+   if(TimeGMT() > (datetime)expiresEpoch)
      {
       RejectCommand(requestId, 0, "command_expired");
       return;
@@ -737,9 +746,17 @@ void ProcessIncomingCommands()
 
 void PushSnapshotsAndHello()
   {
-   const string marketPayload = BuildMarketSnapshotJson();
-   if(marketPayload != "")
-      SendUtf8Line(marketPayload);
+   const string h1Payload = BuildMarketSnapshotJson(PERIOD_H1);
+   if(h1Payload != "")
+      SendUtf8Line(h1Payload);
+
+   const string m15Payload = BuildMarketSnapshotJson(PERIOD_M15);
+   if(m15Payload != "")
+      SendUtf8Line(m15Payload);
+
+   const string m5Payload = BuildMarketSnapshotJson(PERIOD_M5);
+   if(m5Payload != "")
+      SendUtf8Line(m5Payload);
 
    const string riskPayload = BuildRiskSnapshotJson();
    if(riskPayload != "")
@@ -752,12 +769,6 @@ void PushSnapshotsAndHello()
 
 int OnInit()
   {
-   if(TimeframeLabel(InpTimeframe) == "")
-     {
-      Print("Hearth demo executor: unsupported timeframe.");
-      return INIT_PARAMETERS_INCORRECT;
-     }
-
    string upperSymbol = _Symbol;
    StringToUpper(upperSymbol);
    if(StringFind(upperSymbol, "XAUUSD") < 0 && StringFind(upperSymbol, "GOLD") < 0)

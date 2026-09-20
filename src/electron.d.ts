@@ -39,6 +39,61 @@ interface InvestMonitorState {
   last_bar_as_of: string | null;
   last_error: string | null;
 }
+interface DemoRiskConfig {
+  version: 'demo-risk-config-v1';
+  risk_fraction_per_trade: number;
+  max_daily_loss_fraction: number;
+  max_drawdown_fraction: number;
+  max_total_open_risk_fraction: number;
+  max_positions: number;
+  max_spread_points: number;
+  max_slippage_points: number;
+  min_stop_points: number;
+  max_stop_points: number;
+  requested_volume: number | null;
+}
+interface DemoRiskConfigState {
+  version: 'demo-risk-config-v1';
+  configured: boolean;
+  config: DemoRiskConfig | null;
+  error: string | null;
+}
+interface V2StrategyStatus {
+  strategy: 'SMC_IDM' | 'HARMONIC_PRZ';
+  state: 'NO_SETUP' | 'INVALID' | 'PRE_SIGNAL' | 'READY';
+  direction: 'BUY' | 'SELL' | null;
+  signal_id: string | null;
+  entry_zone: [number, number] | null;
+  invalidation: number | null;
+  targets: number[];
+  reason_codes: string[];
+  as_of: string | null;
+  expires_at: string | null;
+}
+interface LiveV2CoordinatorState {
+  version: 'live-v2-coordinator-v1';
+  state: string;
+  interval_ms: number;
+  required_timeframes: string[];
+  last_checked_at: string | null;
+  last_cycle_at: string | null;
+  last_closed_m5: string | null;
+  last_error: string | null;
+  execution_blocked_reason: string | null;
+  strategies: {
+    SMC_IDM: V2StrategyStatus;
+    HARMONIC_PRZ: V2StrategyStatus;
+  };
+  risk: {
+    configured: boolean;
+    signal_id: string | null;
+    decision: 'APPROVE' | 'RESIZE' | 'REJECT' | null;
+    approved_volume: number | null;
+    reason_codes: string[];
+    evaluated_at: string | null;
+  };
+  circuit_breaker_active: boolean;
+}
 interface DemoExecutionState {
   state: 'idle' | 'executing' | 'unavailable';
   demo_session_id: string | null;
@@ -86,12 +141,14 @@ interface InvestStatus {
   signals: InvestSignal[];
   execution: DemoExecutionState;
   executions: DemoExecutionRecord[];
+  risk_config: DemoRiskConfigState;
+  v2: LiveV2CoordinatorState;
   mt5_bridge: {
     running: boolean;
     host?: string;
     http_port?: number;
     ingest_port?: number;
-    snapshots: Array<{ timeframe: string; broker_symbol: string; as_of: string; age_ms: number; bar_count: number }>;
+    snapshots: Array<{ timeframe: string; broker_symbol: string; as_of: string; latest_bar_time?: string | null; latest_closed_bar_time?: string | null; age_ms: number; bar_count: number }>;
     risk_snapshot?: { account_type: 'demo' | 'live'; broker_symbol: string; as_of: string; age_ms: number; open_risk_complete: boolean } | null;
     executor_ready?: boolean;
     executor_account_type?: 'demo' | 'live' | null;
@@ -261,6 +318,8 @@ interface Window { controlApp: {
   investModeSet: (mode: InvestModeName) => Promise<InvestModeState>;
   investModeKillSwitch: () => Promise<InvestModeState>;
   investStatusGet: () => Promise<InvestStatus>;
+  investRiskConfigGet: () => Promise<DemoRiskConfigState>;
+  investRiskConfigSet: (config: Omit<DemoRiskConfig, 'version'>) => Promise<DemoRiskConfigState>;
   connectionsList: () => Promise<ConnectionSummary[]>;
   connectionsRefresh: (alias?: string) => Promise<ConnectionSummary[]>;
   githubConnect: (request: { alias: 'github:personal' | 'github:work'; token: string; allowPullRequestCreate?: boolean }) => Promise<ConnectionSummary>;

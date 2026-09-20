@@ -52,6 +52,8 @@ let investMonitor = null;
 let investSignalJournal = null;
 let demoAutoExecutor = null;
 let demoExecutionJournal = null;
+let demoRiskConfigController = null;
+let liveV2Coordinator = null;
 let connectionRegistry = null;
 let credentialStore = null;
 let connectionService = null;
@@ -353,6 +355,29 @@ const publicInvestStatus = () => {
       last_error: null,
     },
     executions: demoExecutionJournal?.list?.() ?? [],
+    risk_config: demoRiskConfigController?.getState?.() ?? {
+      version: 'demo-risk-config-v1',
+      configured: false,
+      config: null,
+      error: null,
+    },
+    v2: liveV2Coordinator?.getState?.() ?? {
+      version: 'live-v2-coordinator-v1',
+      state: 'unavailable',
+      interval_ms: 5_000,
+      required_timeframes: ['H1', 'M15', 'M5'],
+      last_checked_at: null,
+      last_cycle_at: null,
+      last_closed_m5: null,
+      last_error: null,
+      execution_blocked_reason: 'coordinator_unavailable',
+      strategies: {
+        SMC_IDM: { strategy: 'SMC_IDM', state: 'NO_SETUP', direction: null, signal_id: null, entry_zone: null, invalidation: null, targets: [], reason_codes: [], as_of: null, expires_at: null },
+        HARMONIC_PRZ: { strategy: 'HARMONIC_PRZ', state: 'NO_SETUP', direction: null, signal_id: null, entry_zone: null, invalidation: null, targets: [], reason_codes: [], as_of: null, expires_at: null },
+      },
+      risk: { configured: false, signal_id: null, decision: null, approved_volume: null, reason_codes: [], evaluated_at: null },
+      circuit_breaker_active: false,
+    },
     mt5_bridge: bridge,
     search_ai: { permission, ready: permission !== 'Blocked', approval_required: permission === 'Ask' },
     invest_ai: { ready: true },
@@ -2295,6 +2320,24 @@ app.whenReady().then(async () => {
     console.error('[InvestMode] Failed to initialize controller:', err?.message || err);
   }
 
+
+  try {
+    const {
+      DemoRiskConfigController,
+      DemoRiskConfigFileStore,
+    } = await importFromHere('../mcp/market/demo-risk-config.mjs');
+    demoRiskConfigController = new DemoRiskConfigController({
+      store: new DemoRiskConfigFileStore({
+        storagePath: path.join(app.getPath('userData'), 'demo-risk-config.json'),
+      }),
+    });
+    const riskConfigState = demoRiskConfigController.restore();
+    console.info(`[DemoRiskConfig] ${riskConfigState.configured ? 'Configured' : 'Not configured; demo execution remains blocked.'}`);
+  } catch (err) {
+    demoRiskConfigController = null;
+    console.error('[DemoRiskConfig] Failed to initialize:', err?.message || err);
+  }
+
   try {
     const { createMt5SocketBridge } = await importFromHere('../mcp/market/mt5-bridge-server.mjs');
     mt5BridgeServer = createMt5SocketBridge();
@@ -2349,7 +2392,7 @@ app.whenReady().then(async () => {
       getPermission: () => readSettings().permissions?.MarketResearch ?? 'Ask',
       getBridgeStatus: () => mt5BridgeServer?.status?.() ?? { running: false, snapshots: [] },
       requestPermission: requestInvestMonitorPermission,
-      runInvestment: ({ timeframe, signal }) => runLiveXauInvestment({ timeframe, signal }),
+      runInvestment: ({ timeframe, signal }) => runLiveXauInvestment({ timeframe, signal, closedBarsOnly: true }),
       journal: investSignalJournal,
       notify: notifyInvestSignal,
       onUpdate: sendInvestUpdate,
@@ -2359,6 +2402,33 @@ app.whenReady().then(async () => {
     investMonitor = null;
     investSignalJournal = null;
     console.error('[InvestMonitor] Failed to initialize:', err?.message || err);
+  }
+
+  try {
+    if (!demoAutoExecutor || !demoExecutionJournal) throw new Error('demo_executor_unavailable');
+    const { Mt5LoopbackAdapter } = await importFromHere('../mcp/market/mt5-adapter.mjs');
+    const { Mt5RiskLoopbackAdapter } = await importFromHere('../mcp/market/mt5-risk-adapter.mjs');
+    const { LiveV2Coordinator } = await importFromHere('../mcp/market/live-v2-coordinator.mjs');
+    liveV2Coordinator = new LiveV2Coordinator({
+      getMode: () => investModeController?.getState?.() ?? {
+        mode: 'OFF',
+        automatic_analysis_enabled: false,
+        demo_auto_enabled: false,
+        trade_execution_enabled: false,
+        demo_session_id: null,
+      },
+      getRiskConfig: () => demoRiskConfigController?.getConfig?.() ?? null,
+      marketAdapter: new Mt5LoopbackAdapter(),
+      riskAdapter: new Mt5RiskLoopbackAdapter(),
+      executor: demoAutoExecutor,
+      executionJournal: demoExecutionJournal,
+      onUpdate: sendInvestUpdate,
+    });
+    liveV2Coordinator.start();
+    console.info('[LiveV2] H1/M15/M5 coordinator started; V1 signals remain analysis-only.');
+  } catch (err) {
+    liveV2Coordinator = null;
+    console.error('[LiveV2] Failed to initialize:', err?.message || err);
   }
 
   try {
@@ -2549,6 +2619,7 @@ app.whenReady().then(async () => {
     if (!investModeController) throw new Error('invest_mode_controller_unavailable');
     const state = investModeController.setMode(mode);
     investMonitor?.syncMode?.();
+    void liveV2Coordinator?.check?.({ force: true });
     sendInvestUpdate();
     return state;
   });
@@ -2556,10 +2627,22 @@ app.whenReady().then(async () => {
     if (!investModeController) throw new Error('invest_mode_controller_unavailable');
     const state = investModeController.killSwitch();
     investMonitor?.syncMode?.();
+    void liveV2Coordinator?.check?.({ force: true });
     sendInvestUpdate();
     return state;
   });
   ipcMain.handle('invest-status:get', () => publicInvestStatus());
+  ipcMain.handle('invest-risk-config:get', () => {
+    if (!demoRiskConfigController) throw new Error('demo_risk_config_unavailable');
+    return demoRiskConfigController.getState();
+  });
+  ipcMain.handle('invest-risk-config:set', (_event, config) => {
+    if (!demoRiskConfigController) throw new Error('demo_risk_config_unavailable');
+    const state = demoRiskConfigController.save(config);
+    void liveV2Coordinator?.check?.({ force: true });
+    sendInvestUpdate();
+    return state;
+  });
   const listPublicConnections = () => {
     if (!connectionService || !connectionRegistry) return [];
     return connectionRegistry.list().map((connection) => {
@@ -4179,8 +4262,13 @@ app.on('before-quit', () => {
   if (serverProcess) serverProcess.kill('SIGTERM');
   else if (serverState.pid) { try { process.kill(serverState.pid, 'SIGTERM'); } catch {} }
   if (bridgeClientInstance) bridgeClientInstance.stopPolling();
+  if (liveV2Coordinator) {
+    liveV2Coordinator.stop();
+    liveV2Coordinator = null;
+  }
   demoAutoExecutor = null;
   demoExecutionJournal = null;
+  demoRiskConfigController = null;
   if (mt5BridgeServer) {
     const bridge = mt5BridgeServer;
     mt5BridgeServer = null;

@@ -204,14 +204,15 @@ export class InvestMonitor {
     }
     this.lastCheckedAt = this.now();
     const snapshot = this.getBridgeStatus()?.snapshots?.find((item) => item.timeframe === this.timeframe);
-    if (!snapshot?.as_of) {
+    const closedBarAsOf = snapshot?.latest_closed_bar_time || null;
+    if (!closedBarAsOf) {
       this.state = 'waiting_for_price';
       this.lastError = null;
       this.emit();
       return this.getState();
     }
-    const barKey = `XAUUSD:${this.timeframe}:${snapshot.as_of}`;
-    this.lastBarAsOf = snapshot.as_of;
+    const barKey = `XAUUSD:${this.timeframe}:${closedBarAsOf}`;
+    this.lastBarAsOf = closedBarAsOf;
     if (this.journal.has(barKey)) {
       this.state = 'monitoring';
       this.lastError = null;
@@ -235,7 +236,7 @@ export class InvestMonitor {
       this.state = 'waiting_for_permission';
       this.lastError = null;
       this.emit();
-      const allowed = await this.requestPermission({ timeframe: this.timeframe, asOf: snapshot.as_of });
+      const allowed = await this.requestPermission({ timeframe: this.timeframe, asOf: closedBarAsOf });
       if (!this.getMode()?.automatic_analysis_enabled) {
         this.state = 'idle';
         this.lastError = null;
