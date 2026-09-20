@@ -53,6 +53,7 @@ class GitHubConnectionService {
       capabilities: [...(connection.capabilities || [])],
       status: connection.status,
       account: typeof connection.target?.login === 'string' ? connection.target.login : null,
+      defaultRepository: typeof connection.target?.defaultRepository === 'string' ? connection.target.defaultRepository : null,
       lastCheckedAt: connection.lastCheckedAt || null,
       lastError: connection.lastError || null,
       createdAt: connection.createdAt,
@@ -76,14 +77,16 @@ class GitHubConnectionService {
       });
       credentialWritten = true;
 
+      const nextTarget = {
+        ...(existing.target || {}),
+        host: 'github.com',
+        login: identity.login,
+        accountType: identity.accountType,
+      };
+      delete nextTarget.defaultRepository;
       const updated = this.registry.upsert({
         ...this.requireConnection(alias),
-        target: {
-          ...(existing.target || {}),
-          host: 'github.com',
-          login: identity.login,
-          accountType: identity.accountType,
-        },
+        target: nextTarget,
         capabilities: normalizedCapabilities,
         status: 'CONNECTED',
         lastCheckedAt: this.now(),
@@ -174,6 +177,30 @@ class GitHubConnectionService {
     const token = this.requireToken(alias);
     if (!connection.capabilities.includes('repo.read')) throw Object.assign(new Error('github_capability_denied'), { code: 'github_capability_denied' });
     return this.githubClient.getRepository(token, options);
+  }
+
+  async setDefaultRepository(alias, fullName) {
+    const connection = this.requireConnection(alias);
+    if (fullName === null || fullName === '') {
+      const target = { ...(connection.target || {}) };
+      delete target.defaultRepository;
+      const updated = this.registry.upsert({ ...connection, target });
+      return this.publicSnapshot(updated);
+    }
+    if (typeof fullName !== 'string' || !/^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/.test(fullName)) {
+      throw new Error('github_repository_invalid');
+    }
+    const [owner, repo] = fullName.split('/');
+    const result = await this.getRepository(alias, { owner, repo });
+    if (!result?.repository?.fullName) throw new Error('github_repository_invalid');
+    const updated = this.registry.upsert({
+      ...connection,
+      target: {
+        ...(connection.target || {}),
+        defaultRepository: result.repository.fullName,
+      },
+    });
+    return this.publicSnapshot(updated);
   }
 
   async listPullRequests(alias, options = {}) {

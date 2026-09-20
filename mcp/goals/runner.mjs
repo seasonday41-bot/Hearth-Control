@@ -249,6 +249,13 @@ export class GoalRunner {
   }
 
   /**
+   * Clears terminal Goal history only. Never removes draft/ready/active Goals.
+   */
+  clear_goal_history() {
+    return this.storage.clearGoalHistory();
+  }
+
+  /**
    * Returns whether any goal is currently active.
    * Active statuses: running, waiting, paused.
    * @returns {boolean}

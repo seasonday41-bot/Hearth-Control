@@ -11,6 +11,7 @@ interface ConnectionSummary {
   capabilities: string[];
   status: ConnectionStatus;
   account: string | null;
+  defaultRepository?: string | null;
   lastCheckedAt: string | null;
   lastError: string | null;
   createdAt: string;
@@ -178,6 +179,8 @@ interface Window { controlApp: {
   connectionsRefresh: (alias?: string) => Promise<ConnectionSummary[]>;
   githubConnect: (request: { alias: 'github:personal' | 'github:work'; token: string; allowPullRequestCreate?: boolean }) => Promise<ConnectionSummary>;
   githubDisconnect: (alias: 'github:personal' | 'github:work') => Promise<ConnectionSummary>;
+  githubRepositories: (alias: 'github:personal' | 'github:work') => Promise<{ repositories: Array<{ id: number | null; name: string | null; fullName: string | null; private: boolean; archived: boolean; defaultBranch: string | null; owner: string | null }> }>;
+  githubSetDefaultRepository: (request: { alias: 'github:personal' | 'github:work'; fullName: string | null }) => Promise<ConnectionSummary>;
   vercelConnect: (request: { alias: 'vercel:main'; token: string; teamId?: string }) => Promise<ConnectionSummary>;
   vercelDisconnect: (alias: 'vercel:main') => Promise<ConnectionSummary>;
   localChatStatus: () => Promise<{ health: any; models: any }>;
@@ -230,6 +233,8 @@ interface Window { controlApp: {
   publicTasksSignIn: (credentials: { email: string; password: string }) => Promise<PublicTasksState>;
   publicTasksSignOut: () => Promise<PublicTasksState>;
   goalsList: () => Promise<Goal[]>;
+  codexStatus: () => Promise<{ available: boolean }>;
+  goalsClearHistory: () => Promise<{ removedIds: string[]; remaining: Goal[] }>;
   goalsGet: (goalId: string) => Promise<Goal | null>;
   goalsCreate: (data: { title: string; objective: string; workspace?: string; steps: Partial<GoalStep>[]; constraints?: string[]; route?: 'mcp' | 'antigravity' | 'hybrid' }) => Promise<Goal>;
   goalsRun: (goalId: string) => Promise<Goal>;

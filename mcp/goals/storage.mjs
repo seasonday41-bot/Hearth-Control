@@ -103,6 +103,23 @@ export class GoalStorage {
   }
 
   /**
+   * Removes terminal Goal history only. Active/draft/ready goals are preserved.
+   * @returns {{ removedIds: string[], remaining: any[] }}
+   */
+  clearGoalHistory() {
+    if (!this.loaded) this.load();
+    const removedIds = [];
+    for (const [id, goal] of this.goals.entries()) {
+      if (['completed', 'error'].includes(goal.status)) {
+        removedIds.push(id);
+        this.goals.delete(id);
+      }
+    }
+    if (removedIds.length > 0) this.save();
+    return { removedIds, remaining: this.listGoals() };
+  }
+
+  /**
    * Retrieves a single goal by ID.
    * @param {string} id
    * @returns {any | null}

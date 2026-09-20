@@ -39,7 +39,7 @@ const defaults = {
   // X's own publishable key (see publicTasksClientInstance below).
   publicTasksSupabaseUrl: 'https://pavrugcmxdgdxrjinzlm.supabase.co',
   publicTasksSupabaseAnonKey: '',
-  permissions: { Files: 'Allow', Git: 'Allow', Terminal: 'Ask', Browser: 'Blocked', Antigravity: 'Ask', Vercel: 'Ask' },
+  permissions: { X: 'Ask', Codex: 'Ask', Files: 'Allow', Git: 'Allow', Terminal: 'Ask', Browser: 'Blocked', Antigravity: 'Ask', Vercel: 'Ask' },
 };
 let mainWindow;
 let serverProcess;
@@ -1788,7 +1788,10 @@ const startServer = async ({ workspace, port }) => {
       let error = null;
       try {
         if (!goalRunner) { ok = false; error = 'goal_runner_unavailable'; }
-        else {
+        else if ((readSettings().permissions?.Codex ?? 'Ask') === 'Blocked') {
+          ok = false;
+          error = 'codex_permission_blocked';
+        } else {
           result = await goalRunner.dispatch_specialist_execution(message.goalId, message.executionId, { codexBin: message.codexBin });
           ok = true;
           sendEvent({ type: 'goals:updated', goal: result.goal });
@@ -2219,6 +2222,15 @@ app.whenReady().then(async () => {
     if (!githubConnectionService) throw new Error('github_connection_service_unavailable');
     return githubConnectionService.disconnect(alias);
   });
+  ipcMain.handle('github:repositories', async (_event, alias) => {
+    if (!githubConnectionService) throw new Error('github_connection_service_unavailable');
+    return githubConnectionService.listRepositories(alias, { page: 1, perPage: 100 });
+  });
+  ipcMain.handle('github:set-default-repository', async (_event, request) => {
+    if (!githubConnectionService) throw new Error('github_connection_service_unavailable');
+    if (!request || typeof request !== 'object') throw new Error('github_repository_request_invalid');
+    return githubConnectionService.setDefaultRepository(request.alias, request.fullName || null);
+  });
   ipcMain.handle('vercel:connect', async (_event, request) => {
     if (!vercelConnectionService) throw new Error('vercel_connection_service_unavailable');
     if (!request || typeof request !== 'object') throw new Error('vercel_connect_request_invalid');
@@ -2486,6 +2498,21 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle('goals:list', async () => {
     return goalRunner ? goalRunner.list_goals() : [];
+  });
+  ipcMain.handle('specialists:codex-status', async () => {
+    try {
+      const { resolveCodexBinary } = await importFromHere('../mcp/specialist/codex-adapter.mjs');
+      await resolveCodexBinary();
+      return { available: true };
+    } catch {
+      return { available: false };
+    }
+  });
+  ipcMain.handle('goals:clear-history', async () => {
+    if (!goalRunner) throw new Error('Goal runner not initialized');
+    const result = goalRunner.clear_goal_history();
+    sendEvent({ type: 'log', source: 'goals', tone: 'success', message: `Cleared ${result.removedIds.length} terminal Goal(s) from local history` });
+    return result;
   });
   ipcMain.handle('goals:get', async (_event, goalId) => {
     if (!goalRunner) throw new Error('Goal runner not initialized');

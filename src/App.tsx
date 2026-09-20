@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import StorageAudit from './StorageAudit';
+import './calm-control.css';
+import AIConnectorPanel, { type AIConnectorItem } from './components/AIConnectorPanel';
+import GitHubConnectionCard from './components/GitHubConnectionCard';
 
 type Permission = 'Allow' | 'Ask' | 'Blocked';
-type NavItem = 'Overview' | 'Console' | 'Local Chat' | 'Storage Audit' | 'Task Console' | 'Goals' | 'Workspace' | 'Permissions' | 'Logs';
+type NavItem = 'Overview' | 'Console' | 'Local Chat' | 'Storage Audit' | 'Task Console' | 'Goals' | 'Workspace' | 'Permissions' | 'Logs' | 'AI Connectors' | 'Updates';
 type IconName = 'grid' | 'folder' | 'lock' | 'terminal' | 'moon' | 'sun' | 'chevron' | 'activity' | 'copy' | 'server' | 'console' | 'radio' | 'flag' | 'check' | 'plus';
 
 const Icon = ({ name }: { name: IconName }) => {
@@ -85,6 +88,8 @@ export const removeApproval = (queue: ApprovalRequest[], requestId: string): App
 };
 
 const initialPermissions: Array<{ name: string; detail: string; value: Permission; disabled?: boolean }> = [
+  { name: 'X', detail: 'Route coding work to the local X worker', value: 'Ask' },
+  { name: 'Codex', detail: 'Allow authorized specialist continuations through Codex CLI', value: 'Ask' },
   { name: 'Files', detail: 'Read and write inside this workspace', value: 'Allow' },
   { name: 'Git', detail: 'Inspect status, history and diffs', value: 'Allow' },
   { name: 'Terminal', detail: 'Run local commands after confirmation', value: 'Ask' },
@@ -93,16 +98,33 @@ const initialPermissions: Array<{ name: string; detail: string; value: Permissio
   { name: 'Browser', detail: 'No browser tool — not available in this version', value: 'Blocked', disabled: true },
 ];
 
-const nav: Array<{ name: NavItem; icon: IconName }> = [
-  { name: 'Overview', icon: 'grid' },
-  { name: 'Console', icon: 'activity' },
-  { name: 'Local Chat', icon: 'radio' },
-  { name: 'Storage Audit', icon: 'folder' },
-  { name: 'Task Console', icon: 'console' },
-  { name: 'Goals', icon: 'flag' },
-  { name: 'Workspace', icon: 'folder' },
-  { name: 'Permissions', icon: 'lock' },
-  { name: 'Logs', icon: 'terminal' },
+const navGroups: Array<{ label: string; items: Array<{ name: NavItem; icon: IconName }> }> = [
+  {
+    label: 'OPERATE',
+    items: [
+      { name: 'Overview', icon: 'grid' },
+      { name: 'Console', icon: 'activity' },
+      { name: 'Task Console', icon: 'console' },
+      { name: 'Goals', icon: 'flag' },
+    ],
+  },
+  {
+    label: 'AI',
+    items: [
+      { name: 'AI Connectors', icon: 'activity' },
+      { name: 'Local Chat', icon: 'radio' },
+    ],
+  },
+  {
+    label: 'SYSTEM',
+    items: [
+      { name: 'Workspace', icon: 'folder' },
+      { name: 'Permissions', icon: 'lock' },
+      { name: 'Logs', icon: 'terminal' },
+      { name: 'Storage Audit', icon: 'folder' },
+      { name: 'Updates', icon: 'server' },
+    ],
+  },
 ];
 
 const LocalChatResponse = ({ text, onExpand }: { text: string; onExpand: (code: string, language: string) => void }) => {
@@ -143,6 +165,11 @@ export default function App() {
   const [connectionActionBusy, setConnectionActionBusy] = useState<string | null>(null);
   const [connectionTokenInputs, setConnectionTokenInputs] = useState<Record<string, string>>({});
   const [githubPrCreateInputs, setGithubPrCreateInputs] = useState<Record<string, boolean>>({});
+  const [githubSetupOpen, setGithubSetupOpen] = useState<Record<string, boolean>>({});
+  const [githubRepositories, setGithubRepositories] = useState<Record<string, Array<{ id: number | null; name: string | null; fullName: string | null; private: boolean; archived: boolean; defaultBranch: string | null; owner: string | null }>>>({});
+  const [githubRepoBusy, setGithubRepoBusy] = useState<string | null>(null);
+  const [githubRepoErrors, setGithubRepoErrors] = useState<Record<string, string>>({});
+  const githubRepoLoadedRef = useRef<Set<string>>(new Set());
   const [vercelTeamIdInput, setVercelTeamIdInput] = useState('');
   const [workspaceValid, setWorkspaceValid] = useState<boolean | null>(null);
   const [updaterInfo, setUpdaterInfo] = useState<UpdaterInfo | null>(null);
@@ -171,6 +198,7 @@ export default function App() {
 
   // Task Console states
   const [executorStatus, setExecutorStatus] = useState<AntigravityStatus | null>(null);
+  const [codexStatus, setCodexStatus] = useState<{ available: boolean } | null>(null);
   const [taskPrompt, setTaskPrompt] = useState('');
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [activeTaskSource, setActiveTaskSource] = useState<'Local' | 'Remote'>('Local');
@@ -213,6 +241,7 @@ export default function App() {
   const [selectedGoalId, setSelectedGoalId] = useState<string | null>(null);
   const [goalActionBusy, setGoalActionBusy] = useState(false);
   const [showNewGoalModal, setShowNewGoalModal] = useState(false);
+  const [showClearGoalsConfirm, setShowClearGoalsConfirm] = useState(false);
   const [newGoalTitle, setNewGoalTitle] = useState('');
   const [newGoalObjective, setNewGoalObjective] = useState('');
   const [newGoalConstraints, setNewGoalConstraints] = useState('');
@@ -221,6 +250,7 @@ export default function App() {
   ]);
 
   const isGoalActive = useMemo(() => goals.some((g) => ['running', 'waiting', 'paused'].includes(g.status)), [goals]);
+  const terminalGoalCount = useMemo(() => goals.filter((g) => ['completed', 'error'].includes(g.status)).length, [goals]);
   const selectedGoal = useMemo(() => goals.find((g) => g.id === selectedGoalId) || goals[0] || null, [goals, selectedGoalId]);
 
   const activeTaskIdRef = useRef<string | null>(null);
@@ -243,6 +273,7 @@ export default function App() {
       window.controlApp.getSettings(),
       window.controlApp.getServerState(),
       window.controlApp.antigravityStatus().catch(() => null),
+      window.controlApp.codexStatus().catch(() => null),
       window.controlApp.bridgeGetState().catch(() => null),
       window.controlApp.publicTasksGetState().catch(() => null),
       window.controlApp.updaterGetInfo().catch(() => null),
@@ -250,7 +281,7 @@ export default function App() {
       window.controlApp.goalsList().catch(() => []),
       window.controlApp.antigravityListTasks().catch(() => []),
       window.controlApp.connectionsList().catch(() => []),
-    ]).then(([settings, state, executor, bridge, publicX, updateInfo, update, goalsList, taskList, connectionList]) => {
+    ]).then(([settings, state, executor, codex, bridge, publicX, updateInfo, update, goalsList, taskList, connectionList]) => {
       if (!active) return;
       if (settings.workspace) setWorkspace(settings.workspace);
       setPort(settings.port);
@@ -259,6 +290,7 @@ export default function App() {
       setRunning(state.running);
       setPid(state.pid);
       if (executor) setExecutorStatus(executor);
+      if (codex) setCodexStatus(codex);
       if (bridge) setBridgeState(bridge);
       if (publicX) setPublicXState(publicX);
       if (updateInfo) setUpdaterInfo(updateInfo);
@@ -512,7 +544,112 @@ export default function App() {
 
   const promptBytes = useMemo(() => new TextEncoder().encode(taskPrompt).length, [taskPrompt]);
 
+  const xPerm = permissions.find((p) => p.name === 'X')?.value ?? 'Ask';
+  const codexPerm = permissions.find((p) => p.name === 'Codex')?.value ?? 'Ask';
   const antigravityPerm = permissions.find((p) => p.name === 'Antigravity')?.value ?? 'Ask';
+
+  const setPermissionEnabled = (permissionName: 'X' | 'Codex' | 'Antigravity', enabled: boolean) => {
+    const nextValue: Permission = enabled ? 'Ask' : 'Blocked';
+    setPermissions((current) => {
+      const next = current.map((item) => item.name === permissionName ? { ...item, value: nextValue } : item);
+      void window.controlApp.saveSettings({ permissions: Object.fromEntries(next.map((item) => [item.name, item.value])) });
+      return next;
+    });
+    flash(`${permissionName} ${enabled ? 'enabled' : 'disabled'} for new work`);
+  };
+
+  const connectorItems = useMemo<AIConnectorItem[]>(() => {
+    const xAvailable = running && workspaceValid !== false;
+    const gptSignedIn = bridgeState?.signedIn === true;
+    const gptEnabled = bridgeState?.enabled === true;
+    const gptConnected = bridgeState?.connected === true;
+    const codexAvailable = codexStatus?.available === true;
+    const antiAvailable = executorStatus?.available === true;
+
+    return [
+      {
+        id: 'x',
+        name: 'X',
+        badge: 'X',
+        role: 'Local coder · code_change / code_inspect',
+        detail: xAvailable ? 'Hearth server and workspace are ready' : 'Start Hearth server and verify workspace',
+        state: xPerm === 'Blocked' ? 'Disabled' : xAvailable ? 'Ready' : 'Offline',
+        tone: xPerm === 'Blocked' ? 'disabled' : xAvailable ? 'ready' : 'offline',
+        enabled: xPerm !== 'Blocked',
+        canToggle: true,
+        hint: xPerm,
+      },
+      {
+        id: 'gpt',
+        name: 'GPT',
+        badge: 'G',
+        role: 'ChatGPT / Remote Bridge',
+        detail: gptConnected ? 'Remote Bridge connected to Hearth' : gptSignedIn ? 'Signed in; bridge is not connected' : 'Sign in from Remote Inbox to connect',
+        state: !gptSignedIn ? 'Not connected' : !gptEnabled ? 'Disabled' : gptConnected ? 'Connected' : 'Offline',
+        tone: !gptSignedIn ? 'unavailable' : !gptEnabled ? 'disabled' : gptConnected ? 'connected' : 'offline',
+        enabled: gptEnabled,
+        canToggle: gptSignedIn,
+        busy: bridgeBusy,
+        hint: gptSignedIn ? (gptEnabled ? 'Bridge on' : 'Bridge off') : 'Sign in first',
+      },
+      {
+        id: 'codex',
+        name: 'Codex',
+        badge: 'C',
+        role: 'Specialist continuation · Codex CLI',
+        detail: codexAvailable ? 'Codex CLI detected; specialist authorization still required' : 'Codex CLI is not available on this Mac',
+        state: !codexAvailable ? 'Unavailable' : codexPerm === 'Blocked' ? 'Disabled' : 'Available',
+        tone: !codexAvailable ? 'unavailable' : codexPerm === 'Blocked' ? 'disabled' : 'ready',
+        enabled: codexAvailable && codexPerm !== 'Blocked',
+        canToggle: codexAvailable,
+        hint: codexAvailable ? codexPerm : 'CLI missing',
+      },
+      {
+        id: 'anti',
+        name: 'Anti',
+        badge: 'A',
+        role: 'Antigravity · general execution',
+        detail: antiAvailable ? 'Antigravity executor is available' : 'Antigravity executor is unavailable',
+        state: antigravityPerm === 'Blocked' ? 'Disabled' : antiAvailable ? 'Connected' : 'Offline',
+        tone: antigravityPerm === 'Blocked' ? 'disabled' : antiAvailable ? 'connected' : 'offline',
+        enabled: antigravityPerm !== 'Blocked',
+        canToggle: true,
+        hint: antigravityPerm,
+      },
+      {
+        id: 'claude',
+        name: 'Claude',
+        badge: 'Cl',
+        role: 'Claude connector',
+        detail: 'No first-class Claude connector is installed in Hearth yet',
+        state: 'Not connected',
+        tone: 'unavailable',
+        enabled: false,
+        canToggle: false,
+        hint: 'Not installed',
+      },
+    ];
+  }, [running, workspaceValid, xPerm, bridgeState?.signedIn, bridgeState?.enabled, bridgeState?.connected, bridgeBusy, codexStatus?.available, codexPerm, executorStatus?.available, antigravityPerm]);
+
+  const setConnectorEnabled = (connectorId: AIConnectorItem['id'], enabled: boolean) => {
+    if (connectorId === 'x') {
+      setPermissionEnabled('X', enabled);
+      return;
+    }
+    if (connectorId === 'codex') {
+      setPermissionEnabled('Codex', enabled);
+      return;
+    }
+    if (connectorId === 'anti') {
+      setPermissionEnabled('Antigravity', enabled);
+      return;
+    }
+    if (connectorId === 'gpt') {
+      if (!bridgeState?.signedIn || bridgeBusy || bridgeState.enabled === enabled) return;
+      void toggleBridge();
+    }
+  };
+
   const rotateAntigravityPerm = () => {
     const index = permissions.findIndex((p) => p.name === 'Antigravity');
     if (index !== -1) rotatePermission(index);
@@ -609,6 +746,24 @@ export default function App() {
     }
   };
 
+  const handleClearGoalHistory = async () => {
+    if (goalActionBusy || terminalGoalCount === 0) return;
+    setGoalActionBusy(true);
+    try {
+      const result = await window.controlApp.goalsClearHistory();
+      setGoals(result.remaining);
+      if (selectedGoalId && result.removedIds.includes(selectedGoalId)) {
+        setSelectedGoalId(result.remaining[0]?.id ?? null);
+      }
+      setShowClearGoalsConfirm(false);
+      flash(`Cleared ${result.removedIds.length} completed/error Goal${result.removedIds.length === 1 ? '' : 's'}`);
+    } catch (error: any) {
+      flash(error?.message || 'Could not clear Goal history');
+    } finally {
+      setGoalActionBusy(false);
+    }
+  };
+
   const handleSignoffStep = async (goalId: string, stepId: string, action: 'complete' | 'fail') => {
     setGoalActionBusy(true);
     try {
@@ -697,6 +852,40 @@ export default function App() {
     }
   };
 
+  const loadGitHubRepositories = async (alias: 'github:personal' | 'github:work', force = false) => {
+    if (!force && githubRepoLoadedRef.current.has(alias)) return;
+    setGithubRepoBusy(alias);
+    setGithubRepoErrors((current) => ({ ...current, [alias]: '' }));
+    try {
+      const result = await window.controlApp.githubRepositories(alias);
+      const repositories = Array.isArray(result?.repositories)
+        ? result.repositories.filter((repo) => typeof repo.fullName === 'string' && repo.fullName)
+        : [];
+      setGithubRepositories((current) => ({ ...current, [alias]: repositories }));
+      githubRepoLoadedRef.current.add(alias);
+    } catch (error: any) {
+      githubRepoLoadedRef.current.delete(alias);
+      setGithubRepoErrors((current) => ({ ...current, [alias]: error?.message || 'Could not load repositories' }));
+    } finally {
+      setGithubRepoBusy((current) => current === alias ? null : current);
+    }
+  };
+
+  const selectGitHubRepository = async (connection: ConnectionSummary, fullName: string) => {
+    const alias = connection.alias as 'github:personal' | 'github:work';
+    setGithubRepoBusy(alias);
+    setGithubRepoErrors((current) => ({ ...current, [alias]: '' }));
+    try {
+      const updated = await window.controlApp.githubSetDefaultRepository({ alias, fullName: fullName || null });
+      setConnections((current) => current.map((item) => item.alias === updated.alias ? updated : item));
+      flash(fullName ? `Default repository: ${fullName}` : 'Default repository cleared');
+    } catch (error: any) {
+      setGithubRepoErrors((current) => ({ ...current, [alias]: error?.message || 'Could not select repository' }));
+    } finally {
+      setGithubRepoBusy((current) => current === alias ? null : current);
+    }
+  };
+
   const connectManagedConnection = async (connection: ConnectionSummary) => {
     const token = (connectionTokenInputs[connection.alias] || '').trim();
     if (!token) {
@@ -707,11 +896,15 @@ export default function App() {
     setConnectionsError('');
     try {
       if (connection.provider === 'github') {
+        const alias = connection.alias as 'github:personal' | 'github:work';
         await window.controlApp.githubConnect({
-          alias: connection.alias as 'github:personal' | 'github:work',
+          alias,
           token,
           allowPullRequestCreate: githubPrCreateInputs[connection.alias] === true,
         });
+        githubRepoLoadedRef.current.delete(alias);
+        setGithubSetupOpen((current) => ({ ...current, [connection.alias]: false }));
+        void loadGitHubRepositories(alias, true);
       } else if (connection.provider === 'vercel') {
         await window.controlApp.vercelConnect({
           alias: 'vercel:main',
@@ -735,7 +928,12 @@ export default function App() {
     setConnectionsError('');
     try {
       if (connection.provider === 'github') {
-        await window.controlApp.githubDisconnect(connection.alias as 'github:personal' | 'github:work');
+        const alias = connection.alias as 'github:personal' | 'github:work';
+        await window.controlApp.githubDisconnect(alias);
+        githubRepoLoadedRef.current.delete(alias);
+        setGithubRepositories((current) => ({ ...current, [alias]: [] }));
+        setGithubRepoErrors((current) => ({ ...current, [alias]: '' }));
+        setGithubSetupOpen((current) => ({ ...current, [alias]: false }));
       } else if (connection.provider === 'vercel') {
         await window.controlApp.vercelDisconnect('vercel:main');
       } else {
@@ -750,13 +948,17 @@ export default function App() {
     }
   };
 
+  useEffect(() => {
+    for (const connection of connections) {
+      if (connection.provider !== 'github' || connection.status !== 'CONNECTED') continue;
+      const alias = connection.alias as 'github:personal' | 'github:work';
+      if (!githubRepoLoadedRef.current.has(alias)) void loadGitHubRepositories(alias);
+    }
+  }, [connections]);
+
   const navigate = (item: NavItem) => {
     setActiveNav(item);
-    if (item !== 'Task Console') {
-      setTimeout(() => {
-        document.getElementById(item.toLowerCase())?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, 50);
-    }
+    document.querySelector('.main-content')?.scrollTo({ top: 0 });
   };
 
   const handleChatProviderChange = (provider: 'local' | 'external') => {
@@ -1218,20 +1420,26 @@ export default function App() {
   };
 
   return (
-    <div className="app-frame">
+    <div className="app-frame calm-control">
       <div className="titlebar-drag-region" aria-hidden="true">
         <div className="window-drag-handle" />
       </div>
       <aside className="sidebar">
         <div className="brand"><div className="brand-mark"><span /><span /><span /></div><div><strong>Hearth</strong><small>Local Control</small></div></div>
         <nav aria-label="Primary navigation">
-          <p className="nav-label">CONTROL</p>
-          {nav.map((item) => (
-            <button key={item.name} className={activeNav === item.name ? 'active' : ''} onClick={() => navigate(item.name)}>
-              <Icon name={item.icon} />
-              <span>{item.name}</span>
-              {activeNav === item.name && <i />}
-            </button>
+          {navGroups.map((group) => (
+            <div className="nav-group" key={group.label}>
+              <p className="nav-label">{group.label}</p>
+              <div className="nav-group-items">
+                {group.items.map((item) => (
+                  <button key={item.name} aria-label={item.name} aria-current={activeNav === item.name ? 'page' : undefined} title={item.name} className={activeNav === item.name ? 'active' : ''} onClick={() => navigate(item.name)}>
+                    <Icon name={item.icon} />
+                    <span>{item.name}</span>
+                    {activeNav === item.name && <i />}
+                  </button>
+                ))}
+              </div>
+            </div>
           ))}
         </nav>
         <div className="sidebar-bottom">
@@ -1242,6 +1450,7 @@ export default function App() {
       </aside>
 
       <main className="main-content">
+        <div className="calm-topbar"><span>Hearth Control <span aria-hidden="true">/</span> <strong>{activeNav}</strong></span><span className="calm-server-state"><i className={running ? 'online' : ''} />{running ? 'Local server online' : 'Local server offline'}</span></div>
         {activeNav === 'Storage Audit' ? <StorageAudit /> : activeNav === 'Local Chat' ? (
           <div className="local-chat-view">
             <header className="page-header">
@@ -1341,6 +1550,29 @@ export default function App() {
                         </div>
                         <span className={`console-status status-${connection.status.toLowerCase()}`}>{connection.status}</span>
                       </div>
+                      {connection.provider === 'github' ? (
+                        <GitHubConnectionCard
+                          connection={connection}
+                          repositories={githubRepositories[connection.alias] || []}
+                          repositoryBusy={githubRepoBusy === connection.alias}
+                          repositoryError={githubRepoErrors[connection.alias] || ''}
+                          setupOpen={githubSetupOpen[connection.alias] === true}
+                          actionBusy={connectionActionBusy === connection.alias}
+                          connectionsBusy={connectionsBusy}
+                          tokenValue={connectionTokenInputs[connection.alias] || ''}
+                          allowPullRequestCreate={githubPrCreateInputs[connection.alias] === true}
+                          onOpenSetup={() => setGithubSetupOpen((current) => ({ ...current, [connection.alias]: true }))}
+                          onCloseSetup={() => setGithubSetupOpen((current) => ({ ...current, [connection.alias]: false }))}
+                          onTokenChange={(value) => setConnectionTokenInputs((current) => ({ ...current, [connection.alias]: value }))}
+                          onAllowPullRequestCreateChange={(value) => setGithubPrCreateInputs((current) => ({ ...current, [connection.alias]: value }))}
+                          onConnect={() => void connectManagedConnection(connection)}
+                          onDisconnect={() => void disconnectManagedConnection(connection)}
+                          onRefreshHealth={() => void refreshConnections(connection.alias)}
+                          onRefreshRepositories={() => void loadGitHubRepositories(connection.alias as 'github:personal' | 'github:work', true)}
+                          onSelectRepository={(fullName) => void selectGitHubRepository(connection, fullName)}
+                        />
+                      ) : (
+                        <>
                       <dl className="console-facts">
                         <div><dt>Provider</dt><dd>{connection.provider}</dd></div>
                         <div><dt>Account</dt><dd>{connection.account || '—'}</dd></div>
@@ -1348,12 +1580,12 @@ export default function App() {
                         <div><dt>Capabilities</dt><dd>{connection.capabilities.length ? connection.capabilities.join(', ') : 'None granted'}</dd></div>
                       </dl>
                       {connection.lastError && <p className="console-inline-error">Last error: {connection.lastError}</p>}
-                      {(connection.provider === 'github' || connection.provider === 'vercel') && (
+                      {connection.provider === 'vercel' && (
                         <div className="console-connection-management">
                           {connection.status !== 'CONNECTED' && (
                             <div className="console-connect-form">
                               <label>
-                                <span>{connection.provider === 'github' ? 'Fine-grained PAT' : 'Personal access token'}</span>
+                                <span>Personal access token</span>
                                 <input
                                   type="password"
                                   autoComplete="new-password"
@@ -1363,16 +1595,6 @@ export default function App() {
                                   placeholder="Enter token locally"
                                 />
                               </label>
-                              {connection.provider === 'github' && (
-                                <label className="console-checkbox">
-                                  <input
-                                    type="checkbox"
-                                    checked={githubPrCreateInputs[connection.alias] === true}
-                                    onChange={(event) => setGithubPrCreateInputs((current) => ({ ...current, [connection.alias]: event.target.checked }))}
-                                  />
-                                  Allow pull request creation
-                                </label>
-                              )}
                               {connection.provider === 'vercel' && (
                                 <label>
                                   <span>Team ID (optional)</span>
@@ -1410,6 +1632,8 @@ export default function App() {
                       )}
                       {connection.provider === 'supabase' && <p className="console-boundary-note">Authentication remains in the existing Remote Bridge / Project X surfaces; P7 does not create a second Supabase login path.</p>}
                       <button type="button" className="text-action" disabled={connectionsBusy || connectionActionBusy === connection.alias} onClick={() => void refreshConnections(connection.alias)}>Refresh health</button>
+                        </>
+                      )}
                     </article>
                   ))}
                 </div>
@@ -2021,6 +2245,15 @@ export default function App() {
               </div>
               <div className="goals-action-buttons">
                 <button
+                  className="clear-goal-history-btn"
+                  type="button"
+                  disabled={terminalGoalCount === 0 || goalActionBusy}
+                  onClick={() => setShowClearGoalsConfirm(true)}
+                  title={terminalGoalCount === 0 ? 'No completed/error Goals to clear' : `Clear ${terminalGoalCount} completed/error Goal(s)`}
+                >
+                  Clear history{terminalGoalCount > 0 ? ` (${terminalGoalCount})` : ''}
+                </button>
+                <button
                   className="task-workspace-change"
                   disabled={isTaskRunning || isGoalActive}
                   onClick={chooseWorkspace}
@@ -2043,7 +2276,10 @@ export default function App() {
               {/* Left Column: Goals List */}
               <div className="goals-list-panel">
                 <div className="goals-list-header">
-                  <h3>Goals</h3>
+                  <div>
+                    <h3>Goals</h3>
+                    <small>Active work + local history</small>
+                  </div>
                   <span className="goals-count-badge">{goals.length}</span>
                 </div>
                 {goals.length === 0 ? (
@@ -2233,11 +2469,11 @@ export default function App() {
         ) : (
           <>
             <header className="page-header" id="overview">
-              <div><p className="kicker">MCP CONTROL CENTER</p><h1>Good morning.</h1><p className="intro">Your local workspace is ready when you are.</p></div>
+              <div><p className="kicker">YOUR LOCAL CONTROL CENTER</p><h1>{activeNav === 'Overview' ? 'A clear view of your work.' : activeNav}</h1><p className="intro">{({ Overview: 'Monitor your workspace and choose where to work next.', Workspace: 'Choose the folder where Hearth can work.', Permissions: 'Decide which tools can act and which need your approval.', Logs: 'Follow activity from this app session.', 'AI Connectors': 'Manage the agents and services available to your workspace.', Updates: 'Check and prepare verified Hearth releases.' } as Partial<Record<NavItem, string>>)[activeNav]}</p></div>
               <div className={`connection-pill ${running ? 'online' : ''}`}><span /> MCP Server · {running ? 'Running' : 'Offline'}</div>
             </header>
 
-            <section className={`power-console ${running ? 'is-running' : ''}`} aria-labelledby="server-title">
+            {activeNav === 'Overview' && <><section className={`power-console ${running ? 'is-running' : ''}`} aria-labelledby="server-title">
               <div className="console-copy"><div className="console-icon"><Icon name="server" /><span className="pulse-ring" /></div><div><p className="section-kicker">SERVER STATUS</p><h2 id="server-title">{running ? 'MCP server is active' : 'MCP server is standing by'}</h2><p>{running ? `Streamable HTTP listening on 127.0.0.1:${port}.` : 'Start the server to expose Hearth MCP tools locally.'}</p></div></div>
               <div className="server-action"><label className="port-readout"><span>PORT</span><input aria-label="Server port" inputMode="numeric" disabled={running || busy} value={port} onChange={(event) => setPort(Number(event.target.value.replace(/\D/g, '').slice(0, 5)) || 3001)} onBlur={() => void window.controlApp.saveSettings({ port })} /></label><button className={`power-button ${running ? 'stop' : ''}`} disabled={busy} onClick={toggleServer}><span className="power-symbol" />{busy ? 'Working…' : running ? 'Stop Server' : 'Start Server'}</button></div>
             </section>
@@ -2249,19 +2485,25 @@ export default function App() {
               <article><div className="metric-icon purple"><Icon name="console" /></div><div><span>Executor</span><strong>{executorStatus?.available ? 'Connected' : 'Unavailable'}</strong><small>{isTaskRunning ? `Task running (${taskData?.status})` : activeTaskId ? 'Task ready' : 'Standing by'}</small></div></article>
             </section>
 
-            <div className="dashboard-grid">
-              <section className="soft-panel workspace-panel" id="workspace">
+            <section className="calm-shortcuts" aria-label="Workspace shortcuts">
+              {([{ page: 'Task Console', title: 'Tasks', detail: 'Create and follow your work', icon: 'console' }, { page: 'Goals', title: 'Goals', detail: 'Plan work across multiple steps', icon: 'flag' }, { page: 'AI Connectors', title: 'AI Connectors', detail: 'Manage available agents', icon: 'activity' }, { page: 'Console', title: 'Connections & approvals', detail: 'Review system health and evidence', icon: 'lock' }] as Array<{page: NavItem; title: string; detail: string; icon: IconName}>).map(item => <button type="button" key={item.page} onClick={() => navigate(item.page)}><Icon name={item.icon}/><strong>{item.title}</strong><span>{item.detail}</span><Icon name="chevron"/></button>)}
+            </section></>}
+
+            <div className="dashboard-grid calm-system-page">
+              {activeNav === 'Workspace' && <section className="soft-panel workspace-panel" id="workspace">
                 <div className="panel-title"><div><p className="section-kicker">WORKSPACE</p><h2>Working directory</h2></div><button className="round-button" aria-label="Copy workspace path" onClick={async () => { await navigator.clipboard.writeText(workspace); flash('Workspace path copied'); }}><Icon name="copy" /></button></div>
                 <div className="folder-well"><div className="folder-tab" /><div className="folder-icon"><Icon name="folder" /></div><label htmlFor="workspace-path">Current folder</label><input id="workspace-path" value={workspace} onChange={(event) => setWorkspace(event.target.value)} onBlur={() => void window.controlApp.saveSettings({ workspace })} disabled={isTaskRunning || isGoalActive} /><button onClick={chooseWorkspace} disabled={isTaskRunning || isGoalActive}>Choose folder <Icon name="chevron" /></button></div>
                 <p className="panel-note">{isGoalActive ? <span style={{ color: '#8a724f' }}>🔒 Workspace is locked while a goal is active.</span> : <><span /> Changes are restricted to this directory.</>}</p>
               </section>
 
-              <section className="soft-panel permission-panel" id="permissions">
+              }
+              {activeNav === 'Permissions' && <section className="soft-panel permission-panel" id="permissions">
                 <div className="panel-title"><div><p className="section-kicker">PERMISSIONS</p><h2>Tool access</h2></div><span className="panel-meta">Click to change</span></div>
                 <div className="permission-list">{permissions.map((permission, index) => <button className={`permission-row${permission.disabled ? ' disabled' : ''}`} onClick={() => rotatePermission(index)} key={permission.name} disabled={permission.disabled} aria-disabled={permission.disabled}><span className="permission-copy"><strong>{permission.name}</strong><small>{permission.detail}</small></span><em className={`permission-value value-${permission.value.toLowerCase()}`}><i />{permission.value}{!permission.disabled && <Icon name="chevron" />}</em></button>)}</div>
               </section>
 
-              <section className="soft-panel update-panel" aria-labelledby="updates-title">
+              }
+              {activeNav === 'Updates' && <section className="soft-panel update-panel" aria-labelledby="updates-title">
                 <div className="panel-title">
                   <div><p className="section-kicker">UPDATE</p><h2 id="updates-title">Hearth updates</h2></div>
                   <span className={`update-status ${updateCheck?.state ?? 'idle'}`}><i />{updateStatusText[updateCheck?.state ?? 'idle']}</span>
@@ -2286,15 +2528,39 @@ export default function App() {
                 </div>}
               </section>
 
-              <section className="soft-panel logs-panel" id="logs">
+              }
+              {activeNav === 'AI Connectors' && <AIConnectorPanel connectors={connectorItems} onToggle={setConnectorEnabled} />}
+
+              {activeNav === 'Logs' && <section className="soft-panel logs-panel" id="logs">
                 <div className="panel-title"><div><p className="section-kicker">ACTIVITY</p><h2>System log</h2></div><div className="log-actions"><span className="live-indicator"><i /> LIVE</span><button onClick={() => setLogs([])}>Clear log</button></div></div>
                 <div className="log-well" aria-live="polite">{logs.length === 0 ? <div className="empty-state"><Icon name="terminal" /><p>No activity recorded</p><small>New system events will appear here.</small></div> : logs.map((log, index) => <div className={`log-line ${log.tone}`} key={`${log.time}-${index}`}><time>{log.time}</time><span className="log-source">{log.source}</span><p>{log.message}</p></div>)}</div>
               </section>
+              }
             </div>
           </>
         )}
         <footer><span>System operates locally on this Mac</span><span>Hearth MCP tools · 1 Executor registered</span></footer>
       </main>
+
+      {showClearGoalsConfirm && (
+        <div className="approval-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setShowClearGoalsConfirm(false); }}>
+          <section className="approval-dialog goal-clear-dialog" role="dialog" aria-modal="true" aria-labelledby="clear-goals-heading">
+            <div className="approval-icon"><Icon name="flag" /></div>
+            <p className="section-kicker">GOAL HISTORY</p>
+            <h2 id="clear-goals-heading">Clear terminal Goal history?</h2>
+            <p className="approval-note">
+              This permanently removes {terminalGoalCount} completed/error Goal{terminalGoalCount === 1 ? '' : 's'} from local Hearth history.
+              Draft, ready, running, waiting, and paused Goals are preserved.
+            </p>
+            <div className="approval-actions">
+              <button type="button" className="deny-button" disabled={goalActionBusy} onClick={() => setShowClearGoalsConfirm(false)}>Cancel</button>
+              <button type="button" className="clear-confirm-button" disabled={goalActionBusy || terminalGoalCount === 0} onClick={() => void handleClearGoalHistory()}>
+                {goalActionBusy ? 'Clearing…' : 'Clear history'}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
 
       {showNewGoalModal && (
         <div className="approval-backdrop" role="presentation">
