@@ -1,7 +1,7 @@
 import { redactSecretContent } from '../x/secret-guard.mjs';
 
 export const HEARTH_JOB_VERSION = 'hearth-job-v1';
-export const HEARTH_JOB_KINDS = Object.freeze(['code_change', 'code_inspect', 'general']);
+export const HEARTH_JOB_KINDS = Object.freeze(['code_change', 'code_inspect', 'general', 'market_search', 'investment_analysis']);
 
 const KNOWN_FIELDS = new Set([
   'version', 'job_id', 'kind', 'title', 'objective',

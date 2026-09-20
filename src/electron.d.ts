@@ -19,7 +19,50 @@ interface ConnectionSummary {
 }
 
 interface ServerState { running: boolean; port: number; pid: number | null; }
-interface ServerEvent { type: 'state' | 'log' | 'approval' | 'approval:resolved' | 'bridge:state' | 'publicTasks:state' | 'goals:updated'; state?: ServerState | BridgeState | PublicTasksState; goal?: Goal; source?: string; tone?: string; message?: string; requestId?: string; permission?: string; action?: string; allowed?: boolean; reason?: 'user' | 'timeout' | 'aborted' | 'shutdown'; }
+type InvestModeName = 'OFF' | 'MONITOR' | 'DEMO_AUTO';
+interface InvestModeState {
+  version: 'invest-mode-v1';
+  mode: InvestModeName;
+  startup_mode: 'OFF' | 'MONITOR';
+  automatic_analysis_enabled: boolean;
+  demo_auto_enabled: boolean;
+  trade_execution_enabled: false;
+  restore_reason: string;
+}
+interface InvestMonitorState {
+  state: 'idle' | 'waiting_for_price' | 'waiting_for_permission' | 'permission_blocked' | 'permission_denied' | 'analyzing' | 'monitoring' | 'error' | 'unavailable';
+  interval_ms: number;
+  timeframe: string;
+  last_checked_at: string | null;
+  last_signal_at: string | null;
+  last_bar_as_of: string | null;
+  last_error: string | null;
+}
+interface InvestSignal {
+  version: 'invest-signal-journal-v1';
+  id: string;
+  symbol: 'XAUUSD';
+  timeframe: string;
+  market_as_of: string;
+  created_at: string;
+  direction: 'UP' | 'DOWN' | 'NEUTRAL';
+  confidence: number;
+  entry_zone: number[];
+  stop_loss: number | null;
+  targets: number[];
+  risk_level: 'low' | 'medium' | 'high';
+  summary: string;
+  risks: string[];
+}
+interface InvestStatus {
+  mode: InvestModeState;
+  monitor: InvestMonitorState;
+  signals: InvestSignal[];
+  mt5_bridge: { running: boolean; host?: string; http_port?: number; ingest_port?: number; snapshots: Array<{ timeframe: string; broker_symbol: string; as_of: string; age_ms: number; bar_count: number }> };
+  search_ai: { permission: PermissionValue; ready: boolean; approval_required: boolean };
+  invest_ai: { ready: boolean };
+}
+interface ServerEvent { type: 'state' | 'log' | 'approval' | 'approval:resolved' | 'bridge:state' | 'publicTasks:state' | 'goals:updated' | 'invest:updated'; state?: ServerState | BridgeState | PublicTasksState; status?: InvestStatus; goal?: Goal; source?: string; tone?: string; message?: string; requestId?: string; permission?: string; action?: string; allowed?: boolean; reason?: 'user' | 'timeout' | 'aborted' | 'shutdown'; }
 
 interface AntigravityStatus {
   available: boolean;
@@ -175,6 +218,10 @@ interface Window { controlApp: {
   platform: string;
   getSettings: () => Promise<ControlSettings>;
   saveSettings: (settings: Partial<ControlSettings>) => Promise<ControlSettings>;
+  investModeGet: () => Promise<InvestModeState>;
+  investModeSet: (mode: InvestModeName) => Promise<InvestModeState>;
+  investModeKillSwitch: () => Promise<InvestModeState>;
+  investStatusGet: () => Promise<InvestStatus>;
   connectionsList: () => Promise<ConnectionSummary[]>;
   connectionsRefresh: (alias?: string) => Promise<ConnectionSummary[]>;
   githubConnect: (request: { alias: 'github:personal' | 'github:work'; token: string; allowPullRequestCreate?: boolean }) => Promise<ConnectionSummary>;

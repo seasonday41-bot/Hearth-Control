@@ -5,7 +5,7 @@ import AIConnectorPanel, { type AIConnectorItem } from './components/AIConnector
 import GitHubConnectionCard from './components/GitHubConnectionCard';
 
 type Permission = 'Allow' | 'Ask' | 'Blocked';
-type NavItem = 'Overview' | 'Console' | 'Local Chat' | 'Storage Audit' | 'Task Console' | 'Goals' | 'Workspace' | 'Permissions' | 'Logs' | 'AI Connectors' | 'Updates';
+type NavItem = 'Overview' | 'Console' | 'Local Chat' | 'Invest' | 'Storage Audit' | 'Task Console' | 'Goals' | 'Workspace' | 'Permissions' | 'Logs' | 'AI Connectors' | 'Updates';
 type IconName = 'grid' | 'folder' | 'lock' | 'terminal' | 'moon' | 'sun' | 'chevron' | 'activity' | 'copy' | 'server' | 'console' | 'radio' | 'flag' | 'check' | 'plus';
 
 const Icon = ({ name }: { name: IconName }) => {
@@ -95,7 +95,8 @@ const initialPermissions: Array<{ name: string; detail: string; value: Permissio
   { name: 'Terminal', detail: 'Run local commands after confirmation', value: 'Ask' },
   { name: 'Antigravity', detail: 'Run approved tasks through the secure Antigravity CLI', value: 'Ask' },
   { name: 'Vercel', detail: 'Read projects and deployments through the connected Vercel account', value: 'Ask' },
-  { name: 'Browser', detail: 'No browser tool — not available in this version', value: 'Blocked', disabled: true },
+  { name: 'MarketResearch', detail: 'Use fixed-source XAU/USD research for Search AI; this does not control a browser', value: 'Ask' },
+  { name: 'Browser', detail: 'General browser automation — unavailable and unrelated to Market Research', value: 'Blocked', disabled: true },
 ];
 
 const navGroups: Array<{ label: string; items: Array<{ name: NavItem; icon: IconName }> }> = [
@@ -113,6 +114,7 @@ const navGroups: Array<{ label: string; items: Array<{ name: NavItem; icon: Icon
     items: [
       { name: 'AI Connectors', icon: 'activity' },
       { name: 'Local Chat', icon: 'radio' },
+      { name: 'Invest', icon: 'activity' },
     ],
   },
   {
@@ -176,6 +178,9 @@ export default function App() {
   const [updateCheck, setUpdateCheck] = useState<UpdateCheck | null>(null);
   const [updateBusy, setUpdateBusy] = useState(false);
   const [showUpdateDetails, setShowUpdateDetails] = useState(false);
+  const [investStatus, setInvestStatus] = useState<InvestStatus | null>(null);
+  const [investBusy, setInvestBusy] = useState(false);
+  const [investError, setInvestError] = useState('');
 
   // Bridge states
   const [bridgeState, setBridgeState] = useState<BridgeState | null>(null);
@@ -281,7 +286,8 @@ export default function App() {
       window.controlApp.goalsList().catch(() => []),
       window.controlApp.antigravityListTasks().catch(() => []),
       window.controlApp.connectionsList().catch(() => []),
-    ]).then(([settings, state, executor, codex, bridge, publicX, updateInfo, update, goalsList, taskList, connectionList]) => {
+      window.controlApp.investStatusGet().catch(() => null),
+    ]).then(([settings, state, executor, codex, bridge, publicX, updateInfo, update, goalsList, taskList, connectionList, invest]) => {
       if (!active) return;
       if (settings.workspace) setWorkspace(settings.workspace);
       setPort(settings.port);
@@ -297,6 +303,7 @@ export default function App() {
       if (update) setUpdateCheck(update);
       if (goalsList) setGoals(goalsList);
       if (Array.isArray(connectionList)) setConnections(connectionList);
+      if (invest) setInvestStatus(invest);
 
       if (Array.isArray(taskList) && taskList.length > 0) {
         const recoveringOrActive = taskList.find((t: any) => !t.dismissed && ['recovery_required', 'running', 'starting', 'waiting'].includes(t.status))
@@ -323,6 +330,9 @@ export default function App() {
       }
       if (event.type === 'publicTasks:state' && event.state) {
         setPublicXState(event.state as PublicTasksState);
+      }
+      if (event.type === 'invest:updated' && event.status) {
+        setInvestStatus(event.status);
       }
       if (event.type === 'log' && event.message) {
         setLogs((current) => [...current, { time: now(), source: event.source ?? 'core', tone: event.tone ?? 'quiet', message: event.message ?? '' }]);
@@ -374,6 +384,17 @@ export default function App() {
     });
     return () => { active = false; };
   }, [activeNav, chatProvider]);
+
+  useEffect(() => {
+    if (activeNav !== 'Invest') return;
+    let active = true;
+    void window.controlApp.investStatusGet().then((status) => {
+      if (active) setInvestStatus(status);
+    }).catch((error: any) => {
+      if (active) setInvestError(error?.message || 'Invest status is unavailable.');
+    });
+    return () => { active = false; };
+  }, [activeNav]);
 
   useEffect(() => {
     if (activeNav !== 'Local Chat') return;
@@ -699,6 +720,49 @@ export default function App() {
       void window.controlApp.saveSettings({ permissions: Object.fromEntries(next.map((item) => [item.name, item.value])) });
       return next;
     });
+  };
+
+  const setInvestMode = async (mode: InvestModeName) => {
+    if (investBusy) return;
+    setInvestBusy(true);
+    setInvestError('');
+    try {
+      const next = await window.controlApp.investModeSet(mode);
+      setInvestStatus((current) => current ? { ...current, mode: next } : null);
+      flash(`Invest mode changed to ${mode.replace('_', ' ')}`);
+    } catch (error) {
+      setInvestError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setInvestBusy(false);
+    }
+  };
+
+  const useInvestKillSwitch = async () => {
+    if (investBusy) return;
+    setInvestBusy(true);
+    setInvestError('');
+    try {
+      const next = await window.controlApp.investModeKillSwitch();
+      setInvestStatus((current) => current ? { ...current, mode: next } : null);
+      flash('Invest stopped and returned to OFF');
+    } catch (error) {
+      setInvestError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setInvestBusy(false);
+    }
+  };
+
+  const setMarketResearchPermission = (value: Permission) => {
+    setPermissions((current) => {
+      const next = current.map((item) => item.name === 'MarketResearch' ? { ...item, value } : item);
+      void window.controlApp.saveSettings({ permissions: Object.fromEntries(next.map((item) => [item.name, item.value])) });
+      return next;
+    });
+    setInvestStatus((current) => current ? {
+      ...current,
+      search_ai: { permission: value, ready: value !== 'Blocked', approval_required: value === 'Ask' },
+    } : current);
+    flash(`Market Research set to ${value}`);
   };
 
   const chooseWorkspace = async () => {
@@ -1507,6 +1571,57 @@ export default function App() {
               {(chatStreamText || chatResult) && <section className="local-chat-result" aria-live="polite"><div className="local-chat-result-meta"><span>{chatResult?.provider || 'ollama'}</span><span>{chatResult?.model || chatModel}</span><span>{chatProvider === 'local' ? chatProfile.toUpperCase() : 'EXTERNAL'}</span><span>{chatStreaming ? `${Math.round(chatElapsedMs / 1000)}s` : `${chatResult?.elapsedMs || chatElapsedMs} ms`}</span></div><div ref={chatResponseRef} className="local-chat-response-viewer" onScroll={handleChatResponseScroll}><LocalChatResponse text={chatStreamText || chatResult?.response || ''} onExpand={(code, language) => setChatExpandedCode({ code, language })} /></div>{!chatFollowOutput && chatStreaming && <button type="button" className="local-chat-bottom-button" onClick={() => { setChatFollowOutput(true); if (chatResponseRef.current) chatResponseRef.current.scrollTop = chatResponseRef.current.scrollHeight; }}>↓ Bottom</button>}{chatResult?.doneReason === 'length' && <small className="local-chat-output-warning">Response reached the output limit.</small>}</section>}
               {showChatContext && <section className="local-chat-context-inspector" aria-label="Local AI context"><header><strong>Context supplied to Local AI</strong><button type="button" onClick={() => setShowChatContext(false)}>Close</button></header>{chatContextLoading ? <p>Loading current context…</p> : chatContextError ? <p role="alert">{chatContextError}</p> : chatContext && <div><h3>Runtime</h3><pre>{chatContext.runtime}</pre><h3>Capabilities</h3><p><strong>Available:</strong> {chatContext.capabilities.available.join('; ')}</p><p><strong>Not available:</strong> {chatContext.capabilities.unavailable.join('; ')}</p><h3>Project</h3><pre>{chatContext.project}</pre><h3>Safety</h3><p>{chatContext.safety}</p><h3>Response Style</h3><p>{chatContext.responseStyle}</p></div>}</section>}
               {chatExpandedCode && <div className="local-chat-code-modal" role="dialog" aria-modal="true"><div className="local-chat-code-modal-header"><span>{chatExpandedCode.language || 'code'}</span><button type="button" onClick={() => setChatExpandedCode(null)}>Close</button></div><pre><code>{chatExpandedCode.code}</code></pre></div>}
+            </section>
+          </div>
+        ) : activeNav === 'Invest' ? (
+          <div className="invest-view">
+            <header className="page-header">
+              <div>
+                <p className="kicker">XAU/USD INVEST</p>
+                <h1>Invest control.</h1>
+                <p className="intro">Monitor each new XAU/USD H1 bar, save its signal, and notify you on this Mac. Trade execution is not enabled.</p>
+              </div>
+              <div className={`connection-pill ${investStatus?.mode.mode !== 'OFF' ? 'online' : ''}`}><span /> {investStatus?.mode.mode.replace('_', ' ') || 'Loading'}</div>
+            </header>
+
+            <section className="invest-status-grid" aria-label="Invest services">
+              <article><span className={`invest-status-dot ${investStatus?.mt5_bridge.snapshots.length ? 'ready' : ''}`} /><div><small>MT5 BRIDGE</small><strong>{investStatus?.mt5_bridge.snapshots.length ? 'Connected' : investStatus?.mt5_bridge.running ? 'Waiting for price' : 'Offline'}</strong><p>{investStatus?.mt5_bridge.snapshots.length ? `${investStatus.mt5_bridge.snapshots[0].broker_symbol} · ${investStatus.mt5_bridge.snapshots.map((item) => item.timeframe).join(', ')}` : 'Open the MT5 EA to stream XAUUSD data.'}</p></div></article>
+              <article><span className={`invest-status-dot ${investStatus?.search_ai.ready ? 'ready' : ''}`} /><div><small>SEARCH AI</small><strong>{investStatus?.search_ai.ready ? investStatus.search_ai.approval_required ? 'Ask before research' : 'Ready' : 'Blocked'}</strong><p>Uses fixed-origin market sources. It does not require Browser automation.</p></div></article>
+              <article><span className={`invest-status-dot ${investStatus?.invest_ai.ready ? 'ready' : ''}`} /><div><small>INVEST AI</small><strong>{investStatus?.monitor.state === 'analyzing' ? 'Analyzing' : investStatus?.invest_ai.ready ? 'Ready' : 'Unavailable'}</strong><p>AI narrative cannot change direction, confidence, entry, stop loss, or take profit.</p></div></article>
+            </section>
+
+            <section className="soft-panel invest-controller" aria-labelledby="invest-mode-title">
+              <div className="panel-title"><div><p className="section-kicker">MODE CONTROLLER</p><h2 id="invest-mode-title">Operating mode</h2></div><span className="invest-session-label">Startup: {investStatus?.mode.startup_mode || 'OFF'}</span></div>
+              <div className="invest-mode-buttons" role="group" aria-label="Invest operating mode">
+                {(['OFF', 'MONITOR', 'DEMO_AUTO'] as InvestModeName[]).map((mode) => <button type="button" key={mode} className={investStatus?.mode.mode === mode ? 'selected' : ''} aria-pressed={investStatus?.mode.mode === mode} disabled={investBusy || !investStatus} onClick={() => void setInvestMode(mode)}>{mode === 'DEMO_AUTO' ? 'DEMO AUTO' : mode}</button>)}
+              </div>
+              <div className="invest-mode-explanation">
+                <strong>{investStatus?.mode.mode === 'MONITOR' ? 'Monitor selected' : investStatus?.mode.mode === 'DEMO_AUTO' ? 'Demo Auto selected for this session' : 'Invest is off'}</strong>
+                <p>{investStatus?.mode.mode === 'MONITOR' ? `Watching ${investStatus.monitor.timeframe} for a new MT5 bar. ${investStatus.monitor.state === 'waiting_for_permission' ? 'Waiting for Market Research approval.' : investStatus.monitor.state === 'permission_denied' ? 'Research was denied for this bar.' : investStatus.monitor.state === 'permission_blocked' ? 'Market Research is blocked.' : investStatus.monitor.state === 'waiting_for_price' ? 'Waiting for MT5 price data.' : investStatus.monitor.state === 'analyzing' ? 'Search AI and Invest AI are analyzing now.' : 'A Mac notification will appear after a new signal is saved.'}` : investStatus?.mode.mode === 'DEMO_AUTO' ? 'Signals and notifications are active, but no trades can be sent. DEMO AUTO is never restored after restart.' : 'Market data may still arrive, but Invest will not start analysis or trading.'}</p>
+              </div>
+
+              <div className="invest-permission-control">
+                <div><strong>Market Research permission</strong><small>Separate from the unavailable Browser automation tool.</small></div>
+                <div role="group" aria-label="Market Research permission">
+                  {(['Allow', 'Ask', 'Blocked'] as Permission[]).map((value) => <button type="button" key={value} className={investStatus?.search_ai.permission === value ? 'selected' : ''} aria-pressed={investStatus?.search_ai.permission === value} onClick={() => setMarketResearchPermission(value)}>{value}</button>)}
+                </div>
+              </div>
+
+              <div className="invest-safety-row">
+                <div><strong>Startup safety is active</strong><p>DEMO AUTO always falls back to OFF after restart. Real trade execution remains disabled.</p></div>
+                <button type="button" className="invest-kill-switch" disabled={investBusy || investStatus?.mode.mode === 'OFF'} onClick={() => void useInvestKillSwitch()}>KILL SWITCH</button>
+              </div>
+              {investError && <p className="invest-error" role="alert">{investError}</p>}
+            </section>
+
+            <section className="soft-panel invest-journal" aria-labelledby="invest-journal-title">
+              <div className="panel-title"><div><p className="section-kicker">SIGNAL JOURNAL</p><h2 id="invest-journal-title">Latest analysis</h2></div><span className="invest-session-label">{investStatus?.signals.length || 0} saved</span></div>
+              {investStatus?.signals.length ? <div className="invest-signal-list">{investStatus.signals.map((signal) => <article key={signal.id}>
+                <div className="invest-signal-heading"><span className={`invest-direction direction-${signal.direction.toLowerCase()}`}>{signal.direction}</span><strong>{signal.confidence}%</strong><time>{new Date(signal.created_at).toLocaleString()}</time></div>
+                <div className="invest-signal-levels"><span>Entry <strong>{signal.entry_zone.length ? signal.entry_zone.join('–') : '—'}</strong></span><span>SL <strong>{signal.stop_loss ?? '—'}</strong></span><span>TP <strong>{signal.targets[0] ?? '—'}</strong></span><span>Risk <strong>{signal.risk_level}</strong></span></div>
+                {signal.summary && <p>{signal.summary}</p>}
+                {signal.risks[0] && <small>Risk: {signal.risks[0]}</small>}
+              </article>)}</div> : <div className="invest-journal-empty"><strong>No signals yet</strong><p>Set Market Research to Allow or approve the request, select MONITOR, and keep the MT5 EA streaming XAUUSD H1 data.</p></div>}
             </section>
           </div>
         ) : activeNav === 'Console' ? (

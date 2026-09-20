@@ -58,9 +58,10 @@ test('P8.15 Electron general route is TaskStore-owned and reuses Antigravity run
 });
 
 test('P8.16 cross-route ambiguity and same-id conflicts fail closed', () => {
-  assert.match(ingress, /if \(xReceipt && antigravityTask\) throw hearthJobError\('ambiguous_job_state'\)/);
-  assert.match(ingress, /if \(route === 'x' && antigravityTask\) throw hearthJobError\('job_route_conflict'\)/);
-  assert.match(ingress, /if \(route === 'antigravity' && xReceipt\) throw hearthJobError\('job_route_conflict'\)/);
+  assert.match(ingress, /if \(xReceipt && storedTask\) throw hearthJobError\('ambiguous_job_state'\)/);
+  assert.match(ingress, /if \(route === 'x' && storedTask\) throw hearthJobError\('job_route_conflict'\)/);
+  assert.match(ingress, /if \(route === 'antigravity' && \(xReceipt \|\| storedMarketKind\)\) throw hearthJobError\('job_route_conflict'\)/);
+  assert.match(ingress, /if \(route === 'market' && \(xReceipt \|\| \(storedTask && !storedMarketKind\)\)\) throw hearthJobError\('job_route_conflict'\)/);
   assert.match(ingress, /if \(current\.requestId !== requestId\) throw hearthJobError\('job_id_conflict'\)/);
   assert.match(ingress, /existingInflight\.fingerprint !== fingerprint/);
 });
@@ -77,7 +78,8 @@ test('P8.17 universal workspace is transport/Electron-owned and three-way checke
 test('P8.18 Antigravity permission and approval liveness stay authoritative', () => {
   assert.match(ingress, /readSettings\(\)\.permissions\?\.Antigravity \?\? 'Ask'/);
   assert.match(ingress, /permission === 'Blocked'/);
-  assert.match(ingress, /requestHearthJobAntigravityApproval/);
+  assert.match(ingress, /requestHearthJobPermissionApproval/);
+  assert.match(ingress, /'Antigravity'/);
   assert.match(ingress, /shared\.abort\.signal\.aborted/);
   assert.match(ingress, /shared\.waiters\.size === 0/);
   assert.match(ingress, /serverProcess !== child/);
@@ -106,5 +108,5 @@ test('P8.21 Codex remains outside fresh-job router implementation', () => {
   assert.doesNotMatch(contract, /codex/i);
   assert.doesNotMatch(router, /codex/i);
   assert.doesNotMatch(ingress, /codex/i);
-  assert.doesNotMatch(ingress, /specialist/i);
+  assert.doesNotMatch(ingress, /goal_dispatch_specialist_execution|goal_request_specialist_handoff/);
 });

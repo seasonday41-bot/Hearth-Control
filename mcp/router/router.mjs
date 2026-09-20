@@ -7,6 +7,8 @@ export const HEARTH_JOB_ROUTES = Object.freeze({
   code_change: 'x',
   code_inspect: 'x',
   general: 'antigravity',
+  market_search: 'market',
+  investment_analysis: 'market',
 });
 
 export const hearthJobTaskId = (jobId) => `hearthjob:${jobId}`;
@@ -21,7 +23,11 @@ export const routeHearthJob = (input) => {
     route,
     reason: route === 'x'
       ? `Hearth Router · ${job.kind} uses X coding pipeline`
-      : 'Hearth Router · general work uses Antigravity',
+      : route === 'antigravity'
+        ? 'Hearth Router · general work uses Antigravity'
+        : job.kind === 'market_search'
+          ? 'Hearth Router · market_search uses XAU/USD Search AI'
+          : 'Hearth Router · investment_analysis uses XAU/USD Invest AI',
   };
 };
 
