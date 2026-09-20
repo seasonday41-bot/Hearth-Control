@@ -240,9 +240,25 @@ Startup safety is enforced in the controller and its persisted document:
 - a corrupt, unknown, or manually persisted `DEMO_AUTO` startup value fails closed to `OFF`
 - the kill switch changes the current and restart modes to `OFF`
 
-The controller is initialized by Electron from `invest-mode.json` and the installed control surface exposes its bounded local get/set/kill-switch calls. The Invest page shows MT5 Bridge, Search AI, and Invest AI readiness; its controls do not add the analysis loop, signal journal, risk gate, order APIs, or real/demo trade execution. Controller state therefore reports `trade_execution_enabled: false` in every mode.
+The controller is initialized by Electron from `invest-mode.json` and the installed control surface exposes its bounded local get/set/kill-switch calls. The Invest page shows MT5 Bridge, Search AI, Invest AI, monitor state, and the local Signal Journal. Controller state continues to report `trade_execution_enabled: false` in every mode.
 
 Market research now has its own `MarketResearch` permission. `Ask` reuses Hearth's local approval lifecycle, `Allow` permits fixed-origin research, and `Blocked` fails before network access. The disabled `Browser` row refers only to general browser automation and is not a Search AI dependency.
+
+## MONITOR loop and Signal Journal
+
+When `MONITOR` or the current-session `DEMO_AUTO` intent is active, Electron polls the local MT5 bridge every 15 seconds for the latest H1 snapshot. A new `XAUUSD:H1:<as_of>` key runs the existing live Search → MT5 → Invest pipeline once. A successfully persisted key is never analyzed twice, including after restart.
+
+The loop fails closed:
+
+- `OFF` performs no analysis
+- no H1 snapshot remains `waiting_for_price`
+- `MarketResearch: Blocked` performs no network request
+- `MarketResearch: Ask` creates one local approval request per bar; denial does not repeatedly prompt for that bar
+- changing to `OFF` aborts an in-flight analysis
+- a signal is written atomically to `invest-signals.json` before any best-effort macOS notification
+- the journal retains the latest 200 signals and the UI displays the latest 50
+
+Each signal stores deterministic direction, confidence, entry zone, invalidation/stop loss, targets, and risk level plus the already-sandboxed narrative summary and risks. There are no order, account, lot-size, or broker trade APIs in this slice.
 
 ## Hearth Router integration
 
@@ -312,14 +328,11 @@ The EA protocol/source invariants are covered by automated tests and the same pa
 
 The pre-existing dirty `electron/build-meta.json` was backed up before validation build and restored afterward. This Market V1 work does not intentionally own that file.
 
-## Remaining work before the Investment App
+## Remaining work before demo execution
 
-1. Add the MONITOR auto-analysis loop with a fixed cadence and same-bar deduplication.
-2. Add the Signal Journal for UP / DOWN / NEUTRAL outcomes before measuring win rate or profit factor.
-3. Add the Signal Journal UI after its persistence contract exists.
-4. Design the demo-only risk gate and executor separately; require confidence threshold, stop loss, position cap, daily loss limit, and explicit current-session enablement. Do not add live-account execution.
-5. Revalidate the installed MT5 Desktop terminal, compiled EA, broker connection, and current XAUUSD chart attachment before any later live smoke.
-6. Extend the Invest surface only after the backend loop and journal contracts are stable.
+1. Add outcome tracking for Win / Loss / Neutral before measuring win rate or profit factor.
+2. Design the demo-only risk gate and executor separately; require confidence threshold, stop loss, position cap, daily loss limit, and explicit current-session enablement. Do not add live-account execution.
+3. Revalidate the installed MT5 Desktop terminal, compiled EA, broker connection, and current XAUUSD chart attachment before any later live smoke.
 
 The software path from MT5-format TCP snapshot through live Search AI and the Invest engine has already passed an end-to-end smoke using the production bridge protocol.
 

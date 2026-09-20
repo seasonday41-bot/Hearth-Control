@@ -331,6 +331,9 @@ export default function App() {
       if (event.type === 'publicTasks:state' && event.state) {
         setPublicXState(event.state as PublicTasksState);
       }
+      if (event.type === 'invest:updated' && event.status) {
+        setInvestStatus(event.status);
+      }
       if (event.type === 'log' && event.message) {
         setLogs((current) => [...current, { time: now(), source: event.source ?? 'core', tone: event.tone ?? 'quiet', message: event.message ?? '' }]);
       }
@@ -1576,7 +1579,7 @@ export default function App() {
               <div>
                 <p className="kicker">XAU/USD INVEST</p>
                 <h1>Invest control.</h1>
-                <p className="intro">Choose how Invest may observe the market. Trade execution is not enabled in this release.</p>
+                <p className="intro">Monitor each new XAU/USD H1 bar, save its signal, and notify you on this Mac. Trade execution is not enabled.</p>
               </div>
               <div className={`connection-pill ${investStatus?.mode.mode !== 'OFF' ? 'online' : ''}`}><span /> {investStatus?.mode.mode.replace('_', ' ') || 'Loading'}</div>
             </header>
@@ -1584,7 +1587,7 @@ export default function App() {
             <section className="invest-status-grid" aria-label="Invest services">
               <article><span className={`invest-status-dot ${investStatus?.mt5_bridge.snapshots.length ? 'ready' : ''}`} /><div><small>MT5 BRIDGE</small><strong>{investStatus?.mt5_bridge.snapshots.length ? 'Connected' : investStatus?.mt5_bridge.running ? 'Waiting for price' : 'Offline'}</strong><p>{investStatus?.mt5_bridge.snapshots.length ? `${investStatus.mt5_bridge.snapshots[0].broker_symbol} · ${investStatus.mt5_bridge.snapshots.map((item) => item.timeframe).join(', ')}` : 'Open the MT5 EA to stream XAUUSD data.'}</p></div></article>
               <article><span className={`invest-status-dot ${investStatus?.search_ai.ready ? 'ready' : ''}`} /><div><small>SEARCH AI</small><strong>{investStatus?.search_ai.ready ? investStatus.search_ai.approval_required ? 'Ask before research' : 'Ready' : 'Blocked'}</strong><p>Uses fixed-origin market sources. It does not require Browser automation.</p></div></article>
-              <article><span className={`invest-status-dot ${investStatus?.invest_ai.ready ? 'ready' : ''}`} /><div><small>INVEST AI</small><strong>{investStatus?.invest_ai.ready ? 'Ready' : 'Unavailable'}</strong><p>AI narrative cannot change direction, confidence, entry, stop loss, or take profit.</p></div></article>
+              <article><span className={`invest-status-dot ${investStatus?.invest_ai.ready ? 'ready' : ''}`} /><div><small>INVEST AI</small><strong>{investStatus?.monitor.state === 'analyzing' ? 'Analyzing' : investStatus?.invest_ai.ready ? 'Ready' : 'Unavailable'}</strong><p>AI narrative cannot change direction, confidence, entry, stop loss, or take profit.</p></div></article>
             </section>
 
             <section className="soft-panel invest-controller" aria-labelledby="invest-mode-title">
@@ -1594,7 +1597,7 @@ export default function App() {
               </div>
               <div className="invest-mode-explanation">
                 <strong>{investStatus?.mode.mode === 'MONITOR' ? 'Monitor selected' : investStatus?.mode.mode === 'DEMO_AUTO' ? 'Demo Auto selected for this session' : 'Invest is off'}</strong>
-                <p>{investStatus?.mode.mode === 'MONITOR' ? 'The controller is ready for the automatic analysis loop, which is the next planned slice and is not running yet.' : investStatus?.mode.mode === 'DEMO_AUTO' ? 'No trades can be sent yet. DEMO AUTO is never restored after an app restart.' : 'Market data may still arrive, but Invest will not start analysis or trading.'}</p>
+                <p>{investStatus?.mode.mode === 'MONITOR' ? `Watching ${investStatus.monitor.timeframe} for a new MT5 bar. ${investStatus.monitor.state === 'waiting_for_permission' ? 'Waiting for Market Research approval.' : investStatus.monitor.state === 'permission_denied' ? 'Research was denied for this bar.' : investStatus.monitor.state === 'permission_blocked' ? 'Market Research is blocked.' : investStatus.monitor.state === 'waiting_for_price' ? 'Waiting for MT5 price data.' : investStatus.monitor.state === 'analyzing' ? 'Search AI and Invest AI are analyzing now.' : 'A Mac notification will appear after a new signal is saved.'}` : investStatus?.mode.mode === 'DEMO_AUTO' ? 'Signals and notifications are active, but no trades can be sent. DEMO AUTO is never restored after restart.' : 'Market data may still arrive, but Invest will not start analysis or trading.'}</p>
               </div>
 
               <div className="invest-permission-control">
@@ -1609,6 +1612,16 @@ export default function App() {
                 <button type="button" className="invest-kill-switch" disabled={investBusy || investStatus?.mode.mode === 'OFF'} onClick={() => void useInvestKillSwitch()}>KILL SWITCH</button>
               </div>
               {investError && <p className="invest-error" role="alert">{investError}</p>}
+            </section>
+
+            <section className="soft-panel invest-journal" aria-labelledby="invest-journal-title">
+              <div className="panel-title"><div><p className="section-kicker">SIGNAL JOURNAL</p><h2 id="invest-journal-title">Latest analysis</h2></div><span className="invest-session-label">{investStatus?.signals.length || 0} saved</span></div>
+              {investStatus?.signals.length ? <div className="invest-signal-list">{investStatus.signals.map((signal) => <article key={signal.id}>
+                <div className="invest-signal-heading"><span className={`invest-direction direction-${signal.direction.toLowerCase()}`}>{signal.direction}</span><strong>{signal.confidence}%</strong><time>{new Date(signal.created_at).toLocaleString()}</time></div>
+                <div className="invest-signal-levels"><span>Entry <strong>{signal.entry_zone.length ? signal.entry_zone.join('–') : '—'}</strong></span><span>SL <strong>{signal.stop_loss ?? '—'}</strong></span><span>TP <strong>{signal.targets[0] ?? '—'}</strong></span><span>Risk <strong>{signal.risk_level}</strong></span></div>
+                {signal.summary && <p>{signal.summary}</p>}
+                {signal.risks[0] && <small>Risk: {signal.risks[0]}</small>}
+              </article>)}</div> : <div className="invest-journal-empty"><strong>No signals yet</strong><p>Set Market Research to Allow or approve the request, select MONITOR, and keep the MT5 EA streaming XAUUSD H1 data.</p></div>}
             </section>
           </div>
         ) : activeNav === 'Console' ? (

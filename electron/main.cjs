@@ -48,6 +48,8 @@ let goalRunner = null;
 let taskStore = null;
 let mt5BridgeServer = null;
 let investModeController = null;
+let investMonitor = null;
+let investSignalJournal = null;
 let connectionRegistry = null;
 let credentialStore = null;
 let connectionService = null;
@@ -328,6 +330,57 @@ const getPublicTasksState = () => {
 };
 const sendPublicTasksState = () => sendEvent({ type: 'publicTasks:state', state: getPublicTasksState() });
 const sendEvent = (event) => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('server:event', event); };
+const publicInvestStatus = () => {
+  if (!investModeController) throw new Error('invest_mode_controller_unavailable');
+  const bridge = mt5BridgeServer?.status?.() ?? { running: false, snapshots: [] };
+  const permission = readSettings().permissions?.MarketResearch ?? 'Ask';
+  return {
+    mode: investModeController.getState(),
+    monitor: investMonitor?.getState?.() ?? {
+      state: 'unavailable', interval_ms: 15_000, timeframe: 'H1', last_checked_at: null,
+      last_signal_at: null, last_bar_as_of: null, last_error: null,
+    },
+    signals: investSignalJournal?.list?.() ?? [],
+    mt5_bridge: bridge,
+    search_ai: { permission, ready: permission !== 'Blocked', approval_required: permission === 'Ask' },
+    invest_ai: { ready: true },
+  };
+};
+const sendInvestUpdate = () => {
+  try { sendEvent({ type: 'invest:updated', status: publicInvestStatus() }); } catch {}
+};
+const requestInvestMonitorPermission = ({ timeframe, asOf }) => new Promise((resolve) => {
+  const requestId = `invest-monitor:${crypto.randomUUID()}`;
+  let settled = false;
+  const finish = (allowed, reason = 'user') => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    localApprovals.delete(requestId);
+    sendEvent({ type: 'approval:resolved', requestId, permission: 'MarketResearch', allowed: allowed === true, reason });
+    resolve(allowed === true);
+  };
+  const timer = setTimeout(() => finish(false, 'timeout'), 60_000);
+  timer.unref?.();
+  localApprovals.set(requestId, (allowed) => finish(allowed, 'user'));
+  sendEvent({
+    type: 'approval', requestId, permission: 'MarketResearch',
+    action: `Analyze XAU/USD ${timeframe} bar ${asOf} and save a local signal`,
+  });
+});
+const notifyInvestSignal = (signal) => {
+  try {
+    if (!Notification?.isSupported?.()) return;
+    const entry = signal.entry_zone.length ? signal.entry_zone.join('–') : '—';
+    const stop = signal.stop_loss == null ? '—' : signal.stop_loss;
+    const target = signal.targets[0] ?? '—';
+    const summary = String(signal.summary || '').replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 140);
+    new Notification({
+      title: `XAU/USD · ${signal.direction} · ${signal.confidence}%`,
+      body: `Entry ${entry} · SL ${stop} · TP ${target}${summary ? `\n${summary}` : ''}`,
+    }).show();
+  } catch { /* best effort */ }
+};
 
 const initializeConnectionInfrastructure = async () => {
   const { ConnectionRegistry } = await importFromHere('../mcp/connections/registry.mjs');
@@ -2238,6 +2291,30 @@ app.whenReady().then(async () => {
   }
 
   try {
+    const { InvestMonitor, InvestSignalJournal, InvestSignalJournalFileStore } = await importFromHere('../mcp/market/invest-monitor.mjs');
+    const { runLiveXauInvestment } = await importFromHere('../mcp/market/live-runtime.mjs');
+    investSignalJournal = new InvestSignalJournal({
+      store: new InvestSignalJournalFileStore({ storagePath: path.join(app.getPath('userData'), 'invest-signals.json') }),
+    });
+    investSignalJournal.load();
+    investMonitor = new InvestMonitor({
+      getMode: () => investModeController?.getState?.() ?? { automatic_analysis_enabled: false },
+      getPermission: () => readSettings().permissions?.MarketResearch ?? 'Ask',
+      getBridgeStatus: () => mt5BridgeServer?.status?.() ?? { running: false, snapshots: [] },
+      requestPermission: requestInvestMonitorPermission,
+      runInvestment: ({ timeframe, signal }) => runLiveXauInvestment({ timeframe, signal }),
+      journal: investSignalJournal,
+      notify: notifyInvestSignal,
+      onUpdate: sendInvestUpdate,
+    });
+    investMonitor.start();
+  } catch (err) {
+    investMonitor = null;
+    investSignalJournal = null;
+    console.error('[InvestMonitor] Failed to initialize:', err?.message || err);
+  }
+
+  try {
     const { JobManager, setJobManager } = await importFromHere('../mcp/runtime/job-manager.mjs');
     const {
       getAntigravityTask,
@@ -2423,27 +2500,17 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle('invest-mode:set', (_event, mode) => {
     if (!investModeController) throw new Error('invest_mode_controller_unavailable');
-    return investModeController.setMode(mode);
+    const state = investModeController.setMode(mode);
+    investMonitor?.syncMode?.();
+    return state;
   });
   ipcMain.handle('invest-mode:kill-switch', () => {
     if (!investModeController) throw new Error('invest_mode_controller_unavailable');
-    return investModeController.killSwitch();
+    const state = investModeController.killSwitch();
+    investMonitor?.syncMode?.();
+    return state;
   });
-  ipcMain.handle('invest-status:get', () => {
-    if (!investModeController) throw new Error('invest_mode_controller_unavailable');
-    const bridge = mt5BridgeServer?.status?.() ?? { running: false, snapshots: [] };
-    const permission = readSettings().permissions?.MarketResearch ?? 'Ask';
-    return {
-      mode: investModeController.getState(),
-      mt5_bridge: bridge,
-      search_ai: {
-        permission,
-        ready: permission !== 'Blocked',
-        approval_required: permission === 'Ask',
-      },
-      invest_ai: { ready: true },
-    };
-  });
+  ipcMain.handle('invest-status:get', () => publicInvestStatus());
   const listPublicConnections = () => {
     if (!connectionService || !connectionRegistry) return [];
     return connectionRegistry.list().map((connection) => {
@@ -2525,6 +2592,7 @@ app.whenReady().then(async () => {
     }
     const saved = saveSettings(settings);
     if (serverProcess && settings.permissions) serverProcess.send({ type: 'settings:update', permissions: saved.permissions });
+    if (settings.permissions) investMonitor?.syncMode?.();
     return saved;
   });
   ipcMain.handle('local-chat:status', async () => {
@@ -4033,6 +4101,10 @@ app.on('before-quit', () => {
     const bridge = mt5BridgeServer;
     mt5BridgeServer = null;
     void bridge.stop().catch((error) => console.error('[MT5Bridge] Failed to stop local bridge:', error));
+  }
+  if (investMonitor) {
+    investMonitor.stop();
+    investMonitor = null;
   }
   for (const timer of taskMonitors.values()) clearInterval(timer);
   taskMonitors.clear();

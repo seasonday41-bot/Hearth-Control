@@ -17,10 +17,12 @@ test('Invest UI exposes the three bounded modes and kill switch', () => {
   assert.doesNotMatch(app, /sendOrder|placeOrder|executeTrade/);
 });
 
-test('Invest UI is explicit about incomplete automation and restart safety', () => {
-  assert.match(app, /Trade execution is not enabled in this release/);
-  assert.match(app, /automatic analysis loop, which is the next planned slice and is not running yet/);
-  assert.match(app, /DEMO AUTO is never restored after an app restart/);
+test('Invest UI exposes monitor status, notifications, journal, and restart safety', () => {
+  assert.match(app, /Trade execution is not enabled/);
+  assert.match(app, /A Mac notification will appear after a new signal is saved/);
+  assert.match(app, /SIGNAL JOURNAL/);
+  assert.match(app, /investStatus\.signals\.map/);
+  assert.match(app, /DEMO AUTO is never restored after restart/);
   assert.match(app, /Real trade execution remains disabled/);
 });
 
@@ -37,5 +39,6 @@ test('Invest page includes responsive status and controller styling', () => {
   assert.match(css, /\.invest-status-grid/);
   assert.match(css, /\.invest-mode-buttons/);
   assert.match(css, /\.invest-kill-switch/);
+  assert.match(css, /\.invest-signal-list/);
   assert.match(css, /@media \(max-width: 700px\)/);
 });

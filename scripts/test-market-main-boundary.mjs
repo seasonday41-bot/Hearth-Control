@@ -65,3 +65,14 @@ test('Market Main V1.6 Invest Mode Controller restores before exposing bounded l
   assert.match(main, /mt5BridgeServer\?\.status\?\.\(\)/);
   assert.match(preload, /investStatusGet: \(\) => ipcRenderer\.invoke\('invest-status:get'\)/);
 });
+
+test('Market Main V1.7 monitor journals before notifying and remains execution-free', () => {
+  assert.match(main, /new InvestSignalJournal/);
+  assert.match(main, /new InvestMonitor/);
+  assert.match(main, /invest-signals\.json/);
+  assert.match(main, /notify: notifyInvestSignal/);
+  assert.match(main, /requestPermission: requestInvestMonitorPermission/);
+  assert.match(main, /investMonitor\?\.syncMode\?\.\(\)/);
+  assert.match(main, /investMonitor\.stop\(\)/);
+  assert.doesNotMatch(main, /sendOrder|placeOrder|executeTrade/);
+});
