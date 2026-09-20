@@ -240,6 +240,12 @@ await test('6b. crash recovery: a claimed-but-unimported row (local_goal_id stil
   assert.equal(runner.list_goals().length, 1);
 });
 
+await test('6c. startup recovery helper is hoisted before a restored session can schedule it', async () => {
+  const mainSource = await fs.readFile(path.resolve('electron/main.cjs'), 'utf8');
+  assert.match(mainSource, /async function recoverUnimportedGoalRequests\(\)/);
+  assert.doesNotMatch(mainSource, /const recoverUnimportedGoalRequests\s*=/);
+});
+
 await test('7. importing a remote Goal never auto-runs it -- status stays ready, no xApproval, no X dispatch', async () => {
   const { workspace, runner } = await setupHarness();
   const goalPayload = remoteGoalFixture(workspace);

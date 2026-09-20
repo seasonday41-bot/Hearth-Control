@@ -3686,7 +3686,7 @@ app.whenReady().then(async () => {
      * (idempotent via the SAME deterministic id + get_goal check
      * importGoalFromRequestRow already does) and on every poll tick.
      */
-    const recoverUnimportedGoalRequests = async () => {
+    async function recoverUnimportedGoalRequests() {
       if (!goalRunner || !goalRequestsClientInstance?.ownerId) return;
       let rows;
       try { rows = await goalRequestsClientInstance.fetchClaimedUnimportedGoalRequests(); }
@@ -3701,7 +3701,7 @@ app.whenReady().then(async () => {
           catch (syncErr) { console.warn('[Bridge] Failed to mark an unrecoverable goal_requests row as failed:', syncErr.message); }
         }
       }
-    };
+    }
 
     ipcMain.handle('bridge:approve-goal-request', async (_event, requestId) => approveRemoteGoalRequest(requestId));
     ipcMain.handle('bridge:reject-goal-request', async (_event, requestId) => rejectRemoteGoalRequest(requestId));
