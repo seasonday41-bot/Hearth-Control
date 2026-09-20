@@ -19,6 +19,22 @@ interface ConnectionSummary {
 }
 
 interface ServerState { running: boolean; port: number; pid: number | null; }
+type InvestModeName = 'OFF' | 'MONITOR' | 'DEMO_AUTO';
+interface InvestModeState {
+  version: 'invest-mode-v1';
+  mode: InvestModeName;
+  startup_mode: 'OFF' | 'MONITOR';
+  automatic_analysis_enabled: boolean;
+  demo_auto_enabled: boolean;
+  trade_execution_enabled: false;
+  restore_reason: string;
+}
+interface InvestStatus {
+  mode: InvestModeState;
+  mt5_bridge: { running: boolean; host?: string; http_port?: number; ingest_port?: number; snapshots: Array<{ timeframe: string; broker_symbol: string; as_of: string; age_ms: number; bar_count: number }> };
+  search_ai: { permission: PermissionValue; ready: boolean; approval_required: boolean };
+  invest_ai: { ready: boolean };
+}
 interface ServerEvent { type: 'state' | 'log' | 'approval' | 'approval:resolved' | 'bridge:state' | 'publicTasks:state' | 'goals:updated'; state?: ServerState | BridgeState | PublicTasksState; goal?: Goal; source?: string; tone?: string; message?: string; requestId?: string; permission?: string; action?: string; allowed?: boolean; reason?: 'user' | 'timeout' | 'aborted' | 'shutdown'; }
 
 interface AntigravityStatus {
@@ -175,6 +191,10 @@ interface Window { controlApp: {
   platform: string;
   getSettings: () => Promise<ControlSettings>;
   saveSettings: (settings: Partial<ControlSettings>) => Promise<ControlSettings>;
+  investModeGet: () => Promise<InvestModeState>;
+  investModeSet: (mode: InvestModeName) => Promise<InvestModeState>;
+  investModeKillSwitch: () => Promise<InvestModeState>;
+  investStatusGet: () => Promise<InvestStatus>;
   connectionsList: () => Promise<ConnectionSummary[]>;
   connectionsRefresh: (alias?: string) => Promise<ConnectionSummary[]>;
   githubConnect: (request: { alias: 'github:personal' | 'github:work'; token: string; allowPullRequestCreate?: boolean }) => Promise<ConnectionSummary>;

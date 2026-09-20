@@ -240,7 +240,9 @@ Startup safety is enforced in the controller and its persisted document:
 - a corrupt, unknown, or manually persisted `DEMO_AUTO` startup value fails closed to `OFF`
 - the kill switch changes the current and restart modes to `OFF`
 
-The controller is initialized by Electron from `invest-mode.json` and exposes bounded local get/set/kill-switch IPC calls for a future control surface. This slice does not add the analysis loop, signal journal, risk gate, order APIs, or real/demo trade execution. Controller state therefore reports `trade_execution_enabled: false` in every mode.
+The controller is initialized by Electron from `invest-mode.json` and the installed control surface exposes its bounded local get/set/kill-switch calls. The Invest page shows MT5 Bridge, Search AI, and Invest AI readiness; its controls do not add the analysis loop, signal journal, risk gate, order APIs, or real/demo trade execution. Controller state therefore reports `trade_execution_enabled: false` in every mode.
+
+Market research now has its own `MarketResearch` permission. `Ask` reuses Hearth's local approval lifecycle, `Allow` permits fixed-origin research, and `Blocked` fails before network access. The disabled `Browser` row refers only to general browser automation and is not a Search AI dependency.
 
 ## Hearth Router integration
 
@@ -258,7 +260,7 @@ Callers still cannot supply a worker, agent, provider, workspace root, or repair
 
 Market execution:
 
-- uses existing Browser permission
+- uses dedicated MarketResearch permission
 - `Blocked` fails before network access
 - `Ask` uses existing local approval lifecycle
 - disconnect before commit aborts uncommitted work
@@ -314,12 +316,11 @@ The pre-existing dirty `electron/build-meta.json` was backed up before validatio
 
 1. Add the MONITOR auto-analysis loop with a fixed cadence and same-bar deduplication.
 2. Add the Signal Journal for UP / DOWN / NEUTRAL outcomes before measuring win rate or profit factor.
-3. Add the visible OFF / MONITOR / DEMO AUTO controls and kill switch, consuming the existing bounded controller IPC.
+3. Add the Signal Journal UI after its persistence contract exists.
 4. Design the demo-only risk gate and executor separately; require confidence threshold, stop loss, position cap, daily loss limit, and explicit current-session enablement. Do not add live-account execution.
 5. Revalidate the installed MT5 Desktop terminal, compiled EA, broker connection, and current XAUUSD chart attachment before any later live smoke.
-6. Freeze/commit the Market Specialists checkpoint only when authorized.
-7. Build the Investment App as a consumer of these contracts after the backend contracts and journal are stable.
+6. Extend the Invest surface only after the backend loop and journal contracts are stable.
 
 The software path from MT5-format TCP snapshot through live Search AI and the Invest engine has already passed an end-to-end smoke using the production bridge protocol.
 
-No commit, push, deploy, or Investment App work is part of this checkpoint.
+The visible Invest Mode Controller is now part of the desktop app; automatic monitoring and trade execution remain out of scope.

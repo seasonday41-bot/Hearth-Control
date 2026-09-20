@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('controlApp', {
   investModeGet: () => ipcRenderer.invoke('invest-mode:get'),
   investModeSet: (mode) => ipcRenderer.invoke('invest-mode:set', mode),
   investModeKillSwitch: () => ipcRenderer.invoke('invest-mode:kill-switch'),
+  investStatusGet: () => ipcRenderer.invoke('invest-status:get'),
   connectionsList: () => ipcRenderer.invoke('connections:list'),
   connectionsRefresh: (alias) => ipcRenderer.invoke('connections:refresh', alias),
   githubConnect: (request) => ipcRenderer.invoke('github:connect', request),

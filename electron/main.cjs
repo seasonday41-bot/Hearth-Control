@@ -39,7 +39,7 @@ const defaults = {
   // X's own publishable key (see publicTasksClientInstance below).
   publicTasksSupabaseUrl: 'https://pavrugcmxdgdxrjinzlm.supabase.co',
   publicTasksSupabaseAnonKey: '',
-  permissions: { X: 'Ask', Codex: 'Ask', Files: 'Allow', Git: 'Allow', Terminal: 'Ask', Browser: 'Blocked', Antigravity: 'Ask', Vercel: 'Ask' },
+  permissions: { X: 'Ask', Codex: 'Ask', Files: 'Allow', Git: 'Allow', Terminal: 'Ask', Browser: 'Blocked', MarketResearch: 'Ask', Antigravity: 'Ask', Vercel: 'Ask' },
 };
 let mainWindow;
 let serverProcess;
@@ -983,7 +983,7 @@ const handleHearthJobSubmit = async (message, child, launchWorkspace, waiter) =>
     hearthJobMarketInflight.set(taskId, shared);
 
     shared.promise = (async () => {
-      const permission = readSettings().permissions?.Browser ?? 'Ask';
+      const permission = readSettings().permissions?.MarketResearch ?? 'Ask';
       if (permission === 'Blocked') throw hearthJobError('permission_blocked');
       if (permission !== 'Allow' && permission !== 'Ask') throw hearthJobError('permission_blocked');
 
@@ -991,7 +991,7 @@ const handleHearthJobSubmit = async (message, child, launchWorkspace, waiter) =>
         const allowed = await requestHearthJobPermissionApproval(
           shared,
           child,
-          'Browser',
+          'MarketResearch',
           `Allow live XAU/USD market research for: ${job.title || job.objective.slice(0, 80)}`,
         );
         if (!allowed) throw hearthJobError('permission_denied');
@@ -2428,6 +2428,21 @@ app.whenReady().then(async () => {
   ipcMain.handle('invest-mode:kill-switch', () => {
     if (!investModeController) throw new Error('invest_mode_controller_unavailable');
     return investModeController.killSwitch();
+  });
+  ipcMain.handle('invest-status:get', () => {
+    if (!investModeController) throw new Error('invest_mode_controller_unavailable');
+    const bridge = mt5BridgeServer?.status?.() ?? { running: false, snapshots: [] };
+    const permission = readSettings().permissions?.MarketResearch ?? 'Ask';
+    return {
+      mode: investModeController.getState(),
+      mt5_bridge: bridge,
+      search_ai: {
+        permission,
+        ready: permission !== 'Blocked',
+        approval_required: permission === 'Ask',
+      },
+      invest_ai: { ready: true },
+    };
   });
   const listPublicConnections = () => {
     if (!connectionService || !connectionRegistry) return [];

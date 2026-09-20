@@ -11,10 +11,10 @@ const end = main.indexOf("\n  const fingerprint = computeHearthJobFingerprint(jo
 assert.ok(start >= 0 && end > start, 'market route block must exist');
 const market = main.slice(start, end);
 
-test('Market Main V1.1 market route reuses Browser permission boundary', () => {
-  assert.match(market, /readSettings\(\)\.permissions\?\.Browser \?\? 'Ask'/);
+test('Market Main V1.1 market route uses its dedicated MarketResearch permission boundary', () => {
+  assert.match(market, /readSettings\(\)\.permissions\?\.MarketResearch \?\? 'Ask'/);
   assert.match(market, /requestHearthJobPermissionApproval\(/);
-  assert.match(market, /'Browser'/);
+  assert.match(market, /'MarketResearch'/);
   assert.match(market, /shared\.abort\.signal\.aborted/);
   assert.match(market, /shared\.waiters\.size === 0/);
   assert.match(market, /serverProcess !== child/);
@@ -61,4 +61,7 @@ test('Market Main V1.6 Invest Mode Controller restores before exposing bounded l
   assert.match(preload, /investModeGet: \(\) => ipcRenderer\.invoke\('invest-mode:get'\)/);
   assert.match(preload, /investModeSet: \(mode\) => ipcRenderer\.invoke\('invest-mode:set', mode\)/);
   assert.match(preload, /investModeKillSwitch: \(\) => ipcRenderer\.invoke\('invest-mode:kill-switch'\)/);
+  assert.match(main, /ipcMain\.handle\('invest-status:get'/);
+  assert.match(main, /mt5BridgeServer\?\.status\?\.\(\)/);
+  assert.match(preload, /investStatusGet: \(\) => ipcRenderer\.invoke\('invest-status:get'\)/);
 });
