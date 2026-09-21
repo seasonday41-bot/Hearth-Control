@@ -167,6 +167,24 @@ interface AntigravityStatus {
   reason: string | null;
 }
 
+interface XQueueStatus {
+  found: boolean;
+  reason?: string;
+  request_id?: string;
+  queue_id?: string;
+  task_id?: string;
+  queue_status?: 'pending' | 'dispatching' | 'dispatched' | 'terminal';
+  run_id?: string | null;
+  terminal_status?: 'completed' | 'needs_review' | 'failed' | 'interrupted' | null;
+  accepted_at?: string;
+  execution_detail_available?: boolean;
+  gate_status?: string | null;
+  hearth_outcome?: string | null;
+  error?: string | null;
+  result?: any;
+  recovery_required?: boolean;
+}
+
 interface AntigravityTaskEvent {
   stepIndex: number;
   type: string;
@@ -353,6 +371,7 @@ interface Window { controlApp: {
   antigravityMarkFailed: (options: { taskId: string; reason?: string }) => Promise<AntigravityTaskData>;
   antigravityDismiss: (taskId: string) => Promise<AntigravityTaskData>;
   antigravityListTasks: () => Promise<AntigravityTaskData[]>;
+  xQueueStatus: (requestId: string) => Promise<XQueueStatus>;
   updaterGetInfo: () => Promise<UpdaterInfo>;
   updaterCheck: () => Promise<UpdateCheck>;
   updaterPrepare: () => Promise<UpdateCheck>;

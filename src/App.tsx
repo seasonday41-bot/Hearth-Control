@@ -217,6 +217,9 @@ export default function App() {
   const [publicXAuthMode, setPublicXAuthMode] = useState<'sign-in' | 'sign-up'>('sign-in');
 
   // Task Console states
+  const [taskCenterTab, setTaskCenterTab] = useState<'x' | 'antigravity' | 'remote'>('x');
+  const [activeXRequestId, setActiveXRequestId] = useState<string | null>(null);
+  const [activeXStatus, setActiveXStatus] = useState<XQueueStatus | null>(null);
   const [executorStatus, setExecutorStatus] = useState<AntigravityStatus | null>(null);
   const [codexStatus, setCodexStatus] = useState<{ available: boolean } | null>(null);
   const [claudeStatus, setClaudeStatus] = useState<{ available: boolean } | null>(null);
@@ -282,6 +285,31 @@ export default function App() {
   useEffect(() => {
     activeTaskIdRef.current = activeTaskId;
   }, [activeTaskId]);
+
+  useEffect(() => {
+    if (!activeXRequestId) return;
+    let active = true;
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const poll = async () => {
+      try {
+        const status = await window.controlApp.xQueueStatus(activeXRequestId);
+        if (!active) return;
+        setActiveXStatus(status);
+        if (status.queue_status === 'terminal' && timer) {
+          clearInterval(timer);
+          timer = null;
+        }
+      } catch (error) {
+        if (active) console.error('X queue status poll error:', error);
+      }
+    };
+    void poll();
+    timer = setInterval(poll, 1500);
+    return () => {
+      active = false;
+      if (timer) clearInterval(timer);
+    };
+  }, [activeXRequestId]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = dark ? 'dark' : 'light';
@@ -602,6 +630,9 @@ export default function App() {
   const promptBytes = useMemo(() => new TextEncoder().encode(taskPrompt).length, [taskPrompt]);
 
   const xPerm = permissions.find((p) => p.name === 'X')?.value ?? 'Ask';
+  const xReady = running && workspaceValid !== false && xPerm !== 'Blocked';
+  const xPendingTasks = useMemo(() => bridgeState?.pendingTasks.filter((task) => task.routedTo === 'x') ?? [], [bridgeState?.pendingTasks]);
+  const remotePendingTasks = useMemo(() => bridgeState?.pendingTasks.filter((task) => task.routedTo !== 'x') ?? [], [bridgeState?.pendingTasks]);
   const codexPerm = permissions.find((p) => p.name === 'Codex')?.value ?? 'Ask';
   const antigravityPerm = permissions.find((p) => p.name === 'Antigravity')?.value ?? 'Ask';
 
@@ -706,6 +737,11 @@ export default function App() {
       if (!bridgeState?.signedIn || bridgeBusy || bridgeState.enabled === enabled) return;
       void toggleBridge();
     }
+  };
+
+  const rotateXPerm = () => {
+    const index = permissions.findIndex((p) => p.name === 'X');
+    if (index !== -1) rotatePermission(index);
   };
 
   const rotateAntigravityPerm = () => {
@@ -1479,32 +1515,35 @@ export default function App() {
   };
 
   const handleApproveRemoteTask = async (task: BridgeTask) => {
-    if (bridgeBusy || isTaskRunning) {
-      flash('Cannot run while another task is running');
+    if (bridgeBusy || (task.routedTo !== 'x' && isTaskRunning)) {
+      flash(task.routedTo === 'x' ? 'X approval is already in progress' : 'Cannot run while another task is running');
       return;
     }
     setBridgeBusy(true);
-    setActiveTaskId(null);
-    setActiveTaskSource('Remote');
-    setTaskData({ taskId: 'pending', conversationId: null, workspace, title: task.title || 'Remote task', status: 'pending', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), lastEvent: null, recentEvents: [], lastAnswer: null, error: null, completion: null });
+    if (task.routedTo !== 'x') {
+      setActiveTaskId(null);
+      setActiveTaskSource('Remote');
+      setTaskData({ taskId: 'pending', conversationId: null, workspace, title: task.title || 'Remote task', status: 'pending', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), lastEvent: null, recentEvents: [], lastAnswer: null, error: null, completion: null });
+    }
     try {
       const res = await window.controlApp.bridgeApproveTask(task.id);
-      setTaskData(null);
       if (res.routedTo === 'x') {
-        // X tracks its own run progress via the X queue, not this
-        // Antigravity-shaped task panel -- leave it showing no active task.
-        setActiveTaskId(null);
+        setActiveXRequestId(res.taskId);
+        setActiveXStatus({ found: true, request_id: res.taskId, queue_id: res.queueId, queue_status: 'pending' });
+        setTaskCenterTab('x');
         setReviewTask(null);
-        flash(`Remote X task approved and queued (${res.taskId})`);
+        flash('X task approved and queued (' + (res.queueId || res.taskId) + ')');
       } else {
+        setTaskData(null);
         setActiveTaskId(res.taskId);
         setActiveTaskSource('Remote');
         setReviewTask(null);
-        flash(`Remote task approved (${res.taskId})`);
+        setTaskCenterTab('antigravity');
+        flash('Remote task approved (' + res.taskId + ')');
       }
     } catch (err: any) {
-      setTaskData(null);
-      flash(`Failed to approve task: ${err?.message || 'Unknown error'}`);
+      if (task.routedTo !== 'x') setTaskData(null);
+      flash('Failed to approve task: ' + (err?.message || 'Unknown error'));
     } finally {
       setBridgeBusy(false);
     }
@@ -1982,9 +2021,19 @@ export default function App() {
         ) : activeNav === 'Task Console' ? (
           <div className="task-console-view">
             {renderControlCenterHeader(
-              <div className={`connection-pill ${executorStatus?.available ? 'online' : ''}`}>
-                <span /> Executor · {executorStatus?.available ? 'Connected' : 'Unavailable'}
-              </div>
+              taskCenterTab === 'x' ? (
+                <div className={'connection-pill ' + (xReady ? 'online' : '')}>
+                  <span /> X · {xPerm === 'Blocked' ? 'Blocked' : xReady ? 'Ready' : 'Unavailable'}
+                </div>
+              ) : taskCenterTab === 'remote' ? (
+                <div className={'connection-pill ' + (bridgeState?.connected ? 'online' : '')}>
+                  <span /> Remote · {bridgeState?.connected ? 'Bridge connected' : 'Standing by'}
+                </div>
+              ) : (
+                <div className={'connection-pill ' + (executorStatus?.available ? 'online' : '')}>
+                  <span /> Executor · {executorStatus?.available ? 'Connected' : 'Unavailable'}
+                </div>
+              )
             )}
 
             <div className="task-workspace-bar">
@@ -2003,6 +2052,117 @@ export default function App() {
               </button>
             </div>
 
+            <div className="task-center-tabs" role="tablist" aria-label="Task execution surfaces">
+              <button type="button" role="tab" aria-selected={taskCenterTab === 'x'} className={taskCenterTab === 'x' ? 'active' : ''} onClick={() => setTaskCenterTab('x')}>
+                <span>X</span>
+                {xPendingTasks.length > 0 && <em>{xPendingTasks.length}</em>}
+              </button>
+              <button type="button" role="tab" aria-selected={taskCenterTab === 'antigravity'} className={taskCenterTab === 'antigravity' ? 'active' : ''} onClick={() => setTaskCenterTab('antigravity')}>
+                <span>Antigravity</span>
+              </button>
+              <button type="button" role="tab" aria-selected={taskCenterTab === 'remote'} className={taskCenterTab === 'remote' ? 'active' : ''} onClick={() => setTaskCenterTab('remote')}>
+                <span>Remote</span>
+                {remotePendingTasks.length > 0 && <em>{remotePendingTasks.length}</em>}
+              </button>
+            </div>
+
+            {taskCenterTab === 'x' && (
+              <section className="x-task-surface" aria-labelledby="x-task-heading">
+                <div className="x-task-overview">
+                  <div>
+                    <p className="kicker">LOCAL CODER</p>
+                    <h2 id="x-task-heading">X Tasks</h2>
+                    <p>Review Project X requests here, then dispatch them through Hearth's existing X approval and queue path.</p>
+                  </div>
+                  <button className="task-perm-button" type="button" onClick={rotateXPerm} title="Cycle X permission: Allow / Ask / Blocked">
+                    <i style={{ background: xPerm === 'Allow' ? 'var(--sage)' : xPerm === 'Blocked' ? 'var(--rose)' : '#9a7545' }} />
+                    <span>Permission: <strong>{xPerm}</strong></span>
+                    <Icon name="chevron" />
+                  </button>
+                </div>
+
+                <div className={'x-permission-note ' + (xPerm === 'Blocked' ? 'blocked' : xPerm === 'Ask' ? 'ask' : 'allow')}>
+                  <strong>{xPerm === 'Ask' ? 'Approval required' : xPerm === 'Allow' ? 'Automatic X admission enabled' : 'X is blocked'}</strong>
+                  <span>{xPerm === 'Ask' ? 'After you press Approve & Run, Hearth will show the existing “Allow X access?” dialog before queue admission.' : xPerm === 'Allow' ? 'Approved requests enter X without a second permission dialog. Switch to Ask if you want to press Allow once for every request.' : 'Change X permission before approving new work.'}</span>
+                </div>
+
+                {activeXStatus && (
+                  <div className="x-run-card">
+                    <div className="x-run-card-header">
+                      <div>
+                        <p className="section-kicker">CURRENT X RUN</p>
+                        <strong>{activeXStatus.task_id || activeXStatus.request_id || 'X task'}</strong>
+                      </div>
+                      <span className={'task-status-pill ' + (activeXStatus.terminal_status || activeXStatus.queue_status || 'pending')}>
+                        {activeXStatus.terminal_status || activeXStatus.queue_status || 'pending'}
+                      </span>
+                    </div>
+                    <dl className="x-run-meta">
+                      <div><dt>Request</dt><dd>{activeXStatus.request_id || '—'}</dd></div>
+                      <div><dt>Queue</dt><dd>{activeXStatus.queue_id || '—'}</dd></div>
+                      <div><dt>Run</dt><dd>{activeXStatus.run_id || 'Waiting for dispatch'}</dd></div>
+                      <div><dt>Gate</dt><dd>{activeXStatus.gate_status || '—'}</dd></div>
+                    </dl>
+                    {activeXStatus.error && <div className="task-error-box"><div className="task-error-message"><strong>X Error:</strong> {activeXStatus.error}</div></div>}
+                    {activeXStatus.result && (
+                      <div className="x-run-result">
+                        <strong>{activeXStatus.result.gate_status || activeXStatus.terminal_status || 'Result'}</strong>
+                        <span>{Array.isArray(activeXStatus.result.files_changed) ? activeXStatus.result.files_changed.length : 0} file(s) changed · {Array.isArray(activeXStatus.result.validation) ? activeXStatus.result.validation.filter((item: any) => item.status === 'passed').length : 0} validation check(s) passed</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="remote-inbox-header x-inbox-header">
+                  <div>
+                    <p className="kicker">PROJECT X</p>
+                    <h2>Pending X Requests</h2>
+                  </div>
+                  <div className={'connection-pill ' + (publicXState?.signedIn ? 'online' : '')}>
+                    <span /> Project X · {publicXState?.signedIn ? 'Connected' : 'Not connected'}
+                  </div>
+                </div>
+
+                {!publicXState?.signedIn ? (
+                  <div className="remote-inbox-empty">
+                    <Icon name="radio" />
+                    <p>Project X is not connected</p>
+                    <small>Open Connections and sign in to receive X requests for local review.</small>
+                  </div>
+                ) : xPendingTasks.length === 0 ? (
+                  <div className="remote-inbox-empty">
+                    <Icon name="console" />
+                    <p>No pending X requests</p>
+                    <small>New Project X coding requests will appear here before they are admitted to the X queue.</small>
+                  </div>
+                ) : (
+                  <div className="remote-tasks-list">
+                    {xPendingTasks.map((t) => (
+                      <div key={t.id} className="remote-task-card x-request-card">
+                        <div className="remote-task-main">
+                          <div className="remote-task-meta">
+                            <span className="remote-source-tag">X</span>
+                            <strong className="remote-task-title">{t.title || 'X Task'}</strong>
+                            <span className="remote-task-time">{new Date(t.createdAt).toLocaleTimeString()}</span>
+                          </div>
+                          <p className="remote-task-preview">{t.prompt.slice(0, 180)}{t.prompt.length > 180 ? '…' : ''}</p>
+                        </div>
+                        <div className="remote-task-actions">
+                          <button className="remote-action-btn review" type="button" onClick={() => setReviewTask(t)}>Review</button>
+                          <button className="remote-action-btn reject" type="button" disabled={bridgeBusy} onClick={() => handleRejectRemoteTask(t)}>Reject</button>
+                          <button className="remote-action-btn approve" type="button" disabled={bridgeBusy || xPerm === 'Blocked' || !xReady} onClick={() => handleApproveRemoteTask(t)} title={xPerm === 'Ask' ? 'Approve request, then confirm X access in the one-time approval dialog' : 'Approve and dispatch to X'}>
+                            {xPerm === 'Ask' ? 'Approve & Request Access' : 'Approve & Run'}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
+
+            {taskCenterTab === 'antigravity' && (
+              <>
             <div className="task-input-box">
               <div className="task-textarea-container">
                 <textarea
@@ -2222,7 +2382,11 @@ export default function App() {
               </div>
             )}
 
+              </>
+            )}
+
             {/* REMOTE INBOX SECTION */}
+            {taskCenterTab === 'remote' && (
             <section className="remote-inbox-section" aria-labelledby="remote-inbox-heading">
               <div className="remote-inbox-header">
                 <div>
@@ -2312,7 +2476,7 @@ export default function App() {
                   <p>Remote Bridge is Disabled</p>
                   <small>Signed in as {bridgeState.accountEmail}. Enable the bridge when you want Hearth to poll for tasks.</small>
                 </div>
-              ) : bridgeState.pendingTasks.length === 0 ? (
+              ) : remotePendingTasks.length === 0 ? (
                 <div className="remote-inbox-empty">
                   <Icon name="radio" />
                   <p>No pending remote tasks</p>
@@ -2320,7 +2484,7 @@ export default function App() {
                 </div>
               ) : (
                 <div className="remote-tasks-list">
-                  {bridgeState.pendingTasks.map((t) => (
+                  {remotePendingTasks.map((t) => (
                     <div key={t.id} className="remote-task-card">
                       <div className="remote-task-main">
                         <div className="remote-task-meta">
@@ -2364,13 +2528,14 @@ export default function App() {
               <div className="remote-routing-note">
                 <div>
                   <strong>Project X routing</strong>
-                  <span>{publicXState?.signedIn ? 'Connected · X-routed tasks arrive in this Remote Inbox.' : 'Project X is not connected. Configure it from Connections.'}</span>
+                  <span>{publicXState?.signedIn ? 'Connected · X-routed requests are shown in the X tab.' : 'Project X is not connected. Configure it from Connections.'}</span>
                 </div>
                 <button className="task-workspace-change" type="button" onClick={() => navigate('AI Connectors')}>
                   Open Connections
                 </button>
               </div>
             </section>
+            )}
           </div>
         ) : activeNav === 'Goals' ? (
           <div className="goals-view">

@@ -2611,6 +2611,15 @@ app.whenReady().then(async () => {
   }
 
   ipcMain.handle('settings:get', () => publicSettingsSnapshot());
+  // Read-only renderer visibility into an already-admitted X queue receipt.
+  // This creates no enqueue/dispatch/approval authority: the renderer can
+  // only observe the same durable receipt/result projection used by Goal/X.
+  ipcMain.handle('x:queue-status', (_event, requestId) => {
+    if (typeof requestId !== 'string' || !requestId.trim() || requestId.length > 256) {
+      throw xQueueError('invalid_request_id');
+    }
+    return xQueueReceiptStatus(xQueueStore?.getReceipt(requestId.trim()));
+  });
   ipcMain.handle('invest-mode:get', () => {
     if (!investModeController) throw new Error('invest_mode_controller_unavailable');
     return investModeController.getState();
