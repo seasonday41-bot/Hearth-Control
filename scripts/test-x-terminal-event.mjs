@@ -544,7 +544,10 @@ test('EVT12 Electron relay recognizes x_run_terminal via the existing serverProc
   // verify shape without executing an environment-locked module.
   const source = fs.readFileSync(new URL('../electron/main.cjs', import.meta.url), 'utf8');
 
-  const handlerMatch = source.match(/serverProcess\.on\('message',\s*\(message\)\s*=>\s*\{([\s\S]*?)\n {2}\}\);/);
+  // `async` is permitted on the handler: several relayed request types await
+  // main-side services. What this asserts is the handler's identity and shape,
+  // not whether it happens to be synchronous.
+  const handlerMatch = source.match(/serverProcess\.on\('message',\s*(?:async\s+)?\(message\)\s*=>\s*\{([\s\S]*?)\n {2}\}\);/);
   assert.ok(handlerMatch, 'the existing serverProcess.on(\'message\', ...) handler must still be present and singular');
   const handlerBody = handlerMatch[1];
 
