@@ -213,6 +213,25 @@ test('missing staged candidate remains UPDATE_AVAILABLE', async () => {
   }
 });
 
+test('up-to-date check identifies the verified latest release', async () => {
+  const manifest = await signedManifest({
+    version: current.currentVersion,
+    buildId: current.currentBuildId,
+    builtAt: current.builtAt,
+  });
+  const calls = [];
+  const checked = await updateState.checkRemoteUpdate({
+    currentSession: null,
+    info: current,
+    remoteOptions: remoteOptions(manifest, calls),
+  });
+  assert.equal(checked.result.state, updater.UPDATE_STATES.UP_TO_DATE);
+  assert.equal(checked.session, null);
+  assert.equal(checked.result.available, null);
+  assert.deepEqual(checked.result.latestRelease, updateState.publicRemoteManifest(manifest));
+  assert.deepEqual(calls, [MANIFEST_URL]);
+});
+
 test('corrupt staged candidate fails closed and is not reported UPDATE_READY', async () => {
   const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'hearth-ready-corrupt-'));
   try {

@@ -373,6 +373,23 @@ footer { color: var(--faint); display: flex; font-size: 8px; justify-content: sp
 .ai-connector-row .agent-toggle:disabled { cursor: not-allowed; opacity: .42; }
 
 
+/* Unified Control Center */
+.control-center-header { display: flex; flex-direction: column; gap: 16px; margin-bottom: 4px; }
+.control-center-title-row { align-items: flex-start; display: flex; justify-content: space-between; gap: 18px; }
+.control-center-title-row h1 { color: var(--text); font-size: clamp(29px,3vw,38px); font-weight: 720; letter-spacing: -.045em; line-height: 1; margin: 0 0 8px; }
+.control-center-tabs { align-items: center; background: var(--panel-soft); border: 1px solid var(--highlight); border-radius: 14px; box-shadow: 4px 6px 14px var(--shadow-soft), -3px -3px 8px var(--highlight); display: grid; gap: 6px; grid-template-columns: repeat(3,minmax(0,1fr)); padding: 5px; }
+.control-center-tabs button { align-items: center; background: transparent; border: 1px solid transparent; border-radius: 10px; color: var(--muted); display: flex; font-size: 11px; font-weight: 700; gap: 7px; justify-content: center; min-height: 38px; padding: 8px 14px; transition: .15s ease; }
+.control-center-tabs button:hover { color: var(--text); }
+.control-center-tabs button.active { background: var(--panel); border-color: var(--highlight); box-shadow: 3px 4px 9px var(--shadow-soft), -2px -2px 6px var(--highlight); color: var(--text); }
+.control-center-tabs button svg { height: 15px; width: 15px; }
+.control-center-tabs button em { align-items: center; background: color-mix(in srgb,var(--sand) 25%,var(--panel)); border-radius: 999px; color: #8a724f; display: inline-flex; font-size: 9px; font-style: normal; height: 18px; justify-content: center; min-width: 18px; padding: 0 5px; }
+.control-center-connections-view { display: flex; flex-direction: column; gap: 20px; }
+.control-center-connection-panel,.control-center-remote-goals { margin-top: 0; }
+.remote-routing-note { align-items: center; background: var(--panel-soft); border: 1px solid var(--line); border-radius: 12px; display: flex; gap: 16px; justify-content: space-between; padding: 12px 14px; }
+.remote-routing-note>div { display: grid; gap: 3px; min-width: 0; }
+.remote-routing-note strong { font-size: 11px; }
+.remote-routing-note span { color: var(--muted); font-size: 10px; line-height: 1.4; }
+
 /* Task Console styles */
 .task-console-view { display: flex; flex-direction: column; gap: 20px; }
 .task-workspace-bar { display: flex; align-items: center; justify-content: space-between; background: var(--panel-soft); border: 1px solid var(--highlight); border-radius: 14px; padding: 12px 18px; box-shadow: 4px 6px 14px var(--shadow-soft), -3px -3px 8px var(--highlight); }
@@ -720,4 +737,9 @@ footer { color: var(--faint); display: flex; font-size: 8px; justify-content: sp
 .console-empty small { color: var(--faint); font-size: 9px; }
 .console-empty.compact { min-height: 70px; }
 
-@media (max-width: 700px) { body { overflow: auto; } .app-frame { display: block; height: auto; } .sidebar { align-items: center; bottom: 0; flex-direction: row; height: 64px; left: 0; padding: 7px 12px; position: fixed; right: 0; top: auto; } .brand,.sidebar-bottom { display: none; } nav { display: flex; gap: 4px; overflow-x: auto; width: 100%; } .nav-group { display: contents; } .nav-group-items { display: flex; gap: 4px; } nav button { flex: 0 0 48px; width: 48px; } .main-content { height: auto; margin-top: 38px; overflow: visible; padding: 16px 18px 85px; } .page-header { gap: 20px; } .connection-pill { align-self: flex-start; white-space: nowrap; } .power-console { align-items: flex-start; flex-direction: column; gap: 24px; } .server-action { justify-content: space-between; width: 100%; } .metrics,.dashboard-grid,.console-grid,.console-evidence-grid { grid-template-columns: 1fr; } .agent-dock-list,.goals-layout { grid-template-columns: 1fr; } .console-evidence-panel { grid-column: auto; } .logs-panel { grid-column: auto; } .log-line { gap: 8px; grid-template-columns: 50px 50px 1fr; } .bridge-auth-panel { grid-template-columns: 1fr; align-items: stretch; } .bridge-auth-fields { grid-template-columns: 1fr; } .bridge-auth-switch { grid-column: 1; } .task-meta-bar { grid-template-columns: repeat(2, 1fr); } .task-live-summary { grid-template-columns: 1fr; } .local-chat-controls { grid-template-columns: 1fr; } .local-chat-external-note { align-self: start; } }
+@media (max-width: 700px) {
+  .control-center-title-row { align-items: stretch; flex-direction: column; }
+  .control-center-tabs { grid-template-columns: 1fr; }
+  .control-center-tabs button { justify-content: flex-start; }
+  .remote-routing-note { align-items: stretch; flex-direction: column; }
+  body { overflow: auto; } .app-frame { display: block; height: auto; } .sidebar { align-items: center; bottom: 0; flex-direction: row; height: 64px; left: 0; padding: 7px 12px; position: fixed; right: 0; top: auto; } .brand,.sidebar-bottom { display: none; } nav { display: flex; gap: 4px; overflow-x: auto; width: 100%; } .nav-group { display: contents; } .nav-group-items { display: flex; gap: 4px; } nav button { flex: 0 0 48px; width: 48px; } .main-content { height: auto; margin-top: 38px; overflow: visible; padding: 16px 18px 85px; } .page-header { gap: 20px; } .connection-pill { align-self: flex-start; white-space: nowrap; } .power-console { align-items: flex-start; flex-direction: column; gap: 24px; } .server-action { justify-content: space-between; width: 100%; } .metrics,.dashboard-grid,.console-grid,.console-evidence-grid { grid-template-columns: 1fr; } .agent-dock-list,.goals-layout { grid-template-columns: 1fr; } .console-evidence-panel { grid-column: auto; } .logs-panel { grid-column: auto; } .log-line { gap: 8px; grid-template-columns: 50px 50px 1fr; } .bridge-auth-panel { grid-template-columns: 1fr; align-items: stretch; } .bridge-auth-fields { grid-template-columns: 1fr; } .bridge-auth-switch { grid-column: 1; } .task-meta-bar { grid-template-columns: repeat(2, 1fr); } .task-live-summary { grid-template-columns: 1fr; } .local-chat-controls { grid-template-columns: 1fr; } .local-chat-external-note { align-self: start; } }

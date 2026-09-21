@@ -257,6 +257,7 @@ interface UpdaterInfo { currentVersion: string; currentBuildId: string; builtAt:
 interface UpdateCheck extends Pick<UpdaterInfo, 'currentVersion' | 'currentBuildId'> {
   state: UpdateStatus;
   available: { version: string; buildId: string; builtAt: string; platform: string; arch: string; dmgPath: string | null } | null;
+  latestRelease?: { version: string; buildId: string; builtAt: string; platform: string; arch: string; dmgPath: string | null };
   error: string | null;
 }
 

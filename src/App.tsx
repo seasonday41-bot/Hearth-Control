@@ -100,20 +100,18 @@ const initialPermissions: Array<{ name: string; detail: string; value: Permissio
   { name: 'Browser', detail: 'General browser automation — unavailable and unrelated to Market Research', value: 'Blocked', disabled: true },
 ];
 
-const navGroups: Array<{ label: string; items: Array<{ name: NavItem; icon: IconName }> }> = [
+const navGroups: Array<{ label: string; items: Array<{ name: NavItem; icon: IconName; label?: string }> }> = [
   {
     label: 'OPERATE',
     items: [
       { name: 'Overview', icon: 'grid' },
       { name: 'Console', icon: 'activity' },
-      { name: 'Task Console', icon: 'console' },
-      { name: 'Goals', icon: 'flag' },
+      { name: 'Task Console', icon: 'console', label: 'Control Center' },
     ],
   },
   {
     label: 'AI',
     items: [
-      { name: 'AI Connectors', icon: 'activity' },
       { name: 'Local Chat', icon: 'radio' },
       { name: 'Invest', icon: 'activity' },
     ],
@@ -129,6 +127,8 @@ const navGroups: Array<{ label: string; items: Array<{ name: NavItem; icon: Icon
     ],
   },
 ];
+
+const CONTROL_CENTER_PAGES: NavItem[] = ['Task Console', 'Goals', 'AI Connectors'];
 
 const LocalChatResponse = ({ text, onExpand }: { text: string; onExpand: (code: string, language: string) => void }) => {
   const parts: ReactNode[] = [];
@@ -224,6 +224,7 @@ export default function App() {
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [activeTaskSource, setActiveTaskSource] = useState<'Local' | 'Remote'>('Local');
   const [taskData, setTaskData] = useState<AntigravityTaskData | null>(null);
+  const [showTaskProgress, setShowTaskProgress] = useState(false);
   const [taskSubmitting, setTaskSubmitting] = useState(false);
   const [recoveryBusy, setRecoveryBusy] = useState(false);
   const [followUpInput, setFollowUpInput] = useState('');
@@ -1093,6 +1094,10 @@ export default function App() {
     document.querySelector('.main-content')?.scrollTo({ top: 0 });
   };
 
+  useEffect(() => {
+    setShowTaskProgress(false);
+  }, [activeTaskId]);
+
   const handleChatProviderChange = (provider: 'local' | 'external') => {
     setChatProvider(provider);
     setChatResult(null);
@@ -1553,6 +1558,36 @@ export default function App() {
 
   const v2CoordinatorDisplay = getV2CoordinatorDisplay(investStatus?.v2);
 
+  const isControlCenterPage = CONTROL_CENTER_PAGES.includes(activeNav);
+  const controlCenterTabLabel = activeNav === 'Goals' ? 'Goals' : activeNav === 'AI Connectors' ? 'Connections' : 'Tasks';
+  const renderControlCenterHeader = (status?: ReactNode) => (
+    <header className="control-center-header">
+      <div className="control-center-title-row">
+        <div>
+          <p className="kicker">HEARTH WORK CONTROL</p>
+          <h1>Control Center.</h1>
+          <p className="intro">Tasks, multi-step Goals, remote work, and agent connections in one place.</p>
+        </div>
+        {status}
+      </div>
+      <div className="control-center-tabs" role="tablist" aria-label="Control Center sections">
+        <button type="button" role="tab" aria-selected={activeNav === 'Task Console'} className={activeNav === 'Task Console' ? 'active' : ''} onClick={() => navigate('Task Console')}>
+          <Icon name="console" />
+          <span>Tasks</span>
+        </button>
+        <button type="button" role="tab" aria-selected={activeNav === 'Goals'} className={activeNav === 'Goals' ? 'active' : ''} onClick={() => navigate('Goals')}>
+          <Icon name="flag" />
+          <span>Goals</span>
+          {!!bridgeState?.pendingGoalRequests?.length && <em>{bridgeState.pendingGoalRequests.length}</em>}
+        </button>
+        <button type="button" role="tab" aria-selected={activeNav === 'AI Connectors'} className={activeNav === 'AI Connectors' ? 'active' : ''} onClick={() => navigate('AI Connectors')}>
+          <Icon name="activity" />
+          <span>Connections</span>
+        </button>
+      </div>
+    </header>
+  );
+
   return (
     <div className="app-frame calm-control">
       <div className="titlebar-drag-region" aria-hidden="true">
@@ -1565,13 +1600,17 @@ export default function App() {
             <div className="nav-group" key={group.label}>
               <p className="nav-label">{group.label}</p>
               <div className="nav-group-items">
-                {group.items.map((item) => (
-                  <button key={item.name} aria-label={item.name} aria-current={activeNav === item.name ? 'page' : undefined} title={item.name} className={activeNav === item.name ? 'active' : ''} onClick={() => navigate(item.name)}>
-                    <Icon name={item.icon} />
-                    <span>{item.name}</span>
-                    {activeNav === item.name && <i />}
-                  </button>
-                ))}
+                {group.items.map((item) => {
+                  const itemActive = item.name === 'Task Console' ? isControlCenterPage : activeNav === item.name;
+                  const itemLabel = item.label ?? item.name;
+                  return (
+                    <button key={item.name} aria-label={itemLabel} aria-current={itemActive ? 'page' : undefined} title={itemLabel} className={itemActive ? 'active' : ''} onClick={() => navigate(item.name)}>
+                      <Icon name={item.icon} />
+                      <span>{itemLabel}</span>
+                      {itemActive && <i />}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           ))}
@@ -1584,7 +1623,7 @@ export default function App() {
       </aside>
 
       <main className="main-content">
-        <div className="calm-topbar"><span>Hearth Control <span aria-hidden="true">/</span> <strong>{activeNav}</strong></span><span className="calm-server-state"><i className={running ? 'online' : ''} />{running ? 'Local server online' : 'Local server offline'}</span></div>
+        <div className="calm-topbar"><span>Hearth Control <span aria-hidden="true">/</span> <strong>{isControlCenterPage ? `Control Center / ${controlCenterTabLabel}` : activeNav}</strong></span><span className="calm-server-state"><i className={running ? 'online' : ''} />{running ? 'Local server online' : 'Local server offline'}</span></div>
         {activeNav === 'Storage Audit' ? <StorageAudit /> : activeNav === 'Local Chat' ? (
           <div className="local-chat-view">
             <header className="page-header">
@@ -1942,16 +1981,11 @@ export default function App() {
           </div>
         ) : activeNav === 'Task Console' ? (
           <div className="task-console-view">
-            <header className="page-header">
-              <div>
-                <p className="kicker">ANTIGRAVITY TASK CONSOLE</p>
-                <h1>Task Console.</h1>
-                <p className="intro">Dispatch natural language instructions to Antigravity executor.</p>
-              </div>
+            {renderControlCenterHeader(
               <div className={`connection-pill ${executorStatus?.available ? 'online' : ''}`}>
                 <span /> Executor · {executorStatus?.available ? 'Connected' : 'Unavailable'}
               </div>
-            </header>
+            )}
 
             <div className="task-workspace-bar">
               <div className="task-workspace-info">
@@ -2049,7 +2083,7 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="task-live-summary"><strong>Latest</strong><span>{taskData.lastEvent?.summary || taskData.completion?.summary || (taskData.status === 'starting' ? 'Preparing executor…' : 'No progress update yet.')}</span><button type="button" onClick={() => document.querySelector('.task-progress-card')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })}>View Progress</button></div>
+                <div className="task-live-summary"><strong>Latest</strong><span>{taskData.lastEvent?.summary || taskData.completion?.summary || (taskData.status === 'starting' ? 'Preparing executor…' : 'No progress update yet.')}</span><button type="button" aria-expanded={showTaskProgress} onClick={() => setShowTaskProgress((visible) => !visible)}>{showTaskProgress ? 'Hide Progress' : 'View Progress'}</button></div>
 
                 {taskData.status === 'recovery_required' && (
                   <div className="task-recovery-box">
@@ -2108,27 +2142,6 @@ export default function App() {
                   </div>
                 )}
 
-                <div className="task-progress-card">
-                  <span className="task-section-label">
-                    Progress Events ({taskData.recentEvents?.length ?? 0})
-                  </span>
-                  <div className="task-events-list">
-                    {(!taskData.recentEvents || taskData.recentEvents.length === 0) ? (
-                      <div style={{ color: '#718089', fontStyle: 'italic', padding: '6px 0' }}>
-                        {taskData.status === 'starting' ? 'Waiting for executor to initialize…' : 'No events recorded.'}
-                      </div>
-                    ) : (
-                      taskData.recentEvents.map((ev, i) => (
-                        <div key={`${ev.stepIndex ?? i}-${i}`} className="task-event-row">
-                          <span className="task-event-step">#{ev.stepIndex ?? i + 1}</span>
-                          <span className="task-event-type">{ev.type || 'PROGRESS'}</span>
-                          <span className="task-event-text">{ev.summary || ''}</span>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-
                 {taskData.lastAnswer && (
                   <div className="task-result-card">
                     <div className="task-result-header">
@@ -2148,6 +2161,29 @@ export default function App() {
                       </button>
                     </div>
                     <div className="task-result-content">{taskData.lastAnswer}</div>
+                  </div>
+                )}
+
+                {showTaskProgress && (
+                  <div className="task-progress-card">
+                    <span className="task-section-label">
+                      Progress Events ({taskData.recentEvents?.length ?? 0})
+                    </span>
+                    <div className="task-events-list">
+                    {(!taskData.recentEvents || taskData.recentEvents.length === 0) ? (
+                      <div style={{ color: '#718089', fontStyle: 'italic', padding: '6px 0' }}>
+                        {taskData.status === 'starting' ? 'Waiting for executor to initialize…' : 'No events recorded.'}
+                      </div>
+                    ) : (
+                      taskData.recentEvents.map((ev, i) => (
+                        <div key={`${ev.stepIndex ?? i}-${i}`} className="task-event-row">
+                          <span className="task-event-step">#{ev.stepIndex ?? i + 1}</span>
+                          <span className="task-event-type">{ev.type || 'PROGRESS'}</span>
+                          <span className="task-event-text">{ev.summary || ''}</span>
+                        </div>
+                      ))
+                    )}
+                    </div>
                   </div>
                 )}
 
@@ -2325,145 +2361,24 @@ export default function App() {
                 </div>
               )}
 
-              {/* PROJECT X REMOTE TASKS -- a separate connection/session from the Remote Bridge above */}
-              <div className="remote-inbox-header" style={{ marginTop: '1.5rem' }}>
+              <div className="remote-routing-note">
                 <div>
-                  <p className="kicker">PROJECT X</p>
-                  <h2>Project X Remote Tasks</h2>
+                  <strong>Project X routing</strong>
+                  <span>{publicXState?.signedIn ? 'Connected · X-routed tasks arrive in this Remote Inbox.' : 'Project X is not connected. Configure it from Connections.'}</span>
                 </div>
-                <div className="remote-inbox-controls">
-                  <div className={`connection-pill ${publicXState?.signedIn ? 'online' : ''}`}>
-                    <span /> Project X · {publicXState?.signedIn ? 'Connected' : publicXState?.configured ? 'Not signed in' : 'Not configured'}
-                  </div>
-                  {publicXState?.signedIn && (
-                    <button className="bridge-signout-btn" type="button" disabled={publicXBusy} onClick={handlePublicXSignOut}>
-                      Sign out
-                    </button>
-                  )}
-                </div>
+                <button className="task-workspace-change" type="button" onClick={() => navigate('AI Connectors')}>
+                  Open Connections
+                </button>
               </div>
-
-              {!publicXState?.configured ? (
-                <div className="bridge-auth-panel">
-                  <div className="bridge-auth-copy">
-                    <strong>Connect to Project X</strong>
-                    <span>Enter Project X's publishable (anon) key to enable X-routed remote tasks.</span>
-                  </div>
-                  <div className="bridge-auth-fields">
-                    <input
-                      type="text"
-                      value={publicXAnonKey}
-                      onChange={(event) => setPublicXAnonKey(event.target.value)}
-                      onKeyDown={(event) => { if (event.key === 'Enter') void handlePublicXSaveKey(); }}
-                      placeholder="Project X publishable (anon) key"
-                    />
-                    <button type="button" disabled={publicXBusy || !publicXAnonKey.trim()} onClick={handlePublicXSaveKey}>
-                      {publicXBusy ? 'Saving…' : 'Save key'}
-                    </button>
-                  </div>
-                </div>
-              ) : !publicXState?.signedIn ? (
-                <div className="bridge-auth-panel">
-                  <div className="bridge-auth-copy">
-                    <strong>Sign in to Project X</strong>
-                    <span>A separate account from the Remote Bridge above. Your session is protected by macOS Keychain.</span>
-                  </div>
-                  <div className="bridge-auth-fields">
-                    <input
-                      autoComplete="email"
-                      type="email"
-                      value={publicXEmail}
-                      onChange={(event) => setPublicXEmail(event.target.value)}
-                      placeholder="Email"
-                    />
-                    <input
-                      autoComplete={publicXAuthMode === 'sign-in' ? 'current-password' : 'new-password'}
-                      type="password"
-                      minLength={8}
-                      value={publicXPassword}
-                      onChange={(event) => setPublicXPassword(event.target.value)}
-                      onKeyDown={(event) => { if (event.key === 'Enter') void handlePublicXAuth(); }}
-                      placeholder="Password (8+ characters)"
-                    />
-                    <button type="button" disabled={publicXBusy || !publicXEmail.trim() || publicXPassword.length < 8} onClick={handlePublicXAuth}>
-                      {publicXBusy ? 'Connecting…' : publicXAuthMode === 'sign-in' ? 'Sign in' : 'Create account'}
-                    </button>
-                  </div>
-                  <button
-                    className="bridge-auth-switch"
-                    type="button"
-                    onClick={() => setPublicXAuthMode((current) => current === 'sign-in' ? 'sign-up' : 'sign-in')}
-                  >
-                    {publicXAuthMode === 'sign-in' ? 'Create a Project X account' : 'I already have an account'}
-                  </button>
-                </div>
-              ) : (
-                <div className="remote-inbox-empty">
-                  <Icon name="radio" />
-                  <p>Connected to Project X</p>
-                  <small>{publicXState.accountEmail}. Queued Project X tasks appear in the Remote Inbox above once approved.</small>
-                </div>
-              )}
-
-              {/* PROJECT X REMOTE GOALS -- a dedicated, distinct transport from
-                  the single-task Remote Tasks above. Importing only creates
-                  the Goal locally (status 'ready'); it never runs anything and
-                  never grants X approval -- open Goals, press Run, and the
-                  existing Goal-level X approval prompt is still required. */}
-              {publicXState?.signedIn && (
-                <>
-                  <div className="remote-inbox-header" style={{ marginTop: '1.5rem' }}>
-                    <div>
-                      <p className="kicker">PROJECT X</p>
-                      <h2>Project X Remote Goals</h2>
-                    </div>
-                  </div>
-                  {!bridgeState?.pendingGoalRequests?.length ? (
-                    <div className="remote-inbox-empty">
-                      <Icon name="flag" />
-                      <p>No pending remote Goals</p>
-                      <small>A complete, pre-authored multi-step Goal queued by Chat/Main Brain will appear here for your review and import.</small>
-                    </div>
-                  ) : (
-                    <div className="remote-tasks-list">
-                      {bridgeState.pendingGoalRequests.map((g) => (
-                        <div key={g.id} className="remote-task-card">
-                          <div className="remote-task-main">
-                            <div className="remote-task-meta">
-                              <span className="remote-source-tag">goal</span>
-                              <strong className="remote-task-title">{g.title}</strong>
-                              <span className="remote-task-time">{new Date(g.createdAt).toLocaleTimeString()}</span>
-                            </div>
-                            <p className="remote-task-preview">{g.objective.slice(0, 140)}{g.objective.length > 140 ? '…' : ''}</p>
-                            <small>{g.stepCount} step{g.stepCount === 1 ? '' : 's'} · {g.xStepCount} X step{g.xStepCount === 1 ? '' : 's'} · <code>{g.workspace}</code></small>
-                          </div>
-                          <div className="remote-task-actions">
-                            <button className="remote-action-btn review" type="button" onClick={() => setReviewGoalRequest(g)}>Review</button>
-                            <button className="remote-action-btn reject" type="button" disabled={goalRequestBusy} onClick={() => handleRejectRemoteGoalRequest(g)}>Reject</button>
-                            <button className="remote-action-btn approve" type="button" disabled={goalRequestBusy} onClick={() => handleImportRemoteGoalRequest(g)} title="Import into Goals -- does not run or approve X">
-                              Import
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </>
-              )}
             </section>
           </div>
         ) : activeNav === 'Goals' ? (
           <div className="goals-view">
-            <header className="page-header">
-              <div>
-                <p className="kicker">HEARTH GOAL RUNNER V1</p>
-                <h1>Goals.</h1>
-                <p className="intro">Multi-step goal orchestration with checkpoints, lock guards, and step tracking.</p>
-              </div>
+            {renderControlCenterHeader(
               <div className={`connection-pill ${isGoalActive ? 'online' : ''}`}>
                 <span /> Goal Runner · {isGoalActive ? 'Active' : 'Standing by'}
               </div>
-            </header>
+            )}
 
             <div className="goals-workspace-bar">
               <div className="goals-workspace-info">
@@ -2504,6 +2419,60 @@ export default function App() {
                 </button>
               </div>
             </div>
+
+            <section className="remote-inbox-section control-center-remote-goals" aria-label="Remote Goals">
+              {/* PROJECT X REMOTE GOALS -- a dedicated, distinct transport from
+                  the single-task Remote Tasks above. Importing only creates
+                  the Goal locally (status 'ready'); it never runs anything and
+                  never grants X approval -- open Goals, press Run, and the
+                  existing Goal-level X approval prompt is still required. */}
+              {publicXState?.signedIn ? (
+                <>
+                  <div className="remote-inbox-header">
+                    <div>
+                      <p className="kicker">PROJECT X</p>
+                      <h2>Project X Remote Goals</h2>
+                    </div>
+                  </div>
+                  {!bridgeState?.pendingGoalRequests?.length ? (
+                    <div className="remote-inbox-empty">
+                      <Icon name="flag" />
+                      <p>No pending remote Goals</p>
+                      <small>A complete, pre-authored multi-step Goal queued by Chat/Main Brain will appear here for your review and import.</small>
+                    </div>
+                  ) : (
+                    <div className="remote-tasks-list">
+                      {bridgeState.pendingGoalRequests.map((g) => (
+                        <div key={g.id} className="remote-task-card">
+                          <div className="remote-task-main">
+                            <div className="remote-task-meta">
+                              <span className="remote-source-tag">goal</span>
+                              <strong className="remote-task-title">{g.title}</strong>
+                              <span className="remote-task-time">{new Date(g.createdAt).toLocaleTimeString()}</span>
+                            </div>
+                            <p className="remote-task-preview">{g.objective.slice(0, 140)}{g.objective.length > 140 ? '…' : ''}</p>
+                            <small>{g.stepCount} step{g.stepCount === 1 ? '' : 's'} · {g.xStepCount} X step{g.xStepCount === 1 ? '' : 's'} · <code>{g.workspace}</code></small>
+                          </div>
+                          <div className="remote-task-actions">
+                            <button className="remote-action-btn review" type="button" onClick={() => setReviewGoalRequest(g)}>Review</button>
+                            <button className="remote-action-btn reject" type="button" disabled={goalRequestBusy} onClick={() => handleRejectRemoteGoalRequest(g)}>Reject</button>
+                            <button className="remote-action-btn approve" type="button" disabled={goalRequestBusy} onClick={() => handleImportRemoteGoalRequest(g)} title="Import into Goals -- does not run or approve X">
+                              Import
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="remote-inbox-empty">
+                  <Icon name="flag" />
+                  <p>Remote Goals are not connected</p>
+                  <small>Connect Project X from the Connections tab to receive remote multi-step Goals.</small>
+                </div>
+              )}
+            </section>
 
             <div className="goals-layout">
               {/* Left Column: Goals List */}
@@ -2699,6 +2668,99 @@ export default function App() {
               )}
             </div>
           </div>
+        ) : activeNav === 'AI Connectors' ? (
+          <div className="control-center-connections-view">
+            {renderControlCenterHeader(
+              <div className={`connection-pill ${(bridgeState?.connected || publicXState?.signedIn) ? 'online' : ''}`}>
+                <span /> Remote · {bridgeState?.connected ? 'Bridge connected' : publicXState?.signedIn ? 'Project X connected' : 'Standing by'}
+              </div>
+            )}
+
+            <section className="remote-inbox-section control-center-connection-panel" aria-label="Project X connection">
+              <div className="remote-inbox-header">
+                <div>
+                  <p className="kicker">PROJECT X CONNECTION</p>
+                  <h2>Project X Remote Access</h2>
+                </div>
+                <div className="remote-inbox-controls">
+                  <div className={`connection-pill ${publicXState?.signedIn ? 'online' : ''}`}>
+                    <span /> Project X · {publicXState?.signedIn ? 'Connected' : publicXState?.configured ? 'Not signed in' : 'Not configured'}
+                  </div>
+                  {publicXState?.signedIn && (
+                    <button className="bridge-signout-btn" type="button" disabled={publicXBusy} onClick={handlePublicXSignOut}>
+                      Sign out
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {!publicXState?.configured ? (
+                <div className="bridge-auth-panel">
+                  <div className="bridge-auth-copy">
+                    <strong>Connect to Project X</strong>
+                    <span>Enter Project X's publishable (anon) key to enable X-routed remote tasks.</span>
+                  </div>
+                  <div className="bridge-auth-fields">
+                    <input
+                      type="text"
+                      value={publicXAnonKey}
+                      onChange={(event) => setPublicXAnonKey(event.target.value)}
+                      onKeyDown={(event) => { if (event.key === 'Enter') void handlePublicXSaveKey(); }}
+                      placeholder="Project X publishable (anon) key"
+                    />
+                    <button type="button" disabled={publicXBusy || !publicXAnonKey.trim()} onClick={handlePublicXSaveKey}>
+                      {publicXBusy ? 'Saving…' : 'Save key'}
+                    </button>
+                  </div>
+                </div>
+              ) : !publicXState?.signedIn ? (
+                <div className="bridge-auth-panel">
+                  <div className="bridge-auth-copy">
+                    <strong>Sign in to Project X</strong>
+                    <span>A separate Project X session. Your session is protected by macOS Keychain.</span>
+                  </div>
+                  <div className="bridge-auth-fields">
+                    <input
+                      autoComplete="email"
+                      type="email"
+                      value={publicXEmail}
+                      onChange={(event) => setPublicXEmail(event.target.value)}
+                      placeholder="Email"
+                    />
+                    <input
+                      autoComplete={publicXAuthMode === 'sign-in' ? 'current-password' : 'new-password'}
+                      type="password"
+                      minLength={8}
+                      value={publicXPassword}
+                      onChange={(event) => setPublicXPassword(event.target.value)}
+                      onKeyDown={(event) => { if (event.key === 'Enter') void handlePublicXAuth(); }}
+                      placeholder="Password (8+ characters)"
+                    />
+                    <button type="button" disabled={publicXBusy || !publicXEmail.trim() || publicXPassword.length < 8} onClick={handlePublicXAuth}>
+                      {publicXBusy ? 'Connecting…' : publicXAuthMode === 'sign-in' ? 'Sign in' : 'Create account'}
+                    </button>
+                  </div>
+                  <button
+                    className="bridge-auth-switch"
+                    type="button"
+                    onClick={() => setPublicXAuthMode((current) => current === 'sign-in' ? 'sign-up' : 'sign-in')}
+                  >
+                    {publicXAuthMode === 'sign-in' ? 'Create a Project X account' : 'I already have an account'}
+                  </button>
+                </div>
+              ) : (
+                <div className="remote-inbox-empty">
+                  <Icon name="radio" />
+                  <p>Connected to Project X</p>
+                  <small>{publicXState.accountEmail}. Queued Project X tasks are routed into Control Center → Tasks.</small>
+                </div>
+              )}
+
+
+            </section>
+
+            <AIConnectorPanel connectors={connectorItems} onToggle={setConnectorEnabled} />
+          </div>
         ) : (
           <>
             <header className="page-header" id="overview">
@@ -2719,7 +2781,7 @@ export default function App() {
             </section>
 
             <section className="calm-shortcuts" aria-label="Workspace shortcuts">
-              {([{ page: 'Task Console', title: 'Tasks', detail: 'Create and follow your work', icon: 'console' }, { page: 'Goals', title: 'Goals', detail: 'Plan work across multiple steps', icon: 'flag' }, { page: 'AI Connectors', title: 'AI Connectors', detail: 'Manage available agents', icon: 'activity' }, { page: 'Console', title: 'Connections & approvals', detail: 'Review system health and evidence', icon: 'lock' }] as Array<{page: NavItem; title: string; detail: string; icon: IconName}>).map(item => <button type="button" key={item.page} onClick={() => navigate(item.page)}><Icon name={item.icon}/><strong>{item.title}</strong><span>{item.detail}</span><Icon name="chevron"/></button>)}
+              {([{ page: 'Task Console', title: 'Control Center', detail: 'Tasks, Goals, remote work, and agents', icon: 'console' }, { page: 'Console', title: 'Connections & approvals', detail: 'Review system health and evidence', icon: 'lock' }] as Array<{page: NavItem; title: string; detail: string; icon: IconName}>).map(item => <button type="button" key={item.page} onClick={() => navigate(item.page)}><Icon name={item.icon}/><strong>{item.title}</strong><span>{item.detail}</span><Icon name="chevron"/></button>)}
             </section></>}
 
             <div className="dashboard-grid calm-system-page">
@@ -2750,6 +2812,7 @@ export default function App() {
                   <div><dt>Current version</dt><dd>v{updaterInfo?.currentVersion ?? '—'}</dd></div>
                   <div><dt>Current build</dt><dd title={updaterInfo?.currentBuildId}>{updaterInfo?.currentBuildId ?? '—'}</dd></div>
                   <div><dt>Build time</dt><dd>{updaterInfo?.builtAt ? new Date(updaterInfo.builtAt).toLocaleString() : 'Development build'}</dd></div>
+                  {updateCheck?.state === 'up_to_date' && updateCheck.latestRelease && <div><dt>Latest release</dt><dd title={updateCheck.latestRelease.buildId}>v{updateCheck.latestRelease.version} · {updateCheck.latestRelease.buildId}</dd></div>}
                   {updateCheck?.available && <div><dt>New build</dt><dd>v{updateCheck.available.version} · {updateCheck.available.buildId}</dd></div>}
                 </dl>
                 {updateCheck?.error && <p className="update-error">{updateCheck.error}</p>}
@@ -2767,8 +2830,6 @@ export default function App() {
               </section>
 
               }
-              {activeNav === 'AI Connectors' && <AIConnectorPanel connectors={connectorItems} onToggle={setConnectorEnabled} />}
-
               {activeNav === 'Logs' && <section className="soft-panel logs-panel" id="logs">
                 <div className="panel-title"><div><p className="section-kicker">ACTIVITY</p><h2>System log</h2></div><div className="log-actions"><span className="live-indicator"><i /> LIVE</span><button onClick={() => setLogs([])}>Clear log</button></div></div>
                 <div className="log-well" aria-live="polite">{logs.length === 0 ? <div className="empty-state"><Icon name="terminal" /><p>No activity recorded</p><small>New system events will appear here.</small></div> : logs.map((log, index) => <div className={`log-line ${log.tone}`} key={`${log.time}-${index}`}><time>{log.time}</time><span className="log-source">{log.source}</span><p>{log.message}</p></div>)}</div>

@@ -75,7 +75,7 @@ async function checkRemoteUpdate({ currentSession, info, remoteOptions, updatesD
   })) {
     return {
       session: null,
-      result: { ...baseResult, state: localUpdater.UPDATE_STATES.UP_TO_DATE, available: null },
+      result: { ...baseResult, state: localUpdater.UPDATE_STATES.UP_TO_DATE, available: null, latestRelease: publicRemoteManifest(manifest) },
     };
   }
 
