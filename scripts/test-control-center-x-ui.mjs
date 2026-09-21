@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { rendererSource } from './lib/renderer-source.mjs';
 
-const app = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+const app = rendererSource();
 const preload = fs.readFileSync(new URL('../electron/preload.cjs', import.meta.url), 'utf8');
 const main = fs.readFileSync(new URL('../electron/main.cjs', import.meta.url), 'utf8');
 

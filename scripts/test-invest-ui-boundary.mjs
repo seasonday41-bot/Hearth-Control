@@ -2,8 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { getV2CoordinatorDisplay } from '../src/invest-coordinator-status.ts';
+import { rendererSource } from './lib/renderer-source.mjs';
 
-const app = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+const app = rendererSource();
 const types = fs.readFileSync(new URL('../src/electron.d.ts', import.meta.url), 'utf8');
 const css = fs.readFileSync(new URL('../src/calm-control.css', import.meta.url), 'utf8');
 const main = fs.readFileSync(new URL('../electron/main.cjs', import.meta.url), 'utf8');

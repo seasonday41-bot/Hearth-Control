@@ -1,8 +1,8 @@
 {
   "name": "x-v0.2-candidate",
   "schema": 1,
-  "frozen_at": "2026-09-21T14:33:17.563Z",
-  "base_head": "a7e41c838a6bf8b98cba12c33fb695245c5566c0",
+  "frozen_at": "2026-09-21T15:25:37.980Z",
+  "base_head": "93a1d3e69abb4d5c96b34048a6e2aff8129ebe29",
   "committed": false,
   "gold_fingerprint": "f6ac8bfae42af5c5417e2da485f1b61f94c3e3ed6bb72cf5f3f8b142a9bdc03f",
   "x_files": {
@@ -49,7 +49,7 @@
   "test_files": {
     "scripts/test-x-candidate-freeze.mjs": "d09b9c9e2377f7d0d8ef76e17252916c2b145a3f62b4f6daa154aca9b9003769",
     "scripts/test-x-claim-store.mjs": "3860bf1bbbf2ff90de3cb229252ef0aae4448fe2374a8cc559ab2de5242bbb60",
-    "scripts/test-x-console-visibility.mjs": "6ad830ee2804585214cc7a3fb136f2ddbf944e4326ee2d42bc9dc490f0469609",
+    "scripts/test-x-console-visibility.mjs": "2f66ff28ef4291002b38b0498d3b04e635beb67b97f2d5d08c8ddd47897084f7",
     "scripts/test-x-context-loader.mjs": "22ded24712121592a92d73432b79df5d930b055733516a7cb47380c00c77261d",
     "scripts/test-x-context-retrieval.mjs": "ef6b876991e2cb054092aa802c3a308b81a74527a2a191ba11b0b06ff4cb9b0f",
     "scripts/test-x-core-e2e.mjs": "ffcc89a4092356a996f0b44901c769944e0d2f0946c46480c33b198ea5d1eb13",
@@ -82,7 +82,7 @@
     "scripts/test-x-validation-cancellation.mjs": "7ccc5028ccc449212843e57a84beb67adf882d4f1f1ecff513c90d9f91f1946b",
     "scripts/test-x-validation-runner.mjs": "60fd90d3294068b2d45dfa375802ef7da53cb86c4f4eb627be29910eca98ef71"
   },
-  "tests_sha256": "afead2a8c44b506c4170cbdb8896bee7e7fa3e661f8a6d7a5457d2d95c373d0b",
+  "tests_sha256": "4fc6796de5e05a70259e699f8362b25c08bbaa463bc12bc983397bb200ef9704",
   "test_file_count": 34,
   "verification": {
     "verified_at": "2026-09-21T06:08:15.018Z",
@@ -127,6 +127,15 @@
         "scripts/test-x-console-visibility.mjs (new, covers the read-only listing)",
         "scripts/test-x-terminal-event.mjs (EVT12 regex now accepts the async message handler; the singular-handler invariant is unchanged)"
       ]
+    },
+    {
+      "approved_at": "2026-09-21",
+      "approved_by": "repository owner",
+      "scope": "scripts/test-x-console-visibility.mjs",
+      "change": "reads the whole renderer source tree (scripts/lib/renderer-source.mjs) instead of src/App.tsx alone",
+      "rationale": "src/App.tsx is being split into src/pages/*. The X visibility assertions are claims about the renderer, not about which file holds the JSX, so they now hold wherever the X run list lives.",
+      "assertions_changed": "none - every assertion is unchanged, only the source it reads is broader",
+      "no_x_source_change": true
     }
   ]
 }
