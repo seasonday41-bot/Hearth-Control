@@ -6,6 +6,10 @@ import { evaluateXauRisk } from './risk-gate.mjs';
 export const LIVE_V2_COORDINATOR_VERSION = 'live-v2-coordinator-v1';
 export const LIVE_V2_REQUIRED_TIMEFRAMES = Object.freeze(['H1', 'M15', 'M5']);
 const SYSTEM_MAX_STATE_AGE_MS = 15_000;
+// The only executor error treated as a non-fatal skip. Verified by replay + executor source:
+// prepareDemoExecutionRequest throws it before the journal is touched, so nothing was sent.
+const PRICE_OUTSIDE_ENTRY_ZONE = 'demo_executor_price_outside_entry_zone';
+const M5_MS = 5 * 60_000;
 
 const clone = (value) => structuredClone(value);
 const safeError = (error) => String(error?.message || error || 'unknown_error').slice(0, 240);
@@ -78,6 +82,14 @@ const closedBars = (payload, timeframe) => {
   return confirmed;
 };
 
+const invalidationReached = (signal, bars, afterTime) => {
+  const after = Date.parse(afterTime);
+  return bars.some((bar) => (
+    Date.parse(bar.time) > after &&
+    (signal.direction === 'BUY' ? bar.low <= signal.invalidation : bar.high >= signal.invalidation)
+  ));
+};
+
 const executionAlreadyRecorded = (journal, proposalId) => {
   const entries = journal?.list?.({ limit: 500 }) ?? [];
   return entries.some((item) => item?.proposal_id === proposalId);
@@ -125,6 +137,13 @@ export class LiveV2Coordinator {
     this.inFlight = null;
     this.lastClosedM5 = null;
     this.circuitBreakerActive = false;
+    // First-READY registry: the FIRST READY observation of each stable signal id while DEMO_AUTO is
+    // active, kept immutable for as long as the setup stays READY. Records flagged `waiting` are the
+    // WAITING_FOR_ENTRY setups (price was outside the original entry zone). In memory only, so a
+    // restart, session change or mode change can never resurrect them.
+    this.firstReady = new Map();
+    // Ids cancelled by expiry/invalidation stay blocked until the setup stops being READY.
+    this.waitingCancelled = new Set();
     this.state = {
       version: LIVE_V2_COORDINATOR_VERSION,
       state: 'stopped',
@@ -148,6 +167,7 @@ export class LiveV2Coordinator {
         evaluated_at: null,
       },
       circuit_breaker_active: false,
+      waiting_for_entry: [],
     };
   }
 
@@ -169,7 +189,77 @@ export class LiveV2Coordinator {
     return this.getState();
   }
 
+  publishWaiting() {
+    this.state.waiting_for_entry = [...this.firstReady.values()]
+      .filter((record) => record.waiting)
+      .map((record) => ({
+        signal_id: record.signal.id,
+        strategy: record.signal.strategy,
+        direction: record.signal.direction,
+        entry_zone: [...record.signal.entry_zone],
+        invalidation: record.signal.invalidation,
+        targets: [...record.signal.targets],
+        first_ready_at: record.signal.as_of,
+        expires_at: record.signal.expires_at,
+        registered_at: record.registeredAt,
+      }));
+  }
+
+  resetTracking() {
+    this.firstReady.clear();
+    this.waitingCancelled.clear();
+    this.publishWaiting();
+  }
+
+  // Keeps the first-READY registry consistent before any execution decision.
+  //
+  // Clock domain: expiry is judged in MARKET time only. Signals are stamped from MT5 bar times
+  // (as_of = last closed M5 bar time, expires_at = as_of + TTL; the bridge passes the raw MT5 server
+  // epoch through as UTC with no offset), so `marketNowMs` is the close time of the last confirmed
+  // M5 bar. The machine clock is never consulted here.
+  reconcileFirstReady({ mode, ready, triggerBars, marketNowMs }) {
+    const readyIds = new Set(ready.map((item) => item.signal.id));
+    const inDemoAuto = mode?.mode === 'DEMO_AUTO';
+    const checkpoint = triggerBars.at(-1).time;
+
+    for (const [id, record] of this.firstReady) {
+      if (!inDemoAuto || record.demoSessionId !== mode.demo_session_id || !readyIds.has(id)) {
+        this.firstReady.delete(id);
+      } else if (executionAlreadyRecorded(this.executionJournal, id)) {
+        this.firstReady.delete(id);
+      } else if (!(marketNowMs < Date.parse(record.signal.expires_at))) {
+        this.firstReady.delete(id);
+        this.waitingCancelled.add(id);
+      } else if (invalidationReached(record.signal, triggerBars, record.checkedThrough)) {
+        this.firstReady.delete(id);
+        this.waitingCancelled.add(id);
+      } else {
+        record.checkedThrough = checkpoint;
+      }
+    }
+
+    for (const id of this.waitingCancelled) {
+      if (!inDemoAuto || !readyIds.has(id)) this.waitingCancelled.delete(id);
+    }
+
+    if (inDemoAuto) {
+      for (const { signal } of ready) {
+        if (this.firstReady.has(signal.id) || this.waitingCancelled.has(signal.id)) continue;
+        if (executionAlreadyRecorded(this.executionJournal, signal.id)) continue;
+        this.firstReady.set(signal.id, {
+          signal,
+          demoSessionId: mode.demo_session_id,
+          checkedThrough: checkpoint,
+          waiting: false,
+          registeredAt: null,
+        });
+      }
+    }
+    this.publishWaiting();
+  }
+
   stop() {
+    this.resetTracking();
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     this.state.state = 'stopped';
@@ -192,6 +282,7 @@ export class LiveV2Coordinator {
 
     const mode = this.getMode();
     if (!mode?.automatic_analysis_enabled) {
+      this.resetTracking();
       this.state.state = 'off';
       this.state.execution_blocked_reason = 'mode_off';
       this.emit();
@@ -276,6 +367,7 @@ export class LiveV2Coordinator {
     };
 
     const ready = [smc, harmonic].filter((item) => item.state === 'READY' && item.signal);
+    this.reconcileFirstReady({ mode, ready, triggerBars, marketNowMs: Date.parse(closedM5) + M5_MS });
 
     if (mode.mode !== 'DEMO_AUTO') {
       this.state.state = ready.length ? 'ready_monitor_only' : 'idle';
@@ -314,6 +406,17 @@ export class LiveV2Coordinator {
       return this.getState();
     }
 
+    if (this.waitingCancelled.has(candidate.signal.id)) {
+      this.state.state = 'blocked';
+      this.state.execution_blocked_reason = 'waiting_entry_cancelled';
+      this.emit();
+      return this.getState();
+    }
+
+    // The first-READY snapshot defines the setup: zone, invalidation, targets and expiry are never
+    // refreshed by later engine output while the same setup stays READY.
+    const signal = this.firstReady.get(candidate.signal.id)?.signal ?? candidate.signal;
+
     if (executionAlreadyRecorded(this.executionJournal, candidate.signal.id)) {
       this.state.state = 'blocked';
       this.state.execution_blocked_reason = 'setup_already_submitted';
@@ -333,7 +436,7 @@ export class LiveV2Coordinator {
     }
 
     const riskDecision = this.evaluateRisk({
-      technicalSignal: candidate.signal,
+      technicalSignal: signal,
       modeState: mode,
       accountState: {
         ...telemetry.account,
@@ -350,7 +453,7 @@ export class LiveV2Coordinator {
 
     this.state.risk = {
       configured: true,
-      signal_id: candidate.signal.id,
+      signal_id: signal.id,
       decision: riskDecision.decision,
       approved_volume: riskDecision.approved_volume,
       reason_codes: [...riskDecision.reason_codes],
@@ -369,15 +472,31 @@ export class LiveV2Coordinator {
 
     try {
       await this.executor.execute({
-        technicalSignal: candidate.signal,
+        technicalSignal: signal,
         riskDecision,
         brokerState: telemetry.broker,
       });
+      this.firstReady.delete(signal.id);
+      this.publishWaiting();
       this.state.state = 'executed';
       this.state.execution_blocked_reason = 'setup_already_submitted';
       this.emit();
       return this.getState();
     } catch (error) {
+      if (error?.message === PRICE_OUTSIDE_ENTRY_ZONE) {
+        // Non-fatal: nothing was journaled or sent. Flag the FIRST-READY record as waiting; its
+        // original zone, invalidation, targets and expiry are untouched.
+        const record = this.firstReady.get(signal.id);
+        if (record && !record.waiting) {
+          record.waiting = true;
+          record.registeredAt = new Date(Date.parse(closedM5) + M5_MS).toISOString();
+        }
+        this.publishWaiting();
+        this.state.state = 'waiting_for_entry';
+        this.state.execution_blocked_reason = 'waiting_for_entry';
+        this.emit();
+        return this.getState();
+      }
       this.circuitBreakerActive = true;
       this.state.circuit_breaker_active = true;
       this.state.state = 'blocked';
