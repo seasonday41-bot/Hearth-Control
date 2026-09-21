@@ -1,11 +1,23 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { getV2CoordinatorDisplay } from '../src/invest-coordinator-status.ts';
 
 const app = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
 const types = fs.readFileSync(new URL('../src/electron.d.ts', import.meta.url), 'utf8');
 const css = fs.readFileSync(new URL('../src/calm-control.css', import.meta.url), 'utf8');
 const main = fs.readFileSync(new URL('../electron/main.cjs', import.meta.url), 'utf8');
+
+const v2Status = (state, overrides = {}) => ({
+  state,
+  last_error: null,
+  circuit_breaker_active: false,
+  strategies: {
+    SMC_IDM: { state: 'PRE_SIGNAL' },
+    HARMONIC_PRZ: { state: 'NO_SETUP' },
+  },
+  ...overrides,
+});
 
 test('Invest UI exposes the three bounded modes and kill switch', () => {
   assert.match(app, /name: 'Invest'/);
@@ -34,6 +46,27 @@ test('Invest UI separates V1 analysis, V2 setups, explicit Risk, and execution e
   assert.match(app, /window\.controlApp\.investRiskConfigSet/);
   assert.match(app, /KILL SWITCH blocks new demo orders/);
   assert.match(app, /Live accounts are rejected/);
+});
+
+test('Invest UI keeps routine V2 coordinator cycles visually stable', () => {
+  for (const state of ['reading_mt5', 'analyzing', 'idle']) {
+    assert.deepEqual(getV2CoordinatorDisplay(v2Status(state)), { label: 'Monitoring', tone: 'monitoring' });
+  }
+  assert.doesNotMatch(app, /investStatus\?\.v2\.state \|\| 'unavailable'/);
+  assert.match(app, /v2CoordinatorDisplay\.label/);
+});
+
+test('Invest UI exposes only meaningful V2 coordinator transitions', () => {
+  assert.deepEqual(getV2CoordinatorDisplay(v2Status('ready_monitor_only')), { label: 'READY', tone: 'ready' });
+  assert.deepEqual(getV2CoordinatorDisplay(v2Status('idle', {
+    strategies: { SMC_IDM: { state: 'READY' }, HARMONIC_PRZ: { state: 'NO_SETUP' } },
+  })), { label: 'READY', tone: 'ready' });
+  assert.deepEqual(getV2CoordinatorDisplay(v2Status('risk_checking')), { label: 'Risk checking', tone: 'working' });
+  assert.deepEqual(getV2CoordinatorDisplay(v2Status('executing')), { label: 'Executing', tone: 'working' });
+  assert.deepEqual(getV2CoordinatorDisplay(v2Status('blocked')), { label: 'Blocked', tone: 'blocked' });
+  assert.deepEqual(getV2CoordinatorDisplay(v2Status('risk_rejected')), { label: 'Blocked', tone: 'blocked' });
+  assert.deepEqual(getV2CoordinatorDisplay(v2Status('waiting_for_mt5', { last_error: 'mt5 unavailable' })), { label: 'Error', tone: 'error' });
+  assert.deepEqual(getV2CoordinatorDisplay(null), { label: 'Error', tone: 'error' });
 });
 
 test('Search AI uses dedicated MarketResearch permission, not Browser automation', () => {

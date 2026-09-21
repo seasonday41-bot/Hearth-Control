@@ -3,6 +3,7 @@ import StorageAudit from './StorageAudit';
 import './calm-control.css';
 import AIConnectorPanel, { type AIConnectorItem } from './components/AIConnectorPanel';
 import GitHubConnectionCard from './components/GitHubConnectionCard';
+import { getV2CoordinatorDisplay } from './invest-coordinator-status';
 
 type Permission = 'Allow' | 'Ask' | 'Blocked';
 type NavItem = 'Overview' | 'Console' | 'Local Chat' | 'Invest' | 'Storage Audit' | 'Task Console' | 'Goals' | 'Workspace' | 'Permissions' | 'Logs' | 'AI Connectors' | 'Updates';
@@ -1546,6 +1547,8 @@ export default function App() {
     }
   };
 
+  const v2CoordinatorDisplay = getV2CoordinatorDisplay(investStatus?.v2);
+
   return (
     <div className="app-frame calm-control">
       <div className="titlebar-drag-region" aria-hidden="true">
@@ -1691,7 +1694,7 @@ export default function App() {
                 })}
               </div>
               <div className="invest-v2-risk-summary">
-                <div><small>V2 COORDINATOR</small><strong>{investStatus?.v2.state || 'unavailable'}</strong><p>{investStatus?.v2.execution_blocked_reason ? `Execution: ${investStatus.v2.execution_blocked_reason.replaceAll('_', ' ')}` : 'Execution path has no active blocker.'}</p></div>
+                <div><small>V2 COORDINATOR</small><strong className={`invest-v2-coordinator-status status-${v2CoordinatorDisplay.tone}`}>{v2CoordinatorDisplay.label}</strong><p>{investStatus?.v2.execution_blocked_reason ? `Execution: ${investStatus.v2.execution_blocked_reason.replaceAll('_', ' ')}` : 'Execution path has no active blocker.'}</p></div>
                 <div><small>RISK DECISION</small><strong>{investStatus?.v2.risk.decision || (investStatus?.risk_config.configured ? 'Waiting for READY' : 'Not configured')}</strong><p>{investStatus?.v2.risk.approved_volume != null ? `Approved volume: ${investStatus.v2.risk.approved_volume}` : 'No lot size is selected unless Risk approves a READY setup.'}</p></div>
               </div>
             </section>

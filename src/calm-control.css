@@ -102,6 +102,9 @@
 .invest-v2-risk-summary>div { padding: 13px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
 .invest-v2-risk-summary small { display: block; color: var(--faint); font-size: 9px; font-weight: 750; letter-spacing: .08em; }
 .invest-v2-risk-summary strong { display: block; margin: 4px 0; font-size: 12px; }
+.invest-v2-coordinator-status.status-monitoring,.invest-v2-coordinator-status.status-ready { color: var(--sage-deep); }
+.invest-v2-coordinator-status.status-working { color: var(--sand); }
+.invest-v2-coordinator-status.status-blocked,.invest-v2-coordinator-status.status-error { color: var(--rose); }
 .invest-v2-risk-summary p,.invest-risk-help { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
 .invest-risk-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
 .invest-risk-grid label { display: grid; gap: 5px; min-width: 0; }
