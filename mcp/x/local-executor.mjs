@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { assertModelAdapterContract } from './model-adapter.mjs';
-import { loadTaskContext, XContextScopeError } from './context-loader.mjs';
+import { loadTaskContext, XContextScopeError, EXCERPT_MARKER_PATTERN } from './context-loader.mjs';
 import { createFile, replaceFile, applyEdits } from './edit-writer.mjs';
 import { throwIfAborted } from './cancellation.mjs';
 import { loadSkillForTask, buildSkillSection } from './skill-integration.mjs';
@@ -60,6 +60,15 @@ import { loadSkillForTask, buildSkillSection } from './skill-integration.mjs';
  * live-file comparison" step regardless of what this module believed, and
  * a change landing in the narrower window between that comparison and
  * publish is caught by Phase 5B's pre-publish revalidation.
+ *
+ * X v0.2 (large-file excerpt patch): a file too large to load whole may be shown
+ * as `status: 'excerpt'` (see context-loader.mjs). It is NOT a complete snapshot,
+ * so `replace` stays refused. `patch` is allowed only when, on the trusted side,
+ * (1) every `old_string` lies entirely inside ONE shown line range, (2) it occurs
+ * exactly once in the WHOLE ORIGINAL file, (3) the live file's hash still equals
+ * the full-file hash the loader recorded (drift anywhere in the file, shown or
+ * not, aborts), and (4) Phase 5B's scope/symlink/protected-path checks and atomic
+ * publish pass. `replace_all` is refused. The model never supplies any of these.
  *
  * There is no delete, rename/move, chmod, shell, git, network, or package-
  * install capability anywhere in this module (see the "no mutation
@@ -227,6 +236,16 @@ const READ_ONLY_SCHEMA_INSTRUCTIONS = [
   '- Never include a "workspace" or "scope" field -- authorization is not something this response can set.',
 ].join('\n');
 
+// Added to the system prompt ONLY when the loaded context contains an excerpt file, so every prompt for a context
+// without one stays byte-identical to before.
+const EXCERPT_RULES = [
+  'Files shown with "status: excerpt" show only the listed line ranges; lines between them are marked "... (lines A-B not shown) ...".',
+  '- For an excerpt file you may use ONLY "patch". Never use "replace" and never set "replace_all" on it.',
+  '- Every old_string must be copied exactly from inside ONE shown range, WITHOUT the "N: " line-number prefix, must not span a "not shown" marker, and must occur exactly once in the whole file. If it may occur elsewhere, include more of the surrounding shown lines to make it unique.',
+].join('\n');
+
+const REFERENCE_RULES = 'Files shown with "status: reference" are READ-ONLY background from modules related to the files you may edit. Use them only to understand behavior. Never use "create", "replace" or "patch" on them.';
+
 const truncate = (text, maxBytes) => {
   const buf = Buffer.from(String(text ?? ''), 'utf8');
   return buf.byteLength <= maxBytes ? String(text ?? '') : buf.subarray(0, maxBytes).toString('utf8');
@@ -257,6 +276,7 @@ function buildScopeSection(scope) {
     'Scope constraints (fixed; this response cannot change these):',
     `Allowed paths: ${(scope.allowed_paths || []).join(', ') || '(none)'}`,
     `Forbidden paths: ${(scope.forbidden_paths || []).length ? scope.forbidden_paths.join(', ') : '(none)'}`,
+    ...(Array.isArray(scope.reference_paths) && scope.reference_paths.length > 0 ? [`Read-only reference paths (never editable): ${scope.reference_paths.join(', ')}`] : []),
   ].join('\n');
 }
 
@@ -305,6 +325,22 @@ export function getEligibleContextPaths(context) {
   return paths;
 }
 
+/** Paths a `patch` may name: complete (`ok`) files plus excerpt files. `replace` may name only `getEligibleContextPaths`. */
+export function getPatchableContextPaths(context) {
+  const paths = getEligibleContextPaths(context);
+  if (!Array.isArray(context?.files)) return paths;
+  for (const file of context.files) {
+    if (file && file.status === 'excerpt' && typeof file.path === 'string') {
+      const trimmed = file.path.trim();
+      if (trimmed && !paths.includes(trimmed)) paths.push(trimmed);
+    }
+  }
+  return paths;
+}
+
+const hasExcerptFile = (context) => Array.isArray(context?.files) && context.files.some((f) => f && f.status === 'excerpt');
+const hasReferenceFile = (context) => Array.isArray(context?.files) && context.files.some((f) => f && f.status === 'reference');
+
 export function buildLocalExecutorResponseSchema(task, context) {
   if (!hasWriteAuthority(task)) {
     return Object.freeze({
@@ -339,6 +375,7 @@ export function buildLocalExecutorResponseSchema(task, context) {
 
   const createPattern = buildCreatePathPattern(task?.scope);
   const eligiblePaths = getEligibleContextPaths(context);
+  const patchablePaths = getPatchableContextPaths(context);
 
   const createSchema = Object.freeze({
     type: 'object',
@@ -353,8 +390,9 @@ export function buildLocalExecutorResponseSchema(task, context) {
 
   const variants = [createSchema];
 
+  const frozenEligible = Object.freeze([...eligiblePaths]);
+  const frozenPatchable = Object.freeze([...patchablePaths]);
   if (eligiblePaths.length > 0) {
-    const frozenEligible = Object.freeze([...eligiblePaths]);
     const replaceSchema = Object.freeze({
       type: 'object',
       properties: Object.freeze({
@@ -366,11 +404,14 @@ export function buildLocalExecutorResponseSchema(task, context) {
       additionalProperties: false,
     });
 
+    variants.push(replaceSchema);
+  }
+  if (patchablePaths.length > 0) {
     const patchSchema = Object.freeze({
       type: 'object',
       properties: Object.freeze({
         type: Object.freeze({ type: 'string', enum: Object.freeze(['patch']) }),
-        path: Object.freeze({ type: 'string', enum: frozenEligible }),
+        path: Object.freeze({ type: 'string', enum: frozenPatchable }),
         edits: Object.freeze({
           type: 'array',
           items: Object.freeze({
@@ -389,7 +430,7 @@ export function buildLocalExecutorResponseSchema(task, context) {
       additionalProperties: false,
     });
 
-    variants.push(replaceSchema, patchSchema);
+    variants.push(patchSchema);
   }
 
   return Object.freeze({
@@ -442,7 +483,7 @@ export function buildModelRequest(task, context, skill = null) {
     ? `${buildRepairDirectiveSection()}\n\n`
     : '';
   const messages = [
-    { role: 'system', content: instructions },
+    { role: 'system', content: hasWriteAuthority(task) ? [instructions, hasExcerptFile(context) ? EXCERPT_RULES : null, hasReferenceFile(context) ? REFERENCE_RULES : null].filter(Boolean).join('\n') : instructions },
     { role: 'user', content: `${skillSection}${repairDirective}${buildTaskSection(task)}\n\n${buildScopeSection(task.scope)}\n\n${buildContextSection(context)}` },
   ];
   return {
@@ -654,16 +695,71 @@ function stripContextLineNumbers(content) {
   }).join('\n');
 }
 
-const blockedActionResult = (operation, path, detail) => ({
-  operation, path, status: 'error', code: 'PRECONDITION_FAILED', detail,
+/** An `excerpt` context file for exactly this path whose provenance record is present. */
+export function getExcerptContextFile(context, path) {
+  const file = context.files.find((f) => f.path === path && f.status === 'excerpt');
+  if (!file || !Array.isArray(file.excerpts) || file.excerpts.length === 0 || typeof file.full_file?.sha256 !== 'string' || typeof file.content !== 'string') return null;
+  return file;
+}
+
+/**
+ * The plain text (line-number prefixes removed) of each shown range, rebuilt from `content` and checked against the
+ * recorded ranges. Returns null if the record is inconsistent in any way (fail-closed): only text the model was
+ * genuinely shown can ever justify a patch.
+ */
+export function excerptRangeTexts(file) {
+  const ranges = [];
+  let current = null;
+  let next = 0;
+  for (const line of file.content.split('\n')) {
+    if (EXCERPT_MARKER_PATTERN.test(line)) { current = null; continue; }
+    if (current === null) {
+      const start = line.match(/^(\d+): /);
+      if (!start) return null;
+      current = { start: Number(start[1]), lines: [] };
+      ranges.push(current);
+      next = current.start;
+    }
+    const prefix = `${next}: `;
+    if (!line.startsWith(prefix)) return null;
+    current.lines.push(line.slice(prefix.length));
+    next += 1;
+  }
+  if (ranges.length !== file.excerpts.length) return null;
+  for (const [i, r] of ranges.entries()) {
+    if (r.start !== file.excerpts[i].start_line || r.start + r.lines.length - 1 !== file.excerpts[i].end_line) return null;
+  }
+  return ranges.map((r) => r.lines.join('\n'));
+}
+
+const blockedActionResult = (operation, path, detail, subtype = null) => ({
+  operation, path, status: 'error', code: 'PRECONDITION_FAILED', detail, ...(subtype ? { subtype } : {}),
   before_hash: null, after_hash: null, bytes_written: 0, created: false, changed: false,
 });
+
+/**
+ * Patch justified by an EXCERPT (X v0.2). Trusted-side gates, in order: (1) no replace_all; (2) the recorded excerpt
+ * provenance is consistent; (3) every old_string lies entirely inside one shown range; then Phase 5B enforces, before its
+ * atomic write, (4) uniqueness in the whole original file, (5) the live file still hashes to the full-file hash the loader
+ * recorded, (6) scope / symlink / protected-path. The model supplies none of these.
+ */
+async function patchFromExcerpt(task, action, excerptFile, writeLimits, signal) {
+  for (const [index, edit] of action.edits.entries()) {
+    if (edit.replace_all) return blockedActionResult('patch', action.path, `edit ${index}: replace_all is not permitted for a patch justified by an excerpt`, 'edit_form_invalid');
+  }
+  const rangeTexts = excerptRangeTexts(excerptFile);
+  if (!rangeTexts) return blockedActionResult('patch', action.path, 'excerpt provenance for this file is malformed; refusing to patch', 'excerpt_provenance_invalid');
+  // The "entirely within a shown range" gate runs inside applyEdits, against the hash-verified file, so its refusal can tell
+  // unseen-but-real text (permanent) from a mis-copied old_string (repairable). Same message as before.
+  const shown = { texts: rangeTexts, label: excerptFile.excerpts.map((r) => `${r.start_line}-${r.end_line}`).join(', ') };
+  return applyEdits(task, action.path, action.edits, { expectedHash: excerptFile.full_file.sha256, uniqueInOriginal: true, shown, limits: writeLimits, signal });
+}
 
 /**
  * Executes exactly one validated action through the one applicable Phase 5B
  * primitive. No other filesystem operation is reachable from here.
  */
-async function executeOneAction(task, action, context, writeLimits, signal) {
+async function executeOneAction(task, action, context, writeLimits, signal, changedPaths = new Set()) {
   throwIfAborted(signal);
   if (!hasWriteAuthority(task)) {
     return {
@@ -679,7 +775,15 @@ async function executeOneAction(task, action, context, writeLimits, signal) {
       changed: false,
     };
   }
-  if (action.type === 'create') return createFile(task, action.path, action.content, { limits: writeLimits, signal });
+  if (action.type === 'create') {
+    const created = await createFile(task, action.path, action.content, { limits: writeLimits, signal });
+    // The path already exists. If the model was shown it (complete or excerpt) it can switch to patch/replace; if it was NOT
+    // shown and did not change during this run, no later round can show it either -> permanent context limitation.
+    if (created.subtype === 'create_target_exists' && !changedPaths.has(action.path) && !getCompleteContextFile(context, action.path) && !getExcerptContextFile(context, action.path)) {
+      return { ...created, subtype: 'no_usable_context' };
+    }
+    return created;
+  }
 
   if (action.type === 'replace') {
     // The model never supplies a precondition. LocalExecutor binds it
@@ -687,7 +791,14 @@ async function executeOneAction(task, action, context, writeLimits, signal) {
     // process actually, authorizedly read from disk.
     const contextFile = getCompleteContextFile(context, action.path);
     if (!contextFile) {
-      return blockedActionResult('replace', action.path, 'replace target has no complete (status: ok) snapshot in the loaded context; refusing to guess a precondition');
+      if (context.files.some((f) => f.path === action.path && f.status === 'reference')) {
+        return blockedActionResult('replace', action.path, 'replace target is read-only reference context (status: reference); it cannot be edited', 'read_only_target');
+      }
+      if (getExcerptContextFile(context, action.path)) {
+        return blockedActionResult('replace', action.path, 'replace target is only partially shown (status: excerpt); whole-file replace from partial context is not permitted; use patch with old_string copied from a shown range', 'edit_form_invalid');
+      }
+      // A file THIS run just created/changed is not in the (pre-run) context, but the next round shows it: stale, not permanent.
+      return blockedActionResult('replace', action.path, 'replace target has no complete (status: ok) snapshot in the loaded context; refusing to guess a precondition', changedPaths.has(action.path) ? 'stale_live_state' : 'no_usable_context');
     }
     return replaceFile(task, action.path, action.content, { expectedContent: stripContextLineNumbers(contextFile.content), limits: writeLimits, signal });
   }
@@ -701,7 +812,12 @@ async function executeOneAction(task, action, context, writeLimits, signal) {
   // even though it is no longer the content the model reasoned about.
   const contextFile = getCompleteContextFile(context, action.path);
   if (!contextFile) {
-    return blockedActionResult('patch', action.path, 'patch target has no complete (status: ok) snapshot in the loaded context; refusing to guess at unseen content');
+    const excerptFile = getExcerptContextFile(context, action.path);
+    if (excerptFile) return patchFromExcerpt(task, action, excerptFile, writeLimits, signal);
+    if (context.files.some((f) => f.path === action.path && f.status === 'reference')) {
+      return blockedActionResult('patch', action.path, 'patch target is read-only reference context (status: reference); it cannot be edited', 'read_only_target');
+    }
+    return blockedActionResult('patch', action.path, 'patch target has no complete (status: ok) snapshot in the loaded context; refusing to guess at unseen content', changedPaths.has(action.path) ? 'stale_live_state' : 'no_usable_context');
   }
   return applyEdits(task, action.path, action.edits, { expectedHash: sha256(stripContextLineNumbers(contextFile.content)), limits: writeLimits, signal });
 }
@@ -798,7 +914,7 @@ export async function executeTask(task, modelAdapter, options = {}) {
   for (const action of actions) {
     throwIfAborted(options.signal);
     // eslint-disable-next-line no-await-in-loop -- actions must apply strictly in order, one at a time.
-    const result = await executeOneAction(task, action, context, options.writeLimits, options.signal);
+    const result = await executeOneAction(task, action, context, options.writeLimits, options.signal, new Set(changes.filter((c) => c.status === 'ok').map((c) => c.path)));
     throwIfAborted(options.signal);
     changes.push(result);
     if (result.status !== 'ok') { failedChange = result; break; }
@@ -819,7 +935,7 @@ export async function executeTask(task, modelAdapter, options = {}) {
     changes: Object.freeze(changes.map((c) => Object.freeze(c))),
     model_metadata: Object.freeze(modelMetadataFrom(modelResult, explanation, confidence)),
     blockers: Object.freeze(failedChange
-      ? [{ reason: 'write_failed', operation: failedChange.operation, path: failedChange.path, code: failedChange.code, detail: failedChange.detail }]
+      ? [{ reason: 'write_failed', operation: failedChange.operation, path: failedChange.path, code: failedChange.code, detail: failedChange.detail, ...(failedChange.subtype ? { subtype: failedChange.subtype } : {}) }]
       : []),
     remaining_work: Object.freeze(remainingWork),
     // Non-zero only for a read-only task whose model response proposed one

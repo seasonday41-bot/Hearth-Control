@@ -127,11 +127,12 @@ const TEMP_PREFIX = '.x-write-tmp-';
 const DEFAULT_NEW_FILE_MODE = 0o644;
 
 export class XEditError extends Error {
-  constructor(code, message, detail = null) {
+  constructor(code, message, detail = null, subtype = null) {
     super(message);
     this.name = 'XEditError';
     this.code = code;
     this.detail = detail;
+    this.subtype = subtype;
   }
 }
 
@@ -180,10 +181,13 @@ const emptyResult = (operation, relativePath) => ({
   changed: false,
 });
 
-const failure = (operation, relativePath, code, detail) => ({
+// `subtype` (X v0.2 Slice 4) refines PRECONDITION_FAILED (see failure-kinds.mjs); it is present only when the detecting code
+// set one, so every other result keeps its exact previous shape.
+const failure = (operation, relativePath, code, detail, subtype = null) => ({
   ...emptyResult(operation, relativePath),
   code,
   detail: detail || null,
+  ...(subtype ? { subtype } : {}),
 });
 
 /**
@@ -397,7 +401,7 @@ async function publishNoClobber(tempAbsolute, targetAbsolute, signal) {
   } catch (err) {
     await unlink(tempAbsolute).catch(() => {});
     throwIfAborted(signal);
-    if (err?.code === 'EEXIST') throw new XEditError('PRECONDITION_FAILED', 'a file already exists at this path; use replaceFile to modify it');
+    if (err?.code === 'EEXIST') throw new XEditError('PRECONDITION_FAILED', 'a file already exists at this path; use replaceFile to modify it', null, 'create_target_exists');
     throw new XEditError('WRITE_FAILED', err?.message || 'atomic no-clobber publish failed', err?.code || null);
   }
   await unlink(tempAbsolute).catch(() => {});
@@ -412,7 +416,7 @@ async function publishWithRevalidation(tempAbsolute, targetAbsolute, expectedBef
   }
   if (!recheck.ok || sha256(recheck.content) !== expectedBeforeHash) {
     await unlink(tempAbsolute).catch(() => {});
-    throw new XEditError('PRECONDITION_FAILED', 'target content changed after inspection and before publish; write aborted');
+    throw new XEditError('PRECONDITION_FAILED', 'target content changed after inspection and before publish; write aborted', null, 'stale_live_state');
   }
   try {
     throwIfAborted(signal);
@@ -452,7 +456,7 @@ export async function createFile(task, relPath, content, options = {}) {
   const target = await resolveWriteTarget(task.scope, task.workspace.root, relPath);
   throwIfAborted(options.signal);
   if (!target.ok) return failure(operation, normalizePathString(relPath), target.code, target.detail);
-  if (target.exists) return failure(operation, target.relative, 'PRECONDITION_FAILED', 'a file already exists at this path; use replaceFile to modify it');
+  if (target.exists) return failure(operation, target.relative, 'PRECONDITION_FAILED', 'a file already exists at this path; use replaceFile to modify it', 'create_target_exists');
 
   const tempDir = authorizeTempDirectory(task.scope, target.relative);
   if (!tempDir.ok) return failure(operation, target.relative, 'PATH_REJECTED', tempDir.detail);
@@ -467,7 +471,7 @@ export async function createFile(task, relPath, content, options = {}) {
     };
   } catch (err) {
     throwIfAborted(options.signal);
-    if (err instanceof XEditError) return failure(operation, target.relative, err.code, err.message);
+    if (err instanceof XEditError) return failure(operation, target.relative, err.code, err.message, err.subtype);
     return failure(operation, target.relative, 'WRITE_FAILED', err?.message || 'write failed');
   }
 }
@@ -492,7 +496,7 @@ export async function replaceFile(task, relPath, content, options = {}) {
   const operation = 'replace';
   if (typeof content !== 'string') return failure(operation, relPath, 'WRITE_FAILED', 'content must be a string');
   if (!options.expectedHash && options.expectedContent === undefined) {
-    return failure(operation, normalizePathString(relPath), 'PRECONDITION_FAILED', 'replaceFile requires expectedHash or expectedContent to prevent a blind overwrite');
+    return failure(operation, normalizePathString(relPath), 'PRECONDITION_FAILED', 'replaceFile requires expectedHash or expectedContent to prevent a blind overwrite', 'precondition_missing');
   }
   const limits = resolveLimits(options.limits);
   const bytes = Buffer.byteLength(content, 'utf8');
@@ -509,10 +513,10 @@ export async function replaceFile(task, relPath, content, options = {}) {
   const beforeHash = sha256(current.content);
 
   if (options.expectedHash && options.expectedHash !== beforeHash) {
-    return { ...failure(operation, target.relative, 'PRECONDITION_FAILED', 'expectedHash did not match the current file content'), before_hash: beforeHash };
+    return { ...failure(operation, target.relative, 'PRECONDITION_FAILED', 'expectedHash did not match the current file content', 'stale_live_state'), before_hash: beforeHash };
   }
   if (options.expectedContent !== undefined && options.expectedContent !== current.content) {
-    return { ...failure(operation, target.relative, 'PRECONDITION_FAILED', 'expectedContent did not match the current file content'), before_hash: beforeHash };
+    return { ...failure(operation, target.relative, 'PRECONDITION_FAILED', 'expectedContent did not match the current file content', 'stale_live_state'), before_hash: beforeHash };
   }
 
   const tempDir = authorizeTempDirectory(task.scope, target.relative);
@@ -528,7 +532,7 @@ export async function replaceFile(task, relPath, content, options = {}) {
     };
   } catch (err) {
     throwIfAborted(options.signal);
-    if (err instanceof XEditError) return { ...failure(operation, target.relative, err.code, err.message), before_hash: beforeHash };
+    if (err instanceof XEditError) return { ...failure(operation, target.relative, err.code, err.message, err.subtype), before_hash: beforeHash };
     return { ...failure(operation, target.relative, 'WRITE_FAILED', err?.message || 'write failed'), before_hash: beforeHash };
   }
 }
@@ -558,7 +562,18 @@ export async function replaceFile(task, relPath, content, options = {}) {
  * @param {object} task validated x-task-v1 (never mutated)
  * @param {string} relPath
  * @param {{ old_string: string, new_string: string, replace_all?: boolean }[]} edits
- * @param {{ expectedHash?: string, limits?: object, signal?: AbortSignal }} [options]
+ * `options.uniqueInOriginal` (X v0.2 excerpt patches): every edit's `old_string`
+ * must occur EXACTLY ONCE in the ORIGINAL file (the content whose hash was just
+ * verified), and `replace_all` is refused. The default uniqueness check above
+ * runs against the *working* text, where an earlier edit could remove one of two
+ * occurrences and leave a later `old_string` "unique" at a location the caller
+ * never saw. This option closes that: uniqueness is judged against the whole
+ * original file, before any edit is applied.
+ *
+ * `options.shown` (`{ texts, label }`, excerpt patches): the exact text of each range that was shown to the model; an edit whose
+ * old_string is not entirely inside one of them is refused (see the gate below for the two subtypes it distinguishes).
+ *
+ * @param {{ expectedHash?: string, uniqueInOriginal?: boolean, shown?: { texts: string[], label: string }, limits?: object, signal?: AbortSignal }} [options]
  */
 export async function applyEdits(task, relPath, edits, options = {}) {
   throwIfAborted(options.signal);
@@ -598,7 +613,31 @@ export async function applyEdits(task, relPath, edits, options = {}) {
   const beforeHash = sha256(current.content);
 
   if (options.expectedHash && options.expectedHash !== beforeHash) {
-    return { ...failure(operation, target.relative, 'PRECONDITION_FAILED', 'expectedHash did not match the current file content'), before_hash: beforeHash };
+    return { ...failure(operation, target.relative, 'PRECONDITION_FAILED', 'expectedHash did not match the current file content', 'stale_live_state'), before_hash: beforeHash };
+  }
+
+  // Excerpt patches: every old_string must lie entirely inside ONE shown range. Checked here, against the file whose hash was
+  // just verified, so the refusal can say WHY (X v0.2 Slice 4): the text exists in the file but was never shown (`unseen_context`,
+  // permanent -- the same trusted context is shown again next round) versus text that is not in the file at all (`edit_mismatch`,
+  // the model mis-copied it and can re-copy from the shown text).
+  if (options.shown && Array.isArray(options.shown.texts)) {
+    for (const [index, edit] of edits.entries()) {
+      if (!options.shown.texts.some((text) => text.includes(edit.old_string))) {
+        return { ...failure(operation, target.relative, 'PRECONDITION_FAILED', `edit ${index}: old_string is not entirely within a shown excerpt of this file (${options.shown.label}); refusing to patch text that was not shown`, current.content.includes(edit.old_string) ? 'unseen_context' : 'edit_mismatch'), before_hash: beforeHash };
+      }
+    }
+  }
+
+  if (options.uniqueInOriginal === true) {
+    for (const [index, edit] of edits.entries()) {
+      if (edit.replace_all) {
+        return { ...failure(operation, target.relative, 'PRECONDITION_FAILED', `edit ${index}: replace_all is not permitted for a patch justified by a partial (excerpt) view of the file`, 'edit_form_invalid'), before_hash: beforeHash };
+      }
+      const inOriginal = countOccurrences(current.content, edit.old_string);
+      if (inOriginal !== 1) {
+        return { ...failure(operation, target.relative, 'PRECONDITION_FAILED', `edit ${index}: old_string must occur exactly once in the whole file (found ${inOriginal}); it is not unique or not present`, inOriginal === 0 ? 'edit_mismatch' : 'edit_ambiguous'), before_hash: beforeHash };
+      }
+    }
   }
 
   let working = current.content;
@@ -606,10 +645,10 @@ export async function applyEdits(task, relPath, edits, options = {}) {
   for (const [index, edit] of edits.entries()) {
     const occurrences = countOccurrences(working, edit.old_string);
     if (occurrences === 0) {
-      return { ...failure(operation, target.relative, 'PRECONDITION_FAILED', `edit ${index}: old_string not found`), before_hash: beforeHash };
+      return { ...failure(operation, target.relative, 'PRECONDITION_FAILED', `edit ${index}: old_string not found`, 'edit_mismatch'), before_hash: beforeHash };
     }
     if (!edit.replace_all && occurrences > 1) {
-      return { ...failure(operation, target.relative, 'PRECONDITION_FAILED', `edit ${index}: old_string is not unique (${occurrences} occurrences); pass replace_all to replace every occurrence`), before_hash: beforeHash };
+      return { ...failure(operation, target.relative, 'PRECONDITION_FAILED', `edit ${index}: old_string is not unique (${occurrences} occurrences); pass replace_all to replace every occurrence`, 'edit_ambiguous'), before_hash: beforeHash };
     }
 
     const applyCount = edit.replace_all ? occurrences : 1;
@@ -643,7 +682,7 @@ export async function applyEdits(task, relPath, edits, options = {}) {
     };
   } catch (err) {
     throwIfAborted(options.signal);
-    if (err instanceof XEditError) return { ...failure(operation, target.relative, err.code, err.message), before_hash: beforeHash };
+    if (err instanceof XEditError) return { ...failure(operation, target.relative, err.code, err.message, err.subtype), before_hash: beforeHash };
     return { ...failure(operation, target.relative, 'WRITE_FAILED', err?.message || 'write failed'), before_hash: beforeHash };
   }
 }

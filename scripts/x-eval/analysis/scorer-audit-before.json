@@ -1,0 +1,428 @@
+{
+  "audit_mutants": [
+    {
+      "cand": "c1d6770715",
+      "id": "top-level-blockers-collapsed (the Qwen patch)",
+      "kind": "wrong",
+      "expect": {
+        "hidden": "fail"
+      },
+      "actual": {
+        "visible:test": "fail",
+        "hidden": "pass",
+        "net": "fail"
+      },
+      "ok": false,
+      "hidden_failing": [],
+      "net_regressions": [
+        "scripts/test-x-result-gate.mjs: escalation_required: invalid_task_scope -> FAILED",
+        "scripts/test-x-result-gate.mjs: escalation_required: invalid_validation_command -> FAILED"
+      ],
+      "observe": [
+        "visible:test",
+        "net"
+      ]
+    },
+    {
+      "cand": "c1d6770715",
+      "id": "unrecognized-execution-code-collapsed",
+      "kind": "wrong",
+      "expect": {
+        "hidden": "fail"
+      },
+      "actual": {
+        "visible:test": "fail",
+        "hidden": "fail",
+        "net": "fail"
+      },
+      "ok": true,
+      "hidden_failing": [
+        "control: an unrecognized code stays NEEDS_REVIEW / unrecognized_repair_outcome"
+      ],
+      "net_regressions": [
+        "scripts/test-x-result-gate.mjs: escalation_required: unknown/future execution blocker code -> NEEDS_REVIEW (fail closed, not FAILED)"
+      ],
+      "observe": [
+        "visible:test",
+        "net"
+      ]
+    },
+    {
+      "cand": "c1d6770715",
+      "id": "raw-identifier-not-kept-in-evidence",
+      "kind": "wrong",
+      "expect": {
+        "hidden": "fail"
+      },
+      "actual": {
+        "visible:test": "fail",
+        "hidden": "fail",
+        "net": "fail"
+      },
+      "ok": true,
+      "hidden_failing": [
+        "gate: PATH_REJECTED -> FAILED / structural_execution_failure, raw identifier kept in evidence",
+        "x-result: PATH_REJECTED -> reason_code structural_execution_failure; raw identifier listed in blockers",
+        "gate: INVALID_SCOPE -> FAILED / structural_execution_failure, raw identifier kept in evidence",
+        "x-result: INVALID_SCOPE -> reason_code structural_execution_failure; raw identifier listed in blockers"
+      ],
+      "net_regressions": [
+        "scripts/test-x-result-builder.mjs: secret redaction: a secret in gateResult.evidence.blocker.detail is absent from the full serialized result"
+      ],
+      "observe": [
+        "visible:test",
+        "net"
+      ]
+    },
+    {
+      "cand": "c1d6770715",
+      "id": "equivalent-constant-built-differently",
+      "kind": "altOk",
+      "expect": {
+        "hidden": "pass",
+        "net": "pass"
+      },
+      "actual": {
+        "visible:test": "pass",
+        "hidden": "pass",
+        "net": "pass"
+      },
+      "ok": true,
+      "hidden_failing": [],
+      "net_regressions": [],
+      "observe": [
+        "visible:test"
+      ]
+    },
+    {
+      "cand": "070e9850b1",
+      "id": "equal-builtAt-counts-as-newer",
+      "kind": "wrong",
+      "expect": {
+        "hidden": "fail"
+      },
+      "actual": {
+        "visible:test": "fail",
+        "hidden": "pass",
+        "net": "pass"
+      },
+      "ok": false,
+      "hidden_failing": [],
+      "net_regressions": [],
+      "observe": [
+        "visible:test",
+        "net"
+      ]
+    },
+    {
+      "cand": "070e9850b1",
+      "id": "missing-timestamp-fails-open",
+      "kind": "wrong",
+      "expect": {
+        "hidden": "fail"
+      },
+      "actual": {
+        "visible:test": "fail",
+        "hidden": "fail",
+        "net": "fail"
+      },
+      "ok": true,
+      "hidden_failing": [
+        "same version, running build has no builtAt -> fails closed (up_to_date)"
+      ],
+      "net_regressions": [
+        "scripts/test-updater.mjs: Electron verifies a spaced .app bundle containing a real app.asar with original-fs: Expected values to be strictly equal:",
+        "scripts/test-updater.mjs: same version and build becomes up_to_date: Expected values to be strictly equal:"
+      ],
+      "observe": [
+        "visible:test",
+        "net"
+      ]
+    },
+    {
+      "cand": "070e9850b1",
+      "id": "version-compared-as-string",
+      "kind": "wrong",
+      "expect": {
+        "hidden": "fail"
+      },
+      "actual": {
+        "visible:test": "pass",
+        "hidden": "pass",
+        "net": "pass"
+      },
+      "ok": false,
+      "hidden_failing": [],
+      "net_regressions": [],
+      "observe": [
+        "visible:test",
+        "net"
+      ]
+    },
+    {
+      "cand": "070e9850b1",
+      "id": "lower-version-falls-through-to-builtAt",
+      "kind": "wrong",
+      "expect": {
+        "hidden": "fail"
+      },
+      "actual": {
+        "visible:test": "fail",
+        "hidden": "fail",
+        "net": "pass"
+      },
+      "ok": true,
+      "hidden_failing": [
+        "lower version is never offered, even if built later"
+      ],
+      "net_regressions": [],
+      "observe": [
+        "visible:test",
+        "net"
+      ]
+    },
+    {
+      "cand": "070e9850b1",
+      "id": "higher-version-falls-through-to-builtAt",
+      "kind": "wrong",
+      "expect": {
+        "hidden": "fail"
+      },
+      "actual": {
+        "visible:test": "fail",
+        "hidden": "fail",
+        "net": "fail"
+      },
+      "ok": true,
+      "hidden_failing": [
+        "higher version is offered even if built earlier"
+      ],
+      "net_regressions": [
+        "scripts/test-updater.mjs: valid newer manifest becomes update_ready: Expected values to be strictly equal:"
+      ],
+      "observe": [
+        "visible:test",
+        "net"
+      ]
+    },
+    {
+      "cand": "070e9850b1",
+      "id": "install-refuses-everything",
+      "kind": "wrong",
+      "expect": {
+        "hidden": "fail"
+      },
+      "actual": {
+        "visible:test": "fail",
+        "hidden": "fail",
+        "net": "pass"
+      },
+      "ok": true,
+      "hidden_failing": [
+        "control: installUpdate still installs a genuinely newer build (backup kept, helper scheduled)"
+      ],
+      "net_regressions": [],
+      "observe": [
+        "visible:test",
+        "net"
+      ]
+    },
+    {
+      "cand": "070e9850b1",
+      "id": "install-no-longer-requires-user-approval (unchanged behavior)",
+      "kind": "wrong",
+      "expect": {
+        "hidden": "fail"
+      },
+      "actual": {
+        "visible:test": "fail",
+        "hidden": "pass",
+        "net": "fail"
+      },
+      "ok": false,
+      "hidden_failing": [],
+      "net_regressions": [
+        "scripts/test-updater.mjs: install requires explicit user action: The input did not match the regular expression /approval/. Input:"
+      ],
+      "observe": [
+        "visible:test",
+        "net"
+      ]
+    },
+    {
+      "cand": "070e9850b1",
+      "id": "equivalent-comparison-written-differently",
+      "kind": "altOk",
+      "expect": {
+        "hidden": "pass",
+        "net": "pass"
+      },
+      "actual": {
+        "visible:test": "pass",
+        "hidden": "pass",
+        "net": "pass"
+      },
+      "ok": true,
+      "hidden_failing": [],
+      "net_regressions": [],
+      "observe": [
+        "visible:test"
+      ]
+    },
+    {
+      "cand": "8d08bc3621",
+      "id": "failure-cleanup-uses-patched-fs",
+      "kind": "wrong",
+      "expect": {
+        "hidden": "fail"
+      },
+      "actual": {
+        "visible:test": "fail",
+        "hidden": "pass",
+        "net": "pass"
+      },
+      "ok": false,
+      "hidden_failing": [],
+      "net_regressions": [],
+      "observe": [
+        "visible:test",
+        "net"
+      ]
+    },
+    {
+      "cand": "8d08bc3621",
+      "id": "copy-merges-into-existing-destination",
+      "kind": "wrong",
+      "expect": {
+        "hidden": "fail"
+      },
+      "actual": {
+        "visible:test": "pass",
+        "hidden": "pass",
+        "net": "pass"
+      },
+      "ok": false,
+      "hidden_failing": [],
+      "net_regressions": [],
+      "observe": [
+        "visible:test",
+        "net"
+      ]
+    },
+    {
+      "cand": "8d08bc3621",
+      "id": "symlinks-dereferenced",
+      "kind": "wrong",
+      "expect": {
+        "hidden": "fail"
+      },
+      "actual": {
+        "visible:test": "fail",
+        "hidden": "fail",
+        "net": "fail"
+      },
+      "ok": true,
+      "hidden_failing": [
+        "copyAppBundle copies both .asar archives as opaque files, plus unpacked dir and relative symlink",
+        "stageVerifiedUpdate stages this bundle under Electron and the staged tree hash matches"
+      ],
+      "net_regressions": [
+        "scripts/test-remote-update-integration.mjs: 5. verified remote download + staging reaches existing local updater update_ready",
+        "scripts/test-remote-updater.mjs: P2C: 1. verified DMG can enter mount/stage phase and produces staged app + local manifest",
+        "scripts/test-remote-updater.mjs: P2C: 2. hdiutil invoked via fixed /usr/bin/hdiutil, no shell",
+        "scripts/test-remote-updater.mjs: P2C: 3. mount uses read-only, non-browse, no-autoopen flags"
+      ],
+      "observe": [
+        "visible:test",
+        "net"
+      ]
+    },
+    {
+      "cand": "8d08bc3621",
+      "id": "top-level-symlink-candidate-accepted (unchanged behavior)",
+      "kind": "wrong",
+      "expect": {
+        "hidden": "fail"
+      },
+      "actual": {
+        "visible:test": "fail",
+        "hidden": "pass",
+        "net": "fail"
+      },
+      "ok": false,
+      "hidden_failing": [],
+      "net_regressions": [
+        "scripts/test-remote-updater.mjs: P2C: 6. top-level candidate symlink rejected",
+        "scripts/test-remote-updater.mjs: P2C: 7. candidate path escape rejected"
+      ],
+      "observe": [
+        "visible:test",
+        "net"
+      ]
+    },
+    {
+      "cand": "8d08bc3621",
+      "id": "traversal-buildId-accepted (unchanged behavior)",
+      "kind": "wrong",
+      "expect": {
+        "hidden": "fail"
+      },
+      "actual": {
+        "visible:test": "fail",
+        "hidden": "pass",
+        "net": "fail"
+      },
+      "ok": false,
+      "hidden_failing": [],
+      "net_regressions": [
+        "scripts/test-remote-updater.mjs: P2C: 19. buildId path traversal is rejected before touching the filesystem"
+      ],
+      "observe": [
+        "visible:test",
+        "net"
+      ]
+    },
+    {
+      "cand": "8d08bc3621",
+      "id": "tree-checksum-not-enforced (unchanged behavior)",
+      "kind": "wrong",
+      "expect": {
+        "hidden": "fail"
+      },
+      "actual": {
+        "visible:test": "fail",
+        "hidden": "pass",
+        "net": "fail"
+      },
+      "ok": false,
+      "hidden_failing": [],
+      "net_regressions": [
+        "scripts/test-remote-update-integration.mjs: 10. staged application tree mismatch cannot become update_ready"
+      ],
+      "observe": [
+        "visible:test",
+        "net"
+      ]
+    },
+    {
+      "cand": "8d08bc3621",
+      "id": "equivalent-extra-dereference-false",
+      "kind": "altOk",
+      "expect": {
+        "hidden": "pass",
+        "net": "pass"
+      },
+      "actual": {
+        "visible:test": "pass",
+        "hidden": "pass",
+        "net": "pass"
+      },
+      "ok": true,
+      "hidden_failing": [],
+      "net_regressions": [],
+      "observe": [
+        "visible:test"
+      ]
+    }
+  ]
+}

@@ -150,21 +150,42 @@ test('RL2/RL7/RL8 a required-validation failure repairs, the newly-created file 
   assert.equal(fs.readFileSync(path.join(root, 'src/newfile.js'), 'utf8'), 'patched');
 });
 
-test('RL3 PRECONDITION_FAILED is classified repairable and a repair round is attempted', async () => {
+test('RL3 a model-correctable PRECONDITION_FAILED (old_string mismatch on a shown file) is classified repairable and a repair round is attempted', async () => {
   const root = tmpWorkspace();
   writeFile(root, 'src/target.js', 'original');
-  const task = writeTask(root, { validation: { required: ['node --test scripts/test-pass.mjs'], optional: [] } });
+  const task = writeTask(root, { suspected_area: ['src/target.js'], validation: { required: ['node --test scripts/test-pass.mjs'], optional: [] } });
   writeFile(root, 'scripts/test-pass.mjs', "import test from 'node:test';\ntest('ok', () => {});\n");
   const adapter = queueAdapter([
-    { actions: [{ type: 'replace', path: 'src/unseen.js', content: 'x' }] }, // round 1: PRECONDITION_FAILED
+    { actions: [{ type: 'patch', path: 'src/target.js', edits: [{ old_string: 'not-in-the-file', new_string: 'x' }] }] }, // round 1: PRECONDITION_FAILED (edit_mismatch)
     { actions: [] }, // round 2: no-op, validation passes
   ]);
 
   const result = await runTaskWithRepair(task, adapter);
 
+  assert.equal(result.rounds[0].executor.blockers[0].code, 'PRECONDITION_FAILED');
+  assert.equal(result.rounds[0].executor.blockers[0].subtype, 'edit_mismatch');
   assert.equal(result.rounds[0].classification, 'repairable');
   assert.equal(result.total_rounds, 2);
   assert.equal(result.status, 'validated');
+});
+
+test('RL3b PRECONDITION_FAILED on an unseen/unloaded file is a permanent context limitation: escalates after ONE round, no second model call', async () => {
+  const root = tmpWorkspace();
+  writeFile(root, 'src/target.js', 'original');
+  const task = writeTask(root, { validation: { required: ['node --test scripts/test-pass.mjs'], optional: [] } });
+  writeFile(root, 'scripts/test-pass.mjs', "import test from 'node:test';\ntest('ok', () => {});\n");
+  const adapter = queueAdapter([
+    { actions: [{ type: 'replace', path: 'src/unseen.js', content: 'x' }] }, // no snapshot of src/unseen.js exists in the loaded context
+    { actions: [] }, // must never be called
+  ]);
+
+  const result = await runTaskWithRepair(task, adapter);
+
+  assert.equal(result.rounds[0].executor.blockers[0].subtype, 'no_usable_context');
+  assert.equal(result.rounds[0].classification, 'escalate');
+  assert.equal(result.total_rounds, 1);
+  assert.equal(adapter.calls.length, 1);
+  assert.equal(result.status, 'escalation_required');
 });
 
 test('RL4 a structural failure (PATH_REJECTED) escalates immediately with no second executeTask/model call', async () => {

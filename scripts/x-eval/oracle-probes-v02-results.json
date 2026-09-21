@@ -1,0 +1,206 @@
+{
+  "probe": "x-v0.2-slice1-oracle-structural-probes",
+  "gold_fingerprint": "f6ac8bfae42af5c5417e2da485f1b61f94c3e3ed6bb72cf5f3f8b142a9bdc03f",
+  "gold_fingerprint_expected": "f6ac8bfae42af5c5417e2da485f1b61f94c3e3ed6bb72cf5f3f8b142a9bdc03f",
+  "executor": {
+    "repo_head": "11ef37b6fe73543477b1d8f4ffc5b0f102fbbfbb",
+    "mcp_x_index_sha256": "dc38aba303917d1bc9d2c72a142c4ef59d30b298cfc69ba7f91b9e75d52a8bbe",
+    "mcp_x_worktree_clean_vs_HEAD": false
+  },
+  "rows": [
+    {
+      "task": "4f261b2f4b",
+      "config": "A. locked Gold task (file-level hint, NO ranges), model_quality",
+      "expected": "FAILURE (unchanged: X v0.2 changes nothing without a range hint)",
+      "hints": [
+        "electron/main.cjs"
+      ],
+      "outcome": "FAILURE",
+      "gate_agrees": null,
+      "gate": "NEEDS_REVIEW/repair_budget_exhausted_transient",
+      "rounds": 3,
+      "context": {
+        "status": "truncated",
+        "bytes": 20000
+      },
+      "prompt_bytes": 29167,
+      "diff": [],
+      "hidden": "3/8",
+      "blocker": {
+        "code": "PRECONDITION_FAILED",
+        "detail": "patch target has no complete (status: ok) snapshot in the loaded context; refusing to guess at unseen content"
+      },
+      "integrity_ok": true,
+      "effective_max_bytes_per_file": 20000
+    },
+    {
+      "task": "4f261b2f4b",
+      "config": "B. + range hints, model_quality (20,000 B/file)",
+      "expected": "SUCCESS",
+      "hints": [
+        "electron/main.cjs:694-706"
+      ],
+      "outcome": "SUCCESS",
+      "gate_agrees": true,
+      "gate": "COMPLETED/validated",
+      "rounds": 1,
+      "context": {
+        "status": "excerpt",
+        "bytes": 695
+      },
+      "prompt_bytes": 10377,
+      "diff": [
+        {
+          "path": "electron/main.cjs",
+          "insertions": 2,
+          "deletions": 2
+        }
+      ],
+      "hidden": "8/8",
+      "blocker": null,
+      "integrity_ok": true,
+      "effective_max_bytes_per_file": 20000
+    },
+    {
+      "task": "4f261b2f4b",
+      "config": "C. + range hints, production_capability (DEFAULT 8,000 B/file, no override)",
+      "expected": "SUCCESS (no global cap raised)",
+      "hints": [
+        "electron/main.cjs:694-706"
+      ],
+      "outcome": "SUCCESS",
+      "gate_agrees": true,
+      "gate": "COMPLETED/validated",
+      "rounds": 1,
+      "context": {
+        "status": "excerpt",
+        "bytes": 695
+      },
+      "prompt_bytes": 10377,
+      "diff": [
+        {
+          "path": "electron/main.cjs",
+          "insertions": 2,
+          "deletions": 2
+        }
+      ],
+      "hidden": "8/8",
+      "blocker": null,
+      "integrity_ok": true,
+      "effective_max_bytes_per_file": 8000
+    },
+    {
+      "task": "4f261b2f4b",
+      "config": "D. NEGATIVE: hint covers only the FIRST edit; the oracle also edits an unshown region",
+      "skipped": "reference fix has a single edit hunk; nothing to leave out"
+    },
+    {
+      "task": "79664a00cc",
+      "config": "A. locked Gold task (file-level hint, NO ranges), model_quality",
+      "expected": "FAILURE (unchanged: X v0.2 changes nothing without a range hint)",
+      "hints": [
+        "electron/main.cjs"
+      ],
+      "outcome": "FAILURE",
+      "gate_agrees": null,
+      "gate": "NEEDS_REVIEW/repair_budget_exhausted_transient",
+      "rounds": 3,
+      "context": {
+        "status": "truncated",
+        "bytes": 20000
+      },
+      "prompt_bytes": 29190,
+      "diff": [],
+      "hidden": "4/7",
+      "blocker": {
+        "code": "PRECONDITION_FAILED",
+        "detail": "patch target has no complete (status: ok) snapshot in the loaded context; refusing to guess at unseen content"
+      },
+      "integrity_ok": true,
+      "effective_max_bytes_per_file": 20000
+    },
+    {
+      "task": "79664a00cc",
+      "config": "B. + range hints, model_quality (20,000 B/file)",
+      "expected": "SUCCESS",
+      "hints": [
+        "electron/main.cjs:527-532",
+        "electron/main.cjs:534-543"
+      ],
+      "outcome": "SUCCESS",
+      "gate_agrees": true,
+      "gate": "COMPLETED/validated",
+      "rounds": 1,
+      "context": {
+        "status": "excerpt",
+        "bytes": 632
+      },
+      "prompt_bytes": 10337,
+      "diff": [
+        {
+          "path": "electron/main.cjs",
+          "insertions": 16,
+          "deletions": 3
+        }
+      ],
+      "hidden": "7/7",
+      "blocker": null,
+      "integrity_ok": true,
+      "effective_max_bytes_per_file": 20000
+    },
+    {
+      "task": "79664a00cc",
+      "config": "C. + range hints, production_capability (DEFAULT 8,000 B/file, no override)",
+      "expected": "SUCCESS (no global cap raised)",
+      "hints": [
+        "electron/main.cjs:527-532",
+        "electron/main.cjs:534-543"
+      ],
+      "outcome": "SUCCESS",
+      "gate_agrees": true,
+      "gate": "COMPLETED/validated",
+      "rounds": 1,
+      "context": {
+        "status": "excerpt",
+        "bytes": 632
+      },
+      "prompt_bytes": 10337,
+      "diff": [
+        {
+          "path": "electron/main.cjs",
+          "insertions": 16,
+          "deletions": 3
+        }
+      ],
+      "hidden": "7/7",
+      "blocker": null,
+      "integrity_ok": true,
+      "effective_max_bytes_per_file": 8000
+    },
+    {
+      "task": "79664a00cc",
+      "config": "D. NEGATIVE: hint covers only the FIRST edit; the oracle also edits an unshown region",
+      "expected": "FAILURE, file untouched (edit outside the shown excerpt refused)",
+      "hints": [
+        "electron/main.cjs:527-532"
+      ],
+      "outcome": "FAILURE",
+      "gate_agrees": null,
+      "gate": "NEEDS_REVIEW/repair_budget_exhausted_transient",
+      "rounds": 3,
+      "context": {
+        "status": "excerpt",
+        "bytes": 340
+      },
+      "prompt_bytes": 10045,
+      "diff": [],
+      "hidden": "4/7",
+      "blocker": {
+        "code": "PRECONDITION_FAILED",
+        "detail": "edit 1: old_string is not entirely within a shown excerpt of this file (527-532); refusing to patch text that was not shown"
+      },
+      "integrity_ok": true,
+      "effective_max_bytes_per_file": 8000
+    }
+  ]
+}

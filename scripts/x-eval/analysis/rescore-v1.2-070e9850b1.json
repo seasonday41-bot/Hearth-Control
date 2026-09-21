@@ -1,0 +1,52 @@
+{
+  "task": "070e9850b1",
+  "lock_fingerprint": "f6ac8bfae42af5c5417e2da485f1b61f94c3e3ed6bb72cf5f3f8b142a9bdc03f",
+  "source_run": "070e9850b1-ollama-qwen3-5-9b-hermes-s0-muaqtxtm",
+  "source_outcome_under_v1_rules": {
+    "label": "FAILURE",
+    "gate_status": "NEEDS_REVIEW",
+    "reason_code": "repair_budget_exhausted_transient",
+    "integrity_ok": false
+  },
+  "x_gate_recorded": "NEEDS_REVIEW/repair_budget_exhausted_transient",
+  "hidden_v1_archived": {
+    "status": "failed",
+    "pass": "7/9"
+  },
+  "hidden_current": {
+    "status": "failed",
+    "pass": "11/14",
+    "failing": [
+      "development mode never reports update_ready",
+      "control: installUpdate still installs a genuinely newer build (backup kept, helper scheduled)",
+      "control: an offered update still reports version, buildId and builtAt in `available`"
+    ]
+  },
+  "regression_net": {
+    "files_run": 1,
+    "regressions": [],
+    "regression_details": []
+  },
+  "checks": {
+    "out_of_scope": [],
+    "test_tampering": [],
+    "wrong_file": false,
+    "head_unchanged": true,
+    "regressions": []
+  },
+  "outcome_current": {
+    "label": "FAILURE",
+    "gate_status": "NEEDS_REVIEW",
+    "reason_code": "repair_budget_exhausted_transient",
+    "integrity_ok": true
+  },
+  "recorded_regressions": [
+    "scripts/test-updater.mjs: install creates backup in fixture and keeps user data untouched: The update is not newer than the running version.",
+    "scripts/test-updater.mjs: install preserves executable permissions and relative symlinks without touching /Applications: The update is not newer than the running version.",
+    "scripts/test-updater.mjs: rollback restores the fixture application: The update is not newer than the running version.",
+    "scripts/test-updater.mjs: rollback after startup failure runs exactly once and restores a launchable previous bundle: The update is not newer than the running version.",
+    "scripts/test-updater.mjs: startup marker prevents rollback: The update is not newer than the running version.",
+    "scripts/test-updater.mjs: restart state is returned only after helper is scheduled: The update is not newer than the running version.",
+    "scripts/test-updater.mjs: watchdog receives the final installed app path, never staging or backup: The update is not newer than the running version."
+  ]
+}

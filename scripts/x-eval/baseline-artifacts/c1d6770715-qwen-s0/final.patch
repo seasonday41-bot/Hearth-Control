@@ -1,0 +1,43 @@
+diff --git a/mcp/x/result-gate.mjs b/mcp/x/result-gate.mjs
+index 34bf30f..448268e 100644
+--- a/mcp/x/result-gate.mjs
++++ b/mcp/x/result-gate.mjs
+@@ -79,6 +79,12 @@ const KNOWN_FAILED_EXECUTION_CODES = Object.freeze(new Set([
+   'too_many_files',
+ ]));
+ 
++// For the ten deterministic structural execution failures above, we now
++// normalize reason_code to a single stable identifier instead of passing
++// the raw blocker code through. This prevents taxonomy churn when lower-
++// level identifiers change.
++const STRUCTURAL_EXECUTION_FAILURE_REASON = 'structural_execution_failure';
++
+ const buildGateResult = (gateStatus, reasonCode, evidence, waitingReason = null) => {
+   const hearthOutcome = HEARTH_OUTCOME_BY_GATE_STATUS[gateStatus];
+   return Object.freeze({
+@@ -156,7 +162,7 @@ function classifyExecutionRound(repairOutcome, round) {
+       return buildGateResult('NEEDS_REVIEW', 'safety_boundary_review', evidence, 'supervisor_review');
+     }
+     if (KNOWN_FAILED_EXECUTION_CODES.has(key)) {
+-      return buildGateResult('FAILED', key, evidence);
++      return buildGateResult('FAILED', STRUCTURAL_EXECUTION_FAILURE_REASON, evidence);
+     }
+     return buildGateResult('NEEDS_REVIEW', 'unrecognized_repair_outcome', evidence, 'supervisor_review');
+   }
+@@ -241,7 +247,15 @@ export function evaluateResultGate(repairOutcome) {
+     const evidence = baseEvidence(repairOutcome, {
+       top_level_blocker: Object.freeze({ reason: topBlocker.reason, detail: topBlocker.detail ?? null }),
+     });
+-    return buildGateResult('FAILED', topBlocker.reason, evidence);
++    return buildGateResult('FAILED', 'structural_execution_failure', evidence);
++  }
++  // For unrecognized top-level blocker reasons (not in KNOWN_FAILED_EXECUTION_CODES),
++  // preserve the original reason_code to avoid taxonomy churn, as per acceptance criteria.
++  if (repairOutcome.blockers.length > 0) {
++    const evidence = baseEvidence(repairOutcome, {
++      top_level_blocker: Object.freeze({ reason: topBlocker?.reason ?? null, detail: topBlocker?.detail ?? null }),
++    });
++    return buildGateResult('NEEDS_REVIEW', 'unrecognized_repair_outcome', evidence, 'supervisor_review');
+   }
+   if (repairOutcome.blockers.length > 0) {
+     // A top-level blocker is present but its reason is neither of the two

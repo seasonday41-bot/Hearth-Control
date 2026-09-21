@@ -1,0 +1,150 @@
+{
+  "patch": "c1d6770715-ollama-qwen3-5-9b-hermes-s0-muanpz74",
+  "visible_fixed_test": {
+    "model": {
+      "status": "failed",
+      "failing": [
+        "escalation_required: invalid_task_scope -> FAILED",
+        "escalation_required: invalid_validation_command -> FAILED"
+      ]
+    },
+    "parent": {
+      "status": "failed",
+      "failing": [
+        "escalation_required: execution blocker PATH_REJECTED -> FAILED/structural_execution_failure, raw code preserved in evidence",
+        "escalation_required: execution blocker INVALID_SCOPE -> FAILED/structural_execution_failure, raw code preserved in evidence",
+        "escalation_required: execution blocker WRITE_FAILED -> FAILED/structural_execution_failure, raw code preserved in evidence",
+        "escalation_required: execution blocker UNREADABLE_TARGET -> FAILED/structural_execution_failure, raw code preserved in evidence",
+        "escalation_required: execution blocker reason context_load_failed (no code) -> FAILED/structural_execution_failure, raw reason preserved in evidence",
+        "escalation_required: execution blocker reason schema_invalid (no code) -> FAILED/structural_execution_failure, raw reason preserved in evidence",
+        "escalation_required: execution blocker reason unsupported_action (no code) -> FAILED/structural_execution_failure, raw reason preserved in evidence",
+        "escalation_required: execution blocker reason missing_field (no code) -> FAILED/structural_execution_failure, raw reason preserved in evidence",
+        "escalation_required: execution blocker reason too_many_actions (no code) -> FAILED/structural_execution_failure, raw reason preserved in evidence",
+        "escalation_required: execution blocker reason too_many_files (no code) -> FAILED/structural_execution_failure, raw reason preserved in evidence"
+      ]
+    }
+  },
+  "parent_test_regression_net": {
+    "parent": {
+      "status": "passed",
+      "failing": []
+    },
+    "fixed": {
+      "status": "failed",
+      "failing": [
+        "escalation_required: execution blocker PATH_REJECTED -> FAILED",
+        "escalation_required: execution blocker INVALID_SCOPE -> FAILED",
+        "escalation_required: execution blocker WRITE_FAILED -> FAILED",
+        "escalation_required: execution blocker UNREADABLE_TARGET -> FAILED",
+        "escalation_required: execution blocker reason context_load_failed (no code) -> FAILED",
+        "escalation_required: execution blocker reason schema_invalid (no code) -> FAILED",
+        "escalation_required: execution blocker reason unsupported_action (no code) -> FAILED",
+        "escalation_required: execution blocker reason missing_field (no code) -> FAILED",
+        "escalation_required: execution blocker reason too_many_actions (no code) -> FAILED",
+        "escalation_required: execution blocker reason too_many_files (no code) -> FAILED"
+      ]
+    },
+    "model": {
+      "status": "failed",
+      "failing": [
+        "escalation_required: invalid_task_scope -> FAILED",
+        "escalation_required: invalid_validation_command -> FAILED",
+        "escalation_required: execution blocker PATH_REJECTED -> FAILED",
+        "escalation_required: execution blocker INVALID_SCOPE -> FAILED",
+        "escalation_required: execution blocker WRITE_FAILED -> FAILED",
+        "escalation_required: execution blocker UNREADABLE_TARGET -> FAILED",
+        "escalation_required: execution blocker reason context_load_failed (no code) -> FAILED",
+        "escalation_required: execution blocker reason schema_invalid (no code) -> FAILED",
+        "escalation_required: execution blocker reason unsupported_action (no code) -> FAILED",
+        "escalation_required: execution blocker reason missing_field (no code) -> FAILED",
+        "escalation_required: execution blocker reason too_many_actions (no code) -> FAILED",
+        "escalation_required: execution blocker reason too_many_files (no code) -> FAILED"
+      ]
+    },
+    "regressions_in_model_patch": [
+      "escalation_required: invalid_task_scope -> FAILED",
+      "escalation_required: invalid_validation_command -> FAILED"
+    ]
+  },
+  "hidden_locked": {
+    "parent": {
+      "status": "failed",
+      "fail": [
+        "gate: PATH_REJECTED -> FAILED / structural_execution_failure, raw identifier kept in evidence",
+        "x-result: PATH_REJECTED -> reason_code structural_execution_failure; raw identifier listed in blockers",
+        "gate: INVALID_SCOPE -> FAILED / structural_execution_failure, raw identifier kept in evidence",
+        "x-result: INVALID_SCOPE -> reason_code structural_execution_failure; raw identifier listed in blockers",
+        "gate: WRITE_FAILED -> FAILED / structural_execution_failure, raw identifier kept in evidence",
+        "x-result: WRITE_FAILED -> reason_code structural_execution_failure; raw identifier listed in blockers",
+        "gate: UNREADABLE_TARGET -> FAILED / structural_execution_failure, raw identifier kept in evidence",
+        "x-result: UNREADABLE_TARGET -> reason_code structural_execution_failure; raw identifier listed in blockers",
+        "gate: context_load_failed -> FAILED / structural_execution_failure, raw identifier kept in evidence",
+        "x-result: context_load_failed -> reason_code structural_execution_failure; raw identifier listed in blockers",
+        "gate: schema_invalid -> FAILED / structural_execution_failure, raw identifier kept in evidence",
+        "x-result: schema_invalid -> reason_code structural_execution_failure; raw identifier listed in blockers",
+        "gate: unsupported_action -> FAILED / structural_execution_failure, raw identifier kept in evidence",
+        "x-result: unsupported_action -> reason_code structural_execution_failure; raw identifier listed in blockers",
+        "gate: missing_field -> FAILED / structural_execution_failure, raw identifier kept in evidence",
+        "x-result: missing_field -> reason_code structural_execution_failure; raw identifier listed in blockers",
+        "gate: too_many_actions -> FAILED / structural_execution_failure, raw identifier kept in evidence",
+        "x-result: too_many_actions -> reason_code structural_execution_failure; raw identifier listed in blockers",
+        "gate: too_many_files -> FAILED / structural_execution_failure, raw identifier kept in evidence",
+        "x-result: too_many_files -> reason_code structural_execution_failure; raw identifier listed in blockers",
+        "taxonomy is stable: all 10 identifiers share exactly one reason_code"
+      ],
+      "pass": "4/25"
+    },
+    "fixed": {
+      "status": "passed",
+      "fail": [],
+      "pass": "25/25"
+    },
+    "model": {
+      "status": "passed",
+      "fail": [],
+      "pass": "25/25"
+    }
+  },
+  "hidden_proposed_v2": {
+    "parent": {
+      "status": "failed",
+      "fail": [
+        "gate: PATH_REJECTED -> FAILED / structural_execution_failure, raw identifier kept in evidence",
+        "x-result: PATH_REJECTED -> reason_code structural_execution_failure; raw identifier listed in blockers",
+        "gate: INVALID_SCOPE -> FAILED / structural_execution_failure, raw identifier kept in evidence",
+        "x-result: INVALID_SCOPE -> reason_code structural_execution_failure; raw identifier listed in blockers",
+        "gate: WRITE_FAILED -> FAILED / structural_execution_failure, raw identifier kept in evidence",
+        "x-result: WRITE_FAILED -> reason_code structural_execution_failure; raw identifier listed in blockers",
+        "gate: UNREADABLE_TARGET -> FAILED / structural_execution_failure, raw identifier kept in evidence",
+        "x-result: UNREADABLE_TARGET -> reason_code structural_execution_failure; raw identifier listed in blockers",
+        "gate: context_load_failed -> FAILED / structural_execution_failure, raw identifier kept in evidence",
+        "x-result: context_load_failed -> reason_code structural_execution_failure; raw identifier listed in blockers",
+        "gate: schema_invalid -> FAILED / structural_execution_failure, raw identifier kept in evidence",
+        "x-result: schema_invalid -> reason_code structural_execution_failure; raw identifier listed in blockers",
+        "gate: unsupported_action -> FAILED / structural_execution_failure, raw identifier kept in evidence",
+        "x-result: unsupported_action -> reason_code structural_execution_failure; raw identifier listed in blockers",
+        "gate: missing_field -> FAILED / structural_execution_failure, raw identifier kept in evidence",
+        "x-result: missing_field -> reason_code structural_execution_failure; raw identifier listed in blockers",
+        "gate: too_many_actions -> FAILED / structural_execution_failure, raw identifier kept in evidence",
+        "x-result: too_many_actions -> reason_code structural_execution_failure; raw identifier listed in blockers",
+        "gate: too_many_files -> FAILED / structural_execution_failure, raw identifier kept in evidence",
+        "x-result: too_many_files -> reason_code structural_execution_failure; raw identifier listed in blockers",
+        "taxonomy is stable: all 10 identifiers share exactly one reason_code"
+      ],
+      "pass": "7/28"
+    },
+    "fixed": {
+      "status": "passed",
+      "fail": [],
+      "pass": "28/28"
+    },
+    "model": {
+      "status": "failed",
+      "fail": [
+        "control (v2): top-level blocker invalid_task_scope stays FAILED with its OWN reason_code",
+        "control (v2): top-level blocker invalid_validation_command stays FAILED with its OWN reason_code"
+      ],
+      "pass": "26/28"
+    }
+  }
+}

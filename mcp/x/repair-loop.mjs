@@ -2,6 +2,8 @@ import { executeTask } from './local-executor.mjs';
 import { runRequiredValidation, runOptionalValidation } from './validation-runner.mjs';
 import { scopeCheck, XContextScopeError } from './context-loader.mjs';
 import { throwIfAborted } from './cancellation.mjs';
+import { buildValidationDigest, scrubHostPaths, DIGEST } from './repair-digest.mjs';
+import { failureSubtypeOf } from './failure-kinds.mjs';
 
 /**
  * Orchestrates Phase 6 (`executeTask`) and Phase 7's own validation runner
@@ -20,7 +22,8 @@ import { throwIfAborted } from './cancellation.mjs';
  * including any reason/code this table does not name -- is `'escalate'`.
  * There is no prose/content heuristic anywhere in this module; every
  * branch is keyed on a fixed reason or error code already produced by
- * Phase 6/5B.
+ * Phase 6/5B -- plus, for PRECONDITION_FAILED, the structured `subtype` the
+ * detecting code set (failure-kinds.mjs), never the `detail` text.
  *
  * Required validation (`task.validation.required`) gates success: every
  * result must have `status === 'passed'` (Phase 7's own runValidation
@@ -75,6 +78,7 @@ export const FAILURE_CLASSIFICATION = Object.freeze({
   too_many_files: 'escalate',
   // Bounded / plausibly transient -- a repair round with fresh context or a
   // corrected response can reasonably resolve these.
+  // Compatibility default for a PRECONDITION_FAILED blocker WITHOUT a (known) `subtype`; see failure-kinds.mjs for the refinement.
   PRECONDITION_FAILED: 'repairable',
   WRITE_LIMIT_EXCEEDED: 'repairable',
   model_request_failed: 'repairable',
@@ -85,12 +89,17 @@ export const FAILURE_CLASSIFICATION = Object.freeze({
 /** Any reason/code not in the table above is fail-closed to 'escalate' -- an unrecognized failure is never assumed repairable. */
 export function classifyExecutorFailure(executorResult) {
   const blocker = executorResult?.blockers?.[0];
+  // X v0.2 Slice 4: a structured subtype set by the code that detected the failure (never parsed from `detail`) refines the
+  // coarse code. Absent or unknown subtype -> the code table below, exactly as before.
+  const subtype = failureSubtypeOf(blocker);
+  if (subtype) return subtype.classification;
   const key = blocker?.code ?? blocker?.reason;
   return FAILURE_CLASSIFICATION[key] ?? 'escalate';
 }
 
 const MAX_EVIDENCE_BYTES = 2_500;
 const MAX_EVIDENCE_TAIL_BYTES = 1_800;
+const MAX_EVIDENCE_DIGEST_TAIL_BYTES = 600; // the short raw tail kept next to a parsed digest
 const MAX_REPAIR_PREFERRED_FILES = 50;
 
 const truncateText = (text, maxBytes) => {
@@ -115,8 +124,15 @@ export const truncateTailText = (text, maxBytes) => {
 
 const dedupe = (values) => [...new Set(values)];
 
-/** A small, bounded, deterministic text summary of the round just attempted -- never chain-of-thought, never unbounded process output. */
-export function buildRepairEvidence(round) {
+/**
+ * A small, bounded, deterministic text summary of the round just attempted -- never chain-of-thought, never unbounded process output.
+ *
+ * For a failed required validation whose output the test runner formatted as usual, the evidence is a structured DIGEST
+ * (`repair-digest.mjs`: failed test names, expected/actual, first error, `path:line`) plus a short raw tail. When the output
+ * cannot be parsed the evidence is exactly what it was before the digest existed: the last MAX_EVIDENCE_TAIL_BYTES of output.
+ * `options.workspaceRoot` lets the digest print workspace-relative paths.
+ */
+export function buildRepairEvidence(round, options = {}) {
   const lines = [`Repair context from round ${round.round}:`];
   if (round.kind === 'execution') {
     const blocker = round.executor.blockers?.[0];
@@ -126,13 +142,24 @@ export function buildRepairEvidence(round) {
       lines.push(`  ${change.operation} ${change.path}: ${change.status}${change.code ? ` (${change.code})` : ''}`);
     }
   } else {
-    for (const result of round.validation.required) {
+    const results = round.validation.required;
+    for (const result of results) {
       const output = (result.stderr && result.stdout)
         ? `${result.stdout}\n${result.stderr}`
         : (result.stderr || result.stdout || '');
-      const tail = truncateTailText(output, MAX_EVIDENCE_TAIL_BYTES);
       lines.push(`Validation '${result.command}': ${result.status}; exit ${result.exitCode ?? 'none'}${result.signal ? `; signal ${result.signal}` : ''}${result.timedOut ? '; timed out' : ''}`);
-      if (tail) lines.push(`  tail: ${tail}`);
+      const digest = result.status === 'passed' ? { text: '' } : buildValidationDigest(output, {
+        roots: options.workspaceRoot ? [options.workspaceRoot] : [],
+        maxBytes: results.length > 1 ? Math.max(400, Math.floor(DIGEST.MAX_BYTES / results.length)) : DIGEST.MAX_BYTES,
+      });
+      if (digest.text) {
+        lines.push('  digest:', ...digest.text.split('\n').map((l) => `    ${l}`));
+        const tail = scrubHostPaths(truncateTailText(output, Math.floor(MAX_EVIDENCE_DIGEST_TAIL_BYTES / results.length)), options.workspaceRoot ? [options.workspaceRoot] : []);
+        if (tail) lines.push(`  tail: ${tail}`);
+      } else {
+        const tail = truncateTailText(output, MAX_EVIDENCE_TAIL_BYTES);
+        if (tail) lines.push(`  tail: ${tail}`);
+      }
     }
   }
   return truncateTailText(lines.join('\n'), MAX_EVIDENCE_BYTES);
@@ -151,7 +178,7 @@ function buildRepairTask(originalTask, rounds) {
       .filter((filePath) => scopeCheck(filePath, originalTask.scope).ok),
   ).slice(0, MAX_REPAIR_PREFERRED_FILES);
 
-  const evidence = buildRepairEvidence(rounds[rounds.length - 1]);
+  const evidence = buildRepairEvidence(rounds[rounds.length - 1], { workspaceRoot: originalTask.workspace?.root });
 
   return {
     ...originalTask,
@@ -163,6 +190,7 @@ function buildRepairTask(originalTask, rounds) {
       ...originalTask.scope,
       allowed_paths: originalTask.scope.allowed_paths,
       forbidden_paths: originalTask.scope.forbidden_paths,
+      ...(originalTask.scope.reference_paths ? { reference_paths: originalTask.scope.reference_paths } : {}),
       preferred_files: dedupe([...(originalTask.scope.preferred_files ?? []), ...changedFiles]),
     },
   };

@@ -1,0 +1,377 @@
+{
+  "probe": "x-v0.2-slice2-retrieval",
+  "gold_fingerprint": "f6ac8bfae42af5c5417e2da485f1b61f94c3e3ed6bb72cf5f3f8b142a9bdc03f",
+  "gold_fingerprint_locked": "f6ac8bfae42af5c5417e2da485f1b61f94c3e3ed6bb72cf5f3f8b142a9bdc03f",
+  "executor": {
+    "repo_head": "11ef37b6fe73543477b1d8f4ffc5b0f102fbbfbb",
+    "mcp_x_index_sha256": "dc38aba303917d1bc9d2c72a142c4ef59d30b298cfc69ba7f91b9e75d52a8bbe",
+    "mcp_x_worktree_clean_vs_HEAD": false
+  },
+  "rows": [
+    {
+      "task": "4f261b2f4b",
+      "variant": null,
+      "config": "control: retrieval OFF (Slice-1 behavior)",
+      "lane": "mq_off",
+      "outcome": "FAILURE",
+      "gate_agrees": null,
+      "hidden": "3/8",
+      "files": [
+        "electron/main.cjs:truncated:20000B"
+      ],
+      "prompt_bytes": 29167,
+      "prompt_sha16": "9b33202351ad6844",
+      "clue_original_fs_in_prompt": false,
+      "clue_asar_aware_comment_in_prompt": false,
+      "diff": [],
+      "integrity_ok": true,
+      "blocker": "patch target has no complete (status: ok) snapshot in the loaded context; refusing to guess at unseen content"
+    },
+    {
+      "task": "4f261b2f4b",
+      "variant": null,
+      "config": "retrieval ON, model_quality (20,000 B/file)",
+      "lane": "mq",
+      "outcome": "SUCCESS",
+      "gate_agrees": true,
+      "hidden": "8/8",
+      "files": [
+        "electron/main.cjs:excerpt:7028B"
+      ],
+      "prompt_bytes": 16710,
+      "prompt_sha16": "d77f180d2b675800",
+      "clue_original_fs_in_prompt": false,
+      "clue_asar_aware_comment_in_prompt": false,
+      "diff": [
+        {
+          "path": "electron/main.cjs",
+          "insertions": 2,
+          "deletions": 2
+        }
+      ],
+      "integrity_ok": true,
+      "blocker": null
+    },
+    {
+      "task": "4f261b2f4b",
+      "variant": null,
+      "config": "retrieval ON, production_capability (8,000 B/file, no override)",
+      "lane": "prod",
+      "outcome": "SUCCESS",
+      "gate_agrees": true,
+      "hidden": "8/8",
+      "files": [
+        "electron/main.cjs:excerpt:7028B"
+      ],
+      "prompt_bytes": 16710,
+      "prompt_sha16": "d77f180d2b675800",
+      "clue_original_fs_in_prompt": false,
+      "clue_asar_aware_comment_in_prompt": false,
+      "diff": [
+        {
+          "path": "electron/main.cjs",
+          "insertions": 2,
+          "deletions": 2
+        }
+      ],
+      "integrity_ok": true,
+      "blocker": null
+    },
+    {
+      "task": "79664a00cc",
+      "variant": null,
+      "config": "control: retrieval OFF (Slice-1 behavior)",
+      "lane": "mq_off",
+      "outcome": "FAILURE",
+      "gate_agrees": null,
+      "hidden": "4/7",
+      "files": [
+        "electron/main.cjs:truncated:20000B"
+      ],
+      "prompt_bytes": 29190,
+      "prompt_sha16": "c93094b49699c575",
+      "clue_original_fs_in_prompt": false,
+      "clue_asar_aware_comment_in_prompt": false,
+      "diff": [],
+      "integrity_ok": true,
+      "blocker": "patch target has no complete (status: ok) snapshot in the loaded context; refusing to guess at unseen content"
+    },
+    {
+      "task": "79664a00cc",
+      "variant": null,
+      "config": "retrieval ON, model_quality (20,000 B/file)",
+      "lane": "mq",
+      "outcome": "SUCCESS",
+      "gate_agrees": true,
+      "hidden": "7/7",
+      "files": [
+        "electron/main.cjs:excerpt:4678B"
+      ],
+      "prompt_bytes": 14383,
+      "prompt_sha16": "537c3246602f9eee",
+      "clue_original_fs_in_prompt": false,
+      "clue_asar_aware_comment_in_prompt": false,
+      "diff": [
+        {
+          "path": "electron/main.cjs",
+          "insertions": 16,
+          "deletions": 3
+        }
+      ],
+      "integrity_ok": true,
+      "blocker": null
+    },
+    {
+      "task": "79664a00cc",
+      "variant": null,
+      "config": "retrieval ON, production_capability (8,000 B/file, no override)",
+      "lane": "prod",
+      "outcome": "SUCCESS",
+      "gate_agrees": true,
+      "hidden": "7/7",
+      "files": [
+        "electron/main.cjs:excerpt:4678B"
+      ],
+      "prompt_bytes": 14383,
+      "prompt_sha16": "537c3246602f9eee",
+      "clue_original_fs_in_prompt": false,
+      "clue_asar_aware_comment_in_prompt": false,
+      "diff": [
+        {
+          "path": "electron/main.cjs",
+          "insertions": 16,
+          "deletions": 3
+        }
+      ],
+      "integrity_ok": true,
+      "blocker": null
+    },
+    {
+      "task": "8d08bc3621",
+      "variant": null,
+      "config": "control: retrieval OFF",
+      "lane": "mq_off",
+      "outcome": "SUCCESS",
+      "gate_agrees": true,
+      "hidden": "7/7",
+      "files": [
+        "electron/remote-update-stager.cjs:ok:13616B"
+      ],
+      "prompt_bytes": 22960,
+      "prompt_sha16": "c53d09adce8a9ccc",
+      "clue_original_fs_in_prompt": false,
+      "clue_asar_aware_comment_in_prompt": false,
+      "diff": [
+        {
+          "path": "electron/remote-update-stager.cjs",
+          "insertions": 12,
+          "deletions": 5
+        }
+      ],
+      "integrity_ok": true,
+      "blocker": null
+    },
+    {
+      "task": "8d08bc3621",
+      "variant": null,
+      "config": "retrieval ON, model_quality, STRICT Gold scope (no reference_paths)",
+      "lane": "mq",
+      "outcome": "SUCCESS",
+      "gate_agrees": true,
+      "hidden": "7/7",
+      "files": [
+        "electron/remote-update-stager.cjs:ok:13616B"
+      ],
+      "prompt_bytes": 22960,
+      "prompt_sha16": "c53d09adce8a9ccc",
+      "clue_original_fs_in_prompt": false,
+      "clue_asar_aware_comment_in_prompt": false,
+      "diff": [
+        {
+          "path": "electron/remote-update-stager.cjs",
+          "insertions": 12,
+          "deletions": 5
+        }
+      ],
+      "integrity_ok": true,
+      "blocker": null
+    },
+    {
+      "task": "8d08bc3621",
+      "variant": null,
+      "config": "retrieval ON, production_capability, STRICT Gold scope (no reference_paths)",
+      "lane": "prod",
+      "outcome": "SUCCESS",
+      "gate_agrees": true,
+      "hidden": "7/7",
+      "files": [
+        "electron/remote-update-stager.cjs:excerpt:7228B"
+      ],
+      "prompt_bytes": 17094,
+      "prompt_sha16": "a38d03e0014622fe",
+      "clue_original_fs_in_prompt": false,
+      "clue_asar_aware_comment_in_prompt": false,
+      "diff": [
+        {
+          "path": "electron/remote-update-stager.cjs",
+          "insertions": 12,
+          "deletions": 5
+        }
+      ],
+      "integrity_ok": true,
+      "blocker": null
+    },
+    {
+      "task": "8d08bc3621",
+      "variant": "xref",
+      "config": "CROSS-FILE probe: + explicit reference_paths [electron/updater.cjs], model_quality",
+      "lane": "mq",
+      "outcome": "SUCCESS",
+      "gate_agrees": true,
+      "hidden": "7/7",
+      "files": [
+        "electron/remote-update-stager.cjs:ok:13616B",
+        "electron/updater.cjs:reference:1011B"
+      ],
+      "prompt_bytes": 24284,
+      "prompt_sha16": "01aa2102025293c2",
+      "clue_original_fs_in_prompt": true,
+      "clue_asar_aware_comment_in_prompt": true,
+      "diff": [
+        {
+          "path": "electron/remote-update-stager.cjs",
+          "insertions": 12,
+          "deletions": 5
+        }
+      ],
+      "integrity_ok": true,
+      "blocker": null
+    },
+    {
+      "task": "8d08bc3621",
+      "variant": "xref",
+      "config": "CROSS-FILE probe: + explicit reference_paths [electron/updater.cjs], production_capability",
+      "lane": "prod",
+      "outcome": "SUCCESS",
+      "gate_agrees": true,
+      "hidden": "7/7",
+      "files": [
+        "electron/remote-update-stager.cjs:excerpt:7228B",
+        "electron/updater.cjs:reference:1011B"
+      ],
+      "prompt_bytes": 18418,
+      "prompt_sha16": "d2efa749a03ea45c",
+      "clue_original_fs_in_prompt": true,
+      "clue_asar_aware_comment_in_prompt": true,
+      "diff": [
+        {
+          "path": "electron/remote-update-stager.cjs",
+          "insertions": 12,
+          "deletions": 5
+        }
+      ],
+      "integrity_ok": true,
+      "blocker": null
+    },
+    {
+      "task": "c1d6770715",
+      "variant": null,
+      "config": "control: retrieval OFF",
+      "lane": "mq_off",
+      "outcome": "SUCCESS",
+      "gate_agrees": true,
+      "hidden": "28/28",
+      "files": [
+        "mcp/x/result-gate.mjs:ok:14869B"
+      ],
+      "prompt_bytes": 24316,
+      "prompt_sha16": "749a02f8bef6ec19",
+      "clue_original_fs_in_prompt": false,
+      "clue_asar_aware_comment_in_prompt": false,
+      "diff": [
+        {
+          "path": "mcp/x/result-gate.mjs",
+          "insertions": 7,
+          "deletions": 4
+        }
+      ],
+      "integrity_ok": true,
+      "blocker": null
+    },
+    {
+      "task": "c1d6770715",
+      "variant": null,
+      "config": "retrieval ON",
+      "lane": "mq",
+      "outcome": "SUCCESS",
+      "gate_agrees": true,
+      "hidden": "28/28",
+      "files": [
+        "mcp/x/result-gate.mjs:ok:14869B"
+      ],
+      "prompt_bytes": 24316,
+      "prompt_sha16": "749a02f8bef6ec19",
+      "clue_original_fs_in_prompt": false,
+      "clue_asar_aware_comment_in_prompt": false,
+      "diff": [
+        {
+          "path": "mcp/x/result-gate.mjs",
+          "insertions": 7,
+          "deletions": 4
+        }
+      ],
+      "integrity_ok": true,
+      "blocker": null
+    },
+    {
+      "task": "070e9850b1",
+      "variant": null,
+      "config": "control: retrieval OFF",
+      "lane": "mq_off",
+      "outcome": "SUCCESS",
+      "gate_agrees": true,
+      "hidden": "14/14",
+      "files": [
+        "electron/updater.cjs:ok:13311B"
+      ],
+      "prompt_bytes": 21945,
+      "prompt_sha16": "019f78ee219d29cb",
+      "clue_original_fs_in_prompt": true,
+      "clue_asar_aware_comment_in_prompt": true,
+      "diff": [
+        {
+          "path": "electron/updater.cjs",
+          "insertions": 46,
+          "deletions": 5
+        }
+      ],
+      "integrity_ok": true,
+      "blocker": null
+    },
+    {
+      "task": "070e9850b1",
+      "variant": null,
+      "config": "retrieval ON",
+      "lane": "mq",
+      "outcome": "SUCCESS",
+      "gate_agrees": true,
+      "hidden": "14/14",
+      "files": [
+        "electron/updater.cjs:ok:13311B"
+      ],
+      "prompt_bytes": 21945,
+      "prompt_sha16": "019f78ee219d29cb",
+      "clue_original_fs_in_prompt": true,
+      "clue_asar_aware_comment_in_prompt": true,
+      "diff": [
+        {
+          "path": "electron/updater.cjs",
+          "insertions": 46,
+          "deletions": 5
+        }
+      ],
+      "integrity_ok": true,
+      "blocker": null
+    }
+  ]
+}

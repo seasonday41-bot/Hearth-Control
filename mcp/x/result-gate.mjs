@@ -47,6 +47,8 @@
  * collapsed into a generic terminal FAILED alongside ordinary tool errors.
  */
 
+import { failureSubtypeOf } from './failure-kinds.mjs';
+
 export const GATE_STATUSES = Object.freeze(['COMPLETED', 'NEEDS_REVIEW', 'FAILED']);
 export const WAITING_REASONS = Object.freeze(['supervisor_review', 'external_dependency']);
 
@@ -149,13 +151,21 @@ function hasConsistentCompletionEvidence(repairOutcome) {
 function classifyExecutionRound(repairOutcome, round) {
   const blocker = round.executor?.blockers?.[0] ?? null;
   const key = blockerKeyOf(blocker);
+  const subtype = failureSubtypeOf(blocker);
   const evidence = baseEvidence(repairOutcome, {
     last_round_kind: 'execution',
     last_round_classification: round.classification,
-    blocker: blocker ? Object.freeze({ code: blocker.code ?? null, reason: blocker.reason ?? null, detail: blocker.detail ?? null }) : null,
+    blocker: blocker ? Object.freeze({ code: blocker.code ?? null, reason: blocker.reason ?? null, detail: blocker.detail ?? null, ...(subtype ? { subtype: blocker.subtype } : {}) }) : null,
+    ...(subtype ? { failure_class: subtype.failure_class } : {}),
   });
 
   if (round.classification === 'escalate') {
+    // A permanent PRECONDITION_FAILED subtype (X v0.2 Slice 4): X cannot show / let the model edit what the fix needs, or an
+    // internal contract is violated. Deterministic and not model-retryable, so it is the same structural bucket as the codes
+    // below -- never a "transient repair exhaustion". The subtype and failure_class stay in the evidence, not in reason_code.
+    if (subtype && (subtype.failure_class === 'context_limitation' || subtype.failure_class === 'structural')) {
+      return buildGateResult('FAILED', 'structural_execution_failure', evidence);
+    }
     if (SAFETY_BOUNDARY_CODES.has(key)) {
       return buildGateResult('NEEDS_REVIEW', 'safety_boundary_review', evidence, 'supervisor_review');
     }

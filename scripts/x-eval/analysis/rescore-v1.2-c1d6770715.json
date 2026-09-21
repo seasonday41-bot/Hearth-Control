@@ -1,0 +1,58 @@
+{
+  "task": "c1d6770715",
+  "lock_fingerprint": "f6ac8bfae42af5c5417e2da485f1b61f94c3e3ed6bb72cf5f3f8b142a9bdc03f",
+  "source_run": "c1d6770715-ollama-qwen3-5-9b-hermes-s0-muanpz74",
+  "source_outcome_under_v1_rules": {
+    "label": "SUCCESS",
+    "gate_agrees": false
+  },
+  "x_gate_recorded": "NEEDS_REVIEW/repair_budget_exhausted_transient",
+  "hidden_v1_archived": {
+    "status": "passed",
+    "pass": "25/25"
+  },
+  "hidden_current": {
+    "status": "failed",
+    "pass": "26/28",
+    "failing": [
+      "control (v2): top-level blocker invalid_task_scope stays FAILED with its OWN reason_code",
+      "control (v2): top-level blocker invalid_validation_command stays FAILED with its OWN reason_code"
+    ]
+  },
+  "regression_net": {
+    "files_run": 2,
+    "regressions": [
+      "scripts/test-x-result-gate.mjs: escalation_required: invalid_task_scope -> FAILED",
+      "scripts/test-x-result-gate.mjs: escalation_required: invalid_validation_command -> FAILED"
+    ],
+    "regression_details": [
+      {
+        "file": "scripts/test-x-result-gate.mjs",
+        "name": "escalation_required: invalid_task_scope -> FAILED",
+        "message": ""
+      },
+      {
+        "file": "scripts/test-x-result-gate.mjs",
+        "name": "escalation_required: invalid_validation_command -> FAILED",
+        "message": ""
+      }
+    ]
+  },
+  "checks": {
+    "out_of_scope": [],
+    "test_tampering": [],
+    "wrong_file": false,
+    "head_unchanged": true,
+    "regressions": [
+      "scripts/test-x-result-gate.mjs: escalation_required: invalid_task_scope -> FAILED",
+      "scripts/test-x-result-gate.mjs: escalation_required: invalid_validation_command -> FAILED"
+    ]
+  },
+  "outcome_current": {
+    "label": "FAILURE",
+    "gate_status": "NEEDS_REVIEW",
+    "reason_code": "repair_budget_exhausted_transient",
+    "integrity_ok": false
+  },
+  "recorded_regressions": null
+}

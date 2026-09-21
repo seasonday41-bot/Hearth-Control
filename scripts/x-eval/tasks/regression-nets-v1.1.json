@@ -1,0 +1,90 @@
+{
+  "version": "regression-nets-v1.1",
+  "note": "allowed_failures = test names failing at the parent or at the reference fix (pre-existing or intentionally changed). Built offline.",
+  "tasks": {
+    "c1d6770715": {
+      "visible_test": "scripts/test-x-result-gate.mjs",
+      "files": [
+        {
+          "origin": "scripts/test-x-result-gate.mjs",
+          "injected_as": "scripts/test-xeval-net-0.mjs",
+          "stable": true,
+          "parent_status": "passed",
+          "fixed_status": "failed",
+          "allowed_failures": [
+            "escalation_required: execution blocker PATH_REJECTED -> FAILED",
+            "escalation_required: execution blocker INVALID_SCOPE -> FAILED",
+            "escalation_required: execution blocker WRITE_FAILED -> FAILED",
+            "escalation_required: execution blocker UNREADABLE_TARGET -> FAILED",
+            "escalation_required: execution blocker reason context_load_failed (no code) -> FAILED",
+            "escalation_required: execution blocker reason schema_invalid (no code) -> FAILED",
+            "escalation_required: execution blocker reason unsupported_action (no code) -> FAILED",
+            "escalation_required: execution blocker reason missing_field (no code) -> FAILED",
+            "escalation_required: execution blocker reason too_many_actions (no code) -> FAILED",
+            "escalation_required: execution blocker reason too_many_files (no code) -> FAILED"
+          ],
+          "usable": true,
+          "max_ms": 35
+        },
+        {
+          "origin": "scripts/test-x-result-builder.mjs",
+          "injected_as": "scripts/test-xeval-net-1.mjs",
+          "stable": true,
+          "parent_status": "passed",
+          "fixed_status": "passed",
+          "allowed_failures": [],
+          "usable": true,
+          "max_ms": 35
+        }
+      ]
+    },
+    "8d08bc3621": {
+      "visible_test": "scripts/test-remote-stager-electron-asar.mjs",
+      "files": [
+        {
+          "origin": "scripts/test-remote-update-integration.mjs",
+          "injected_as": "scripts/test-xeval-net-0.mjs",
+          "stable": true,
+          "parent_status": "passed",
+          "fixed_status": "passed",
+          "allowed_failures": [],
+          "usable": true,
+          "max_ms": 101
+        },
+        {
+          "origin": "scripts/test-remote-updater.mjs",
+          "injected_as": "scripts/test-xeval-net-1.mjs",
+          "stable": true,
+          "parent_status": "passed",
+          "fixed_status": "passed",
+          "allowed_failures": [],
+          "usable": true,
+          "max_ms": 771
+        }
+      ]
+    },
+    "070e9850b1": {
+      "visible_test": "scripts/test-updater.mjs",
+      "files": [
+        {
+          "origin": "scripts/test-updater.mjs",
+          "injected_as": "scripts/test-xeval-net-0.mjs",
+          "stable": true,
+          "parent_status": "passed",
+          "fixed_status": "failed",
+          "allowed_failures": [
+            "install creates backup in fixture and keeps user data untouched: The selected build is not newer than the currently running version.",
+            "install preserves executable permissions and relative symlinks without touching /Applications: The selected build is not newer than the currently running version.",
+            "rollback restores the fixture application: The selected build is not newer than the currently running version.",
+            "rollback after startup failure runs exactly once and restores a launchable previous bundle: The selected build is not newer than the currently running version.",
+            "startup marker prevents rollback: The selected build is not newer than the currently running version.",
+            "restart state is returned only after helper is scheduled: The selected build is not newer than the currently running version.",
+            "watchdog receives the final installed app path, never staging or backup: The selected build is not newer than the currently running version."
+          ],
+          "usable": true,
+          "max_ms": 126
+        }
+      ]
+    }
+  }
+}

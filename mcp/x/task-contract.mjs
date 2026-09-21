@@ -147,6 +147,24 @@ export const validateXTask = (input) => {
     if (normalized.allowed_paths && normalized.forbidden_paths && normalized.allowed_paths.some((allowed) => normalized.forbidden_paths.some((forbidden) => allowed && forbidden && pathsOverlap(allowed, forbidden)))) {
       error(errors, 'scope', 'CONFLICT', 'allowed_paths and forbidden_paths must not overlap');
     }
+    // Optional explicit READ-ONLY reference authority (X v0.2 Slice 2). Absent means none: allowed_paths stays the whole
+    // read AND write scope. Listed paths may be shown to the model as reference context, never edited, and must not overlap
+    // allowed_paths (that would be ambiguous) or forbidden_paths. Only emitted when supplied, so existing task shapes are unchanged.
+    if (task.scope.reference_paths !== undefined) {
+      const values = task.scope.reference_paths;
+      if (!Array.isArray(values)) {
+        error(errors, 'scope.reference_paths', 'INVALID_TYPE', 'must be an array');
+      } else {
+        if (values.length > MAX_SCOPE_PATHS) error(errors, 'scope.reference_paths', 'OUT_OF_BOUNDS', `must contain at most ${MAX_SCOPE_PATHS} paths`);
+        const clean = values.map(normalizedPath);
+        if (clean.some((path) => !path || path.length > MAX_SCOPE_PATH_LENGTH)) {
+          error(errors, 'scope.reference_paths', 'OUT_OF_BOUNDS', 'must contain bounded workspace-relative paths');
+        } else if (['allowed_paths', 'forbidden_paths'].some((field) => (normalized[field] || []).some((other) => other && clean.some((ref) => pathsOverlap(ref, other))))) {
+          error(errors, 'scope.reference_paths', 'CONFLICT', 'reference_paths must not overlap allowed_paths or forbidden_paths');
+        }
+        normalized.reference_paths = clean;
+      }
+    }
     scope = normalized;
   }
 

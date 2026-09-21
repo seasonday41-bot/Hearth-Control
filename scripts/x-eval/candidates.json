@@ -1,0 +1,3519 @@
+{
+  "meta": {
+    "maxSourceFiles": 5,
+    "maxSourceLines": 400,
+    "rev": "HEAD",
+    "head": "11ef37b6fe73543477b1d8f4ffc5b0f102fbbfbb",
+    "note": "Mining output only. Human review required before any commit becomes a benchmark task."
+  },
+  "summary": {
+    "commits_scanned": 131,
+    "candidate_count": 50,
+    "source_and_test_commits": 80,
+    "fix_like_commits_scanned": 17,
+    "fix_like_candidates": 15,
+    "in_commit_validation": 46,
+    "existing_related_validation": 4,
+    "median_source_lines_changed": 108,
+    "median_source_files": 1.5,
+    "candidates_by_type": {
+      "feat": 30,
+      "fix": 13,
+      "untyped": 5,
+      "hearth": 1,
+      "chore": 1
+    },
+    "rejection_primary_reason": {
+      "no_source_change:doc_only": 27,
+      "too_many_source_files": 21,
+      "too_large_diff": 14,
+      "release_metadata": 6,
+      "merge_commit": 5,
+      "no_source_change:test_only": 4,
+      "no_source_change:other_only": 2,
+      "no_validation": 1,
+      "root_commit": 1
+    },
+    "rejection_any_reason": {
+      "too_large_diff": 29,
+      "no_source_change:doc_only": 27,
+      "too_many_source_files": 21,
+      "release_metadata": 6,
+      "merge_commit": 5,
+      "no_source_change:test_only": 4,
+      "no_source_change:other_only": 2,
+      "no_validation": 1,
+      "root_commit": 1
+    },
+    "top_candidates": [
+      {
+        "commit": "11ef37b6fe",
+        "score": 10,
+        "type": "fix",
+        "fix_like": true,
+        "subject": "fix(invest): stabilize v2 coordinator status for 0.4.13",
+        "source_files": 3,
+        "source_lines": 47,
+        "validation": "in_commit",
+        "flags": [
+          "ui",
+          "new_files=1"
+        ]
+      },
+      {
+        "commit": "8d08bc3621",
+        "score": 10,
+        "type": "fix",
+        "fix_like": true,
+        "subject": "fix(updater): use physical filesystem for app staging",
+        "source_files": 1,
+        "source_lines": 17,
+        "validation": "in_commit",
+        "flags": []
+      },
+      {
+        "commit": "c7cbaa326f",
+        "score": 10,
+        "type": null,
+        "fix_like": true,
+        "subject": "Hearth X: improve repair evidence and guidance",
+        "source_files": 2,
+        "source_lines": 63,
+        "validation": "in_commit",
+        "flags": [
+          "mcp/x"
+        ]
+      },
+      {
+        "commit": "c1d6770715",
+        "score": 10,
+        "type": "fix",
+        "fix_like": true,
+        "subject": "fix: normalize X structural result gate reason",
+        "source_files": 1,
+        "source_lines": 11,
+        "validation": "in_commit",
+        "flags": [
+          "mcp/x"
+        ]
+      },
+      {
+        "commit": "070e9850b1",
+        "score": 9,
+        "type": "fix",
+        "fix_like": true,
+        "subject": "fix: prevent stale updater downgrades",
+        "source_files": 2,
+        "source_lines": 59,
+        "validation": "in_commit",
+        "flags": [
+          "electron/main.cjs"
+        ]
+      },
+      {
+        "commit": "ef1808fa2f",
+        "score": 8,
+        "type": "fix",
+        "fix_like": true,
+        "subject": "fix(runtime): hoist remote goal recovery helper",
+        "source_files": 1,
+        "source_lines": 6,
+        "validation": "in_commit",
+        "flags": [
+          "electron/main.cjs"
+        ]
+      },
+      {
+        "commit": "4f261b2f4b",
+        "score": 8,
+        "type": "fix",
+        "fix_like": true,
+        "subject": "fix(updater): use initialized X runtime preflight",
+        "source_files": 1,
+        "source_lines": 4,
+        "validation": "in_commit",
+        "flags": [
+          "electron/main.cjs"
+        ]
+      },
+      {
+        "commit": "2b50ef1bf0",
+        "score": 8,
+        "type": "hearth",
+        "fix_like": false,
+        "subject": "Hearth: emit terminal Goal progress updates",
+        "source_files": 1,
+        "source_lines": 12,
+        "validation": "in_commit",
+        "flags": []
+      },
+      {
+        "commit": "9aa1446303",
+        "score": 8,
+        "type": "fix",
+        "fix_like": true,
+        "subject": "fix: preserve specialist recovery lineage",
+        "source_files": 2,
+        "source_lines": 17,
+        "validation": "existing_related",
+        "flags": []
+      },
+      {
+        "commit": "79664a00cc",
+        "score": 8,
+        "type": "fix",
+        "fix_like": true,
+        "subject": "fix: reopen Hearth after window close",
+        "source_files": 1,
+        "source_lines": 19,
+        "validation": "in_commit",
+        "flags": [
+          "electron/main.cjs"
+        ]
+      },
+      {
+        "commit": "70a5ece7c1",
+        "score": 8,
+        "type": "feat",
+        "fix_like": true,
+        "subject": "feat: add X validation repair loop",
+        "source_files": 1,
+        "source_lines": 247,
+        "validation": "in_commit",
+        "flags": [
+          "mcp/x",
+          "new_files=1"
+        ]
+      },
+      {
+        "commit": "69feb1c84c",
+        "score": 7,
+        "type": "fix",
+        "fix_like": true,
+        "subject": "fix(server): synchronize MCP server lifecycle state",
+        "source_files": 2,
+        "source_lines": 209,
+        "validation": "in_commit",
+        "flags": [
+          "electron/main.cjs",
+          "ui"
+        ]
+      },
+      {
+        "commit": "e322e75d1b",
+        "score": 7,
+        "type": null,
+        "fix_like": false,
+        "subject": "Hearth X: support exact-file atomic writes",
+        "source_files": 1,
+        "source_lines": 42,
+        "validation": "in_commit",
+        "flags": [
+          "mcp/x"
+        ]
+      },
+      {
+        "commit": "7cca7ac0f7",
+        "score": 7,
+        "type": null,
+        "fix_like": false,
+        "subject": "Hearth X: disable asar hook for Electron validations",
+        "source_files": 1,
+        "source_lines": 5,
+        "validation": "in_commit",
+        "flags": [
+          "mcp/x"
+        ]
+      },
+      {
+        "commit": "c41a557a0d",
+        "score": 7,
+        "type": "fix",
+        "fix_like": true,
+        "subject": "fix: make Electron message relay async",
+        "source_files": 1,
+        "source_lines": 2,
+        "validation": "existing_related",
+        "flags": [
+          "electron/main.cjs"
+        ]
+      },
+      {
+        "commit": "50548177a3",
+        "score": 6,
+        "type": "fix",
+        "fix_like": true,
+        "subject": "fix(updater): recover prepared update state",
+        "source_files": 3,
+        "source_lines": 163,
+        "validation": "in_commit",
+        "flags": [
+          "electron/main.cjs",
+          "new_files=1"
+        ]
+      },
+      {
+        "commit": "8dc4f7cdf1",
+        "score": 6,
+        "type": null,
+        "fix_like": false,
+        "subject": "Hearth X: harden read-only execution boundary",
+        "source_files": 2,
+        "source_lines": 109,
+        "validation": "in_commit",
+        "flags": [
+          "mcp/x"
+        ]
+      },
+      {
+        "commit": "270d62491f",
+        "score": 6,
+        "type": "fix",
+        "fix_like": true,
+        "subject": "fix: make approval lifecycle durable in UI",
+        "source_files": 4,
+        "source_lines": 133,
+        "validation": "in_commit",
+        "flags": [
+          "electron/main.cjs",
+          "ui"
+        ]
+      },
+      {
+        "commit": "a3a76ef804",
+        "score": 6,
+        "type": "feat",
+        "fix_like": false,
+        "subject": "feat: notify after Antigravity admission release",
+        "source_files": 1,
+        "source_lines": 44,
+        "validation": "in_commit",
+        "flags": []
+      },
+      {
+        "commit": "5df52527ae",
+        "score": 6,
+        "type": "feat",
+        "fix_like": false,
+        "subject": "feat: reconcile X runtime state on startup",
+        "source_files": 1,
+        "source_lines": 41,
+        "validation": "in_commit",
+        "flags": [
+          "mcp/x"
+        ]
+      },
+      {
+        "commit": "b921befd02",
+        "score": 6,
+        "type": "feat",
+        "fix_like": false,
+        "subject": "feat: add atomic X run lease fencing",
+        "source_files": 1,
+        "source_lines": 78,
+        "validation": "in_commit",
+        "flags": [
+          "mcp/x"
+        ]
+      },
+      {
+        "commit": "ff81398bb3",
+        "score": 6,
+        "type": "feat",
+        "fix_like": false,
+        "subject": "feat: compose X task execution pipeline",
+        "source_files": 1,
+        "source_lines": 12,
+        "validation": "in_commit",
+        "flags": [
+          "mcp/x",
+          "new_files=1"
+        ]
+      },
+      {
+        "commit": "66b4ef3012",
+        "score": 6,
+        "type": "feat",
+        "fix_like": false,
+        "subject": "feat: add shared Hearth runtime database path",
+        "source_files": 1,
+        "source_lines": 45,
+        "validation": "in_commit",
+        "flags": [
+          "mcp/x",
+          "new_files=1"
+        ]
+      },
+      {
+        "commit": "0885d81be4",
+        "score": 6,
+        "type": "feat",
+        "fix_like": false,
+        "subject": "feat: add executor contract and antigravity adapter",
+        "source_files": 2,
+        "source_lines": 77,
+        "validation": "in_commit",
+        "flags": [
+          "mcp/x",
+          "new_files=2"
+        ]
+      },
+      {
+        "commit": "7865119f9e",
+        "score": 5,
+        "type": "feat",
+        "fix_like": false,
+        "subject": "feat(console): add operational connections and evidence UI",
+        "source_files": 1,
+        "source_lines": 341,
+        "validation": "in_commit",
+        "flags": [
+          "ui"
+        ]
+      },
+      {
+        "commit": "8854e623ae",
+        "score": 5,
+        "type": null,
+        "fix_like": false,
+        "subject": "Hearth P2C: stage verified DMG updates safely",
+        "source_files": 1,
+        "source_lines": 302,
+        "validation": "in_commit",
+        "flags": [
+          "new_files=1"
+        ]
+      },
+      {
+        "commit": "5f9f481099",
+        "score": 5,
+        "type": "feat",
+        "fix_like": false,
+        "subject": "feat: add durable goal review queue",
+        "source_files": 2,
+        "source_lines": 246,
+        "validation": "in_commit",
+        "flags": []
+      },
+      {
+        "commit": "474292fb78",
+        "score": 5,
+        "type": "fix",
+        "fix_like": true,
+        "subject": "fix: recover X runs after lease expiry",
+        "source_files": 5,
+        "source_lines": 168,
+        "validation": "in_commit",
+        "flags": [
+          "electron/main.cjs",
+          "mcp/x"
+        ]
+      },
+      {
+        "commit": "a7a56ada45",
+        "score": 5,
+        "type": "feat",
+        "fix_like": false,
+        "subject": "feat: expose X start and task MCP tools",
+        "source_files": 2,
+        "source_lines": 107,
+        "validation": "in_commit",
+        "flags": [
+          "mcp/x",
+          "new_files=1"
+        ]
+      },
+      {
+        "commit": "ac761bbafb",
+        "score": 5,
+        "type": "feat",
+        "fix_like": false,
+        "subject": "feat: add X production task runner",
+        "source_files": 1,
+        "source_lines": 147,
+        "validation": "in_commit",
+        "flags": [
+          "mcp/x",
+          "new_files=1"
+        ]
+      }
+    ]
+  },
+  "candidates": [
+    {
+      "commit": "11ef37b6fe73543477b1d8f4ffc5b0f102fbbfbb",
+      "parent": "8079ddb647f7db7679c6f5172564e94045ece1bd",
+      "date": "2026-09-21T08:41:50+07:00",
+      "subject": "fix(invest): stabilize v2 coordinator status for 0.4.13",
+      "type": "fix",
+      "fix_like": true,
+      "changed_files": [
+        "electron/build-meta.json",
+        "electron/stable-build-meta.json",
+        "package-lock.json",
+        "package.json",
+        "scripts/restore-stable-build-meta.cjs",
+        "scripts/test-build-metadata.mjs",
+        "scripts/test-invest-ui-boundary.mjs",
+        "src/App.tsx",
+        "src/calm-control.css",
+        "src/invest-coordinator-status.ts"
+      ],
+      "source_files": [
+        "scripts/restore-stable-build-meta.cjs",
+        "src/App.tsx",
+        "src/invest-coordinator-status.ts"
+      ],
+      "test_files": [
+        "scripts/test-build-metadata.mjs",
+        "scripts/test-invest-ui-boundary.mjs"
+      ],
+      "other_files": [
+        "package.json",
+        "src/calm-control.css"
+      ],
+      "generated_files_ignored": [
+        "electron/build-meta.json",
+        "electron/stable-build-meta.json",
+        "package-lock.json"
+      ],
+      "new_source_files": [
+        "src/invest-coordinator-status.ts"
+      ],
+      "insertions": 45,
+      "deletions": 2,
+      "test_insertions": 35,
+      "test_deletions": 2,
+      "touches_electron_main": false,
+      "touches_x_core": false,
+      "touches_ui": true,
+      "validation": {
+        "strength": "in_commit",
+        "tests": [
+          {
+            "file": "scripts/test-build-metadata.mjs",
+            "command": "node --test scripts/test-build-metadata.mjs",
+            "npm_scripts": []
+          },
+          {
+            "file": "scripts/test-invest-ui-boundary.mjs",
+            "command": "node --test scripts/test-invest-ui-boundary.mjs",
+            "npm_scripts": [
+              "npm run test:market"
+            ]
+          }
+        ]
+      },
+      "score": 10
+    },
+    {
+      "commit": "8d08bc3621d6d7925d3267161ca410d0adc252a0",
+      "parent": "b3186b85068bef617260831ebe8bf2b5121b6642",
+      "date": "2026-09-19T10:16:53+07:00",
+      "subject": "fix(updater): use physical filesystem for app staging",
+      "type": "fix",
+      "fix_like": true,
+      "changed_files": [
+        "electron/remote-update-stager.cjs",
+        "scripts/test-remote-stager-electron-asar.mjs"
+      ],
+      "source_files": [
+        "electron/remote-update-stager.cjs"
+      ],
+      "test_files": [
+        "scripts/test-remote-stager-electron-asar.mjs"
+      ],
+      "other_files": [],
+      "generated_files_ignored": [],
+      "new_source_files": [],
+      "insertions": 12,
+      "deletions": 5,
+      "test_insertions": 280,
+      "test_deletions": 0,
+      "touches_electron_main": false,
+      "touches_x_core": false,
+      "touches_ui": false,
+      "validation": {
+        "strength": "in_commit",
+        "tests": [
+          {
+            "file": "scripts/test-remote-stager-electron-asar.mjs",
+            "command": "node --test scripts/test-remote-stager-electron-asar.mjs",
+            "npm_scripts": []
+          }
+        ]
+      },
+      "score": 10
+    },
+    {
+      "commit": "c7cbaa326fc4009d558c85ae091003481bdb6409",
+      "parent": "e322e75d1ba6a1dcd91164a28e4939af11cfec00",
+      "date": "2026-09-18T23:01:47+07:00",
+      "subject": "Hearth X: improve repair evidence and guidance",
+      "type": null,
+      "fix_like": true,
+      "changed_files": [
+        "mcp/x/local-executor.mjs",
+        "mcp/x/repair-loop.mjs",
+        "scripts/test-x-local-executor.mjs",
+        "scripts/test-x-repair-loop.mjs"
+      ],
+      "source_files": [
+        "mcp/x/local-executor.mjs",
+        "mcp/x/repair-loop.mjs"
+      ],
+      "test_files": [
+        "scripts/test-x-local-executor.mjs",
+        "scripts/test-x-repair-loop.mjs"
+      ],
+      "other_files": [],
+      "generated_files_ignored": [],
+      "new_source_files": [],
+      "insertions": 57,
+      "deletions": 6,
+      "test_insertions": 80,
+      "test_deletions": 5,
+      "touches_electron_main": false,
+      "touches_x_core": true,
+      "touches_ui": false,
+      "validation": {
+        "strength": "in_commit",
+        "tests": [
+          {
+            "file": "scripts/test-x-local-executor.mjs",
+            "command": "node --test scripts/test-x-local-executor.mjs",
+            "npm_scripts": []
+          },
+          {
+            "file": "scripts/test-x-repair-loop.mjs",
+            "command": "node --test scripts/test-x-repair-loop.mjs",
+            "npm_scripts": []
+          }
+        ]
+      },
+      "score": 10
+    },
+    {
+      "commit": "c1d6770715112ca2f092a8eb914aa7f0833ba13c",
+      "parent": "470da93ca7a16b4a357399742f6e58a8dce6123b",
+      "date": "2026-09-14T09:47:18+07:00",
+      "subject": "fix: normalize X structural result gate reason",
+      "type": "fix",
+      "fix_like": true,
+      "changed_files": [
+        "mcp/x/result-gate.mjs",
+        "scripts/test-x-result-gate.mjs"
+      ],
+      "source_files": [
+        "mcp/x/result-gate.mjs"
+      ],
+      "test_files": [
+        "scripts/test-x-result-gate.mjs"
+      ],
+      "other_files": [],
+      "generated_files_ignored": [],
+      "new_source_files": [],
+      "insertions": 7,
+      "deletions": 4,
+      "test_insertions": 6,
+      "test_deletions": 4,
+      "touches_electron_main": false,
+      "touches_x_core": true,
+      "touches_ui": false,
+      "validation": {
+        "strength": "in_commit",
+        "tests": [
+          {
+            "file": "scripts/test-x-result-gate.mjs",
+            "command": "node --test scripts/test-x-result-gate.mjs",
+            "npm_scripts": []
+          }
+        ]
+      },
+      "score": 10
+    },
+    {
+      "commit": "070e9850b16a284702709bce60f9c8ac4e8f9771",
+      "parent": "c41a557a0d899872a121c81c08da9571324e8333",
+      "date": "2026-09-17T08:53:42+07:00",
+      "subject": "fix: prevent stale updater downgrades",
+      "type": "fix",
+      "fix_like": true,
+      "changed_files": [
+        "electron/main.cjs",
+        "electron/updater.cjs",
+        "scripts/test-updater.mjs"
+      ],
+      "source_files": [
+        "electron/main.cjs",
+        "electron/updater.cjs"
+      ],
+      "test_files": [
+        "scripts/test-updater.mjs"
+      ],
+      "other_files": [],
+      "generated_files_ignored": [],
+      "new_source_files": [],
+      "insertions": 54,
+      "deletions": 5,
+      "test_insertions": 141,
+      "test_deletions": 7,
+      "touches_electron_main": true,
+      "touches_x_core": false,
+      "touches_ui": false,
+      "validation": {
+        "strength": "in_commit",
+        "tests": [
+          {
+            "file": "scripts/test-updater.mjs",
+            "command": "node scripts/test-updater.mjs",
+            "npm_scripts": [
+              "npm run test:updater"
+            ]
+          }
+        ]
+      },
+      "score": 9
+    },
+    {
+      "commit": "ef1808fa2f452721ae87d81f9c30949752a27efd",
+      "parent": "f99930f5c02b9a9ebdd2b27f14e944b3e2415225",
+      "date": "2026-09-20T07:13:02+07:00",
+      "subject": "fix(runtime): hoist remote goal recovery helper",
+      "type": "fix",
+      "fix_like": true,
+      "changed_files": [
+        "electron/main.cjs",
+        "scripts/test-remote-goal-requests.mjs"
+      ],
+      "source_files": [
+        "electron/main.cjs"
+      ],
+      "test_files": [
+        "scripts/test-remote-goal-requests.mjs"
+      ],
+      "other_files": [],
+      "generated_files_ignored": [],
+      "new_source_files": [],
+      "insertions": 3,
+      "deletions": 3,
+      "test_insertions": 6,
+      "test_deletions": 0,
+      "touches_electron_main": true,
+      "touches_x_core": false,
+      "touches_ui": false,
+      "validation": {
+        "strength": "in_commit",
+        "tests": [
+          {
+            "file": "scripts/test-remote-goal-requests.mjs",
+            "command": "node scripts/test-remote-goal-requests.mjs",
+            "npm_scripts": []
+          }
+        ]
+      },
+      "score": 8
+    },
+    {
+      "commit": "4f261b2f4ba51722ea18968e22cdde631c28bed0",
+      "parent": "24a813f1f81be05ada782d93934a656ad0e8670d",
+      "date": "2026-09-19T22:51:38+07:00",
+      "subject": "fix(updater): use initialized X runtime preflight",
+      "type": "fix",
+      "fix_like": true,
+      "changed_files": [
+        "electron/build-meta.json",
+        "electron/main.cjs",
+        "electron/stable-build-meta.json",
+        "scripts/test-build-metadata.mjs",
+        "scripts/test-updater-runtime-preflight.mjs"
+      ],
+      "source_files": [
+        "electron/main.cjs"
+      ],
+      "test_files": [
+        "scripts/test-build-metadata.mjs",
+        "scripts/test-updater-runtime-preflight.mjs"
+      ],
+      "other_files": [],
+      "generated_files_ignored": [
+        "electron/build-meta.json",
+        "electron/stable-build-meta.json"
+      ],
+      "new_source_files": [],
+      "insertions": 2,
+      "deletions": 2,
+      "test_insertions": 16,
+      "test_deletions": 4,
+      "touches_electron_main": true,
+      "touches_x_core": false,
+      "touches_ui": false,
+      "validation": {
+        "strength": "in_commit",
+        "tests": [
+          {
+            "file": "scripts/test-build-metadata.mjs",
+            "command": "node --test scripts/test-build-metadata.mjs",
+            "npm_scripts": []
+          },
+          {
+            "file": "scripts/test-updater-runtime-preflight.mjs",
+            "command": "node --test scripts/test-updater-runtime-preflight.mjs",
+            "npm_scripts": []
+          }
+        ]
+      },
+      "score": 8
+    },
+    {
+      "commit": "2b50ef1bf0bdb801fee9ef68a9c9eee41a975e91",
+      "parent": "5dd71e75fb08ac7690c5797ca1b5c23b9b1e3d0d",
+      "date": "2026-09-18T09:11:04+07:00",
+      "subject": "Hearth: emit terminal Goal progress updates",
+      "type": "hearth",
+      "fix_like": false,
+      "changed_files": [
+        "mcp/goals/runner.mjs",
+        "scripts/test-goal-retry.mjs",
+        "scripts/test-goal-runner.mjs"
+      ],
+      "source_files": [
+        "mcp/goals/runner.mjs"
+      ],
+      "test_files": [
+        "scripts/test-goal-retry.mjs",
+        "scripts/test-goal-runner.mjs"
+      ],
+      "other_files": [],
+      "generated_files_ignored": [],
+      "new_source_files": [],
+      "insertions": 9,
+      "deletions": 3,
+      "test_insertions": 125,
+      "test_deletions": 1,
+      "touches_electron_main": false,
+      "touches_x_core": false,
+      "touches_ui": false,
+      "validation": {
+        "strength": "in_commit",
+        "tests": [
+          {
+            "file": "scripts/test-goal-retry.mjs",
+            "command": "node scripts/test-goal-retry.mjs",
+            "npm_scripts": []
+          },
+          {
+            "file": "scripts/test-goal-runner.mjs",
+            "command": "node scripts/test-goal-runner.mjs",
+            "npm_scripts": [
+              "npm run test:goal-runner"
+            ]
+          }
+        ]
+      },
+      "score": 8
+    },
+    {
+      "commit": "9aa1446303706a4ce505c011dc8bc1ecef9e176a",
+      "parent": "b374a3990302c71fc92722fd58e0b83e4fef803a",
+      "date": "2026-09-17T07:58:27+07:00",
+      "subject": "fix: preserve specialist recovery lineage",
+      "type": "fix",
+      "fix_like": true,
+      "changed_files": [
+        "mcp/goals/model.mjs",
+        "mcp/goals/runner.mjs"
+      ],
+      "source_files": [
+        "mcp/goals/model.mjs",
+        "mcp/goals/runner.mjs"
+      ],
+      "test_files": [],
+      "other_files": [],
+      "generated_files_ignored": [],
+      "new_source_files": [],
+      "insertions": 11,
+      "deletions": 6,
+      "test_insertions": 0,
+      "test_deletions": 0,
+      "touches_electron_main": false,
+      "touches_x_core": false,
+      "touches_ui": false,
+      "validation": {
+        "strength": "existing_related",
+        "tests": [
+          {
+            "file": "scripts/test-goal-autopilot.mjs",
+            "command": "node scripts/test-goal-autopilot.mjs",
+            "npm_scripts": []
+          },
+          {
+            "file": "scripts/test-goal-context.mjs",
+            "command": "node --test scripts/test-goal-context.mjs",
+            "npm_scripts": []
+          },
+          {
+            "file": "scripts/test-goal-retry.mjs",
+            "command": "node scripts/test-goal-retry.mjs",
+            "npm_scripts": []
+          },
+          {
+            "file": "scripts/test-goal-review-decision.mjs",
+            "command": "node scripts/test-goal-review-decision.mjs",
+            "npm_scripts": []
+          },
+          {
+            "file": "scripts/test-goal-review-queue.mjs",
+            "command": "node scripts/test-goal-review-queue.mjs",
+            "npm_scripts": []
+          },
+          {
+            "file": "scripts/test-goal-runner-x.mjs",
+            "command": "node scripts/test-goal-runner-x.mjs",
+            "npm_scripts": []
+          }
+        ]
+      },
+      "score": 8
+    },
+    {
+      "commit": "79664a00cc8500c27b0a10bde855cc2473b79384",
+      "parent": "aa50d93162561dfed76fae8e0b25b3280676b302",
+      "date": "2026-09-15T08:10:32+07:00",
+      "subject": "fix: reopen Hearth after window close",
+      "type": "fix",
+      "fix_like": true,
+      "changed_files": [
+        "electron/main.cjs",
+        "scripts/test-electron-window-lifecycle.mjs"
+      ],
+      "source_files": [
+        "electron/main.cjs"
+      ],
+      "test_files": [
+        "scripts/test-electron-window-lifecycle.mjs"
+      ],
+      "other_files": [],
+      "generated_files_ignored": [],
+      "new_source_files": [],
+      "insertions": 16,
+      "deletions": 3,
+      "test_insertions": 231,
+      "test_deletions": 0,
+      "touches_electron_main": true,
+      "touches_x_core": false,
+      "touches_ui": false,
+      "validation": {
+        "strength": "in_commit",
+        "tests": [
+          {
+            "file": "scripts/test-electron-window-lifecycle.mjs",
+            "command": "node --test scripts/test-electron-window-lifecycle.mjs",
+            "npm_scripts": []
+          }
+        ]
+      },
+      "score": 8
+    },
+    {
+      "commit": "70a5ece7c1162495613a5e52a7a499718380145e",
+      "parent": "d55d05d34f0e0b78b326740f63c066588a88c505",
+      "date": "2026-09-14T08:50:20+07:00",
+      "subject": "feat: add X validation repair loop",
+      "type": "feat",
+      "fix_like": true,
+      "changed_files": [
+        "mcp/x/repair-loop.mjs",
+        "scripts/test-x-repair-loop.mjs"
+      ],
+      "source_files": [
+        "mcp/x/repair-loop.mjs"
+      ],
+      "test_files": [
+        "scripts/test-x-repair-loop.mjs"
+      ],
+      "other_files": [],
+      "generated_files_ignored": [],
+      "new_source_files": [
+        "mcp/x/repair-loop.mjs"
+      ],
+      "insertions": 247,
+      "deletions": 0,
+      "test_insertions": 386,
+      "test_deletions": 0,
+      "touches_electron_main": false,
+      "touches_x_core": true,
+      "touches_ui": false,
+      "validation": {
+        "strength": "in_commit",
+        "tests": [
+          {
+            "file": "scripts/test-x-repair-loop.mjs",
+            "command": "node --test scripts/test-x-repair-loop.mjs",
+            "npm_scripts": []
+          }
+        ]
+      },
+      "score": 8
+    },
+    {
+      "commit": "69feb1c84ca704e547595d8f34c770972c34ac8f",
+      "parent": "010b3fede876e2da0090878c869321931fba8314",
+      "date": "2026-09-19T21:11:42+07:00",
+      "subject": "fix(server): synchronize MCP server lifecycle state",
+      "type": "fix",
+      "fix_like": true,
+      "changed_files": [
+        "electron/main.cjs",
+        "scripts/test-server-lifecycle.mjs",
+        "src/App.tsx"
+      ],
+      "source_files": [
+        "electron/main.cjs",
+        "src/App.tsx"
+      ],
+      "test_files": [
+        "scripts/test-server-lifecycle.mjs"
+      ],
+      "other_files": [],
+      "generated_files_ignored": [],
+      "new_source_files": [],
+      "insertions": 167,
+      "deletions": 42,
+      "test_insertions": 235,
+      "test_deletions": 0,
+      "touches_electron_main": true,
+      "touches_x_core": false,
+      "touches_ui": true,
+      "validation": {
+        "strength": "in_commit",
+        "tests": [
+          {
+            "file": "scripts/test-server-lifecycle.mjs",
+            "command": "node --test scripts/test-server-lifecycle.mjs",
+            "npm_scripts": []
+          }
+        ]
+      },
+      "score": 7
+    },
+    {
+      "commit": "e322e75d1ba6a1dcd91164a28e4939af11cfec00",
+      "parent": "7cca7ac0f75f4db15840972ed7fa71b4fe58e140",
+      "date": "2026-09-18T22:39:31+07:00",
+      "subject": "Hearth X: support exact-file atomic writes",
+      "type": null,
+      "fix_like": false,
+      "changed_files": [
+        "mcp/x/edit-writer.mjs",
+        "scripts/test-x-edit-writer.mjs"
+      ],
+      "source_files": [
+        "mcp/x/edit-writer.mjs"
+      ],
+      "test_files": [
+        "scripts/test-x-edit-writer.mjs"
+      ],
+      "other_files": [],
+      "generated_files_ignored": [],
+      "new_source_files": [],
+      "insertions": 29,
+      "deletions": 13,
+      "test_insertions": 89,
+      "test_deletions": 3,
+      "touches_electron_main": false,
+      "touches_x_core": true,
+      "touches_ui": false,
+      "validation": {
+        "strength": "in_commit",
+        "tests": [
+          {
+            "file": "scripts/test-x-edit-writer.mjs",
+            "command": "node --test scripts/test-x-edit-writer.mjs",
+            "npm_scripts": []
+          }
+        ]
+      },
+      "score": 7
+    },
+    {
+      "commit": "7cca7ac0f75f4db15840972ed7fa71b4fe58e140",
+      "parent": "8dc4f7cdf11a2587637d27b0291e2068fa4593db",
+      "date": "2026-09-18T21:46:47+07:00",
+      "subject": "Hearth X: disable asar hook for Electron validations",
+      "type": null,
+      "fix_like": false,
+      "changed_files": [
+        "mcp/x/validation-runner.mjs",
+        "scripts/test-x-validation-runner.mjs"
+      ],
+      "source_files": [
+        "mcp/x/validation-runner.mjs"
+      ],
+      "test_files": [
+        "scripts/test-x-validation-runner.mjs"
+      ],
+      "other_files": [],
+      "generated_files_ignored": [],
+      "new_source_files": [],
+      "insertions": 4,
+      "deletions": 1,
+      "test_insertions": 62,
+      "test_deletions": 0,
+      "touches_electron_main": false,
+      "touches_x_core": true,
+      "touches_ui": false,
+      "validation": {
+        "strength": "in_commit",
+        "tests": [
+          {
+            "file": "scripts/test-x-validation-runner.mjs",
+            "command": "node --test scripts/test-x-validation-runner.mjs",
+            "npm_scripts": []
+          }
+        ]
+      },
+      "score": 7
+    },
+    {
+      "commit": "c41a557a0d899872a121c81c08da9571324e8333",
+      "parent": "9aa1446303706a4ce505c011dc8bc1ecef9e176a",
+      "date": "2026-09-17T08:47:15+07:00",
+      "subject": "fix: make Electron message relay async",
+      "type": "fix",
+      "fix_like": true,
+      "changed_files": [
+        "electron/main.cjs"
+      ],
+      "source_files": [
+        "electron/main.cjs"
+      ],
+      "test_files": [],
+      "other_files": [],
+      "generated_files_ignored": [],
+      "new_source_files": [],
+      "insertions": 1,
+      "deletions": 1,
+      "test_insertions": 0,
+      "test_deletions": 0,
+      "touches_electron_main": true,
+      "touches_x_core": false,
+      "touches_ui": false,
+      "validation": {
+        "strength": "existing_related",
+        "tests": [
+          {
+            "file": "scripts/test-bridge.mjs",
+            "command": "node scripts/test-bridge.mjs",
+            "npm_scripts": [
+              "npm run test:bridge"
+            ]
+          },
+          {
+            "file": "scripts/test-context-inspector.mjs",
+            "command": "node --test scripts/test-context-inspector.mjs",
+            "npm_scripts": [
+              "npm run test:context-inspector"
+            ]
+          },
+          {
+            "file": "scripts/test-continuation-recovery.mjs",
+            "command": "node --test scripts/test-continuation-recovery.mjs",
+            "npm_scripts": [
+              "npm run test:continuation"
+            ]
+          },
+          {
+            "file": "scripts/test-electron-public-x-auth.mjs",
+            "command": "node --test scripts/test-electron-public-x-auth.mjs",
+            "npm_scripts": []
+          },
+          {
+            "file": "scripts/test-electron-remote-x-approval.mjs",
+            "command": "node --test scripts/test-electron-remote-x-approval.mjs",
+            "npm_scripts": []
+          },
+          {
+            "file": "scripts/test-electron-window-lifecycle.mjs",
+            "command": "node --test scripts/test-electron-window-lifecycle.mjs",
+            "npm_scripts": []
+          }
+        ]
+      },
+      "score": 7
+    },
+    {
+      "commit": "50548177a302f189305432db1a610b756f97e393",
+      "parent": "f4f5e890b8d8ea7940cddf0f1733d2f9bfa37e45",
+      "date": "2026-09-19T22:03:52+07:00",
+      "subject": "fix(updater): recover prepared update state",
+      "type": "fix",
+      "fix_like": true,
+      "changed_files": [
+        "electron/main.cjs",
+        "electron/remote-update-stager.cjs",
+        "electron/remote-update-state.cjs",
+        "scripts/test-remote-update-integration.mjs",
+        "scripts/test-update-ready-recovery.mjs"
+      ],
+      "source_files": [
+        "electron/main.cjs",
+        "electron/remote-update-stager.cjs",
+        "electron/remote-update-state.cjs"
+      ],
+      "test_files": [
+        "scripts/test-remote-update-integration.mjs",
+        "scripts/test-update-ready-recovery.mjs"
+      ],
+      "other_files": [],
+      "generated_files_ignored": [],
+      "new_source_files": [
+        "electron/remote-update-state.cjs"
+      ],
+      "insertions": 135,
+      "deletions": 28,
+      "test_insertions": 289,
+      "test_deletions": 19,
+      "touches_electron_main": true,
+      "touches_x_core": false,
+      "touches_ui": false,
+      "validation": {
+        "strength": "in_commit",
+        "tests": [
+          {
+            "file": "scripts/test-remote-update-integration.mjs",
+            "command": "node --test scripts/test-remote-update-integration.mjs",
+            "npm_scripts": []
+          },
+          {
+            "file": "scripts/test-update-ready-recovery.mjs",
+            "command": "node --test scripts/test-update-ready-recovery.mjs",
+            "npm_scripts": []
+          }
+        ]
+      },
+      "score": 6
+    },
+    {
+      "commit": "8dc4f7cdf11a2587637d27b0291e2068fa4593db",
+      "parent": "8854e623aea473bb54b5c6a0376ffbc1bf7cceb9",
+      "date": "2026-09-18T10:12:15+07:00",
+      "subject": "Hearth X: harden read-only execution boundary",
+      "type": null,
+      "fix_like": false,
+      "changed_files": [
+        "mcp/goals/runner.mjs",
+        "mcp/x/local-executor.mjs",
+        "scripts/test-goal-runner-x.mjs",
+        "scripts/test-x-core-e2e.mjs",
+        "scripts/test-x-execute-x-task.mjs",
+        "scripts/test-x-local-executor.mjs",
+        "scripts/test-x-mcp-tools.mjs",
+        "scripts/test-x-queue-coordinator.mjs",
+        "scripts/test-x-repair-loop.mjs",
+        "scripts/test-x-skill-integration.mjs",
+        "scripts/test-x-terminal-event.mjs"
+      ],
+      "source_files": [
+        "mcp/goals/runner.mjs",
+        "mcp/x/local-executor.mjs"
+      ],
+      "test_files": [
+        "scripts/test-goal-runner-x.mjs",
+        "scripts/test-x-core-e2e.mjs",
+        "scripts/test-x-execute-x-task.mjs",
+        "scripts/test-x-local-executor.mjs",
+        "scripts/test-x-mcp-tools.mjs",
+        "scripts/test-x-queue-coordinator.mjs",
+        "scripts/test-x-repair-loop.mjs",
+        "scripts/test-x-skill-integration.mjs",
+        "scripts/test-x-terminal-event.mjs"
+      ],
+      "other_files": [],
+      "generated_files_ignored": [],
+      "new_source_files": [],
+      "insertions": 102,
+      "deletions": 7,
+      "test_insertions": 290,
+      "test_deletions": 66,
+      "touches_electron_main": false,
+      "touches_x_core": true,
+      "touches_ui": false,
+      "validation": {
+        "strength": "in_commit",
+        "tests": [
+          {
+            "file": "scripts/test-goal-runner-x.mjs",
+            "command": "node scripts/test-goal-runner-x.mjs",
+            "npm_scripts": []
+          },
+          {
+            "file": "scripts/test-x-core-e2e.mjs",
+            "command": "node --test scripts/test-x-core-e2e.mjs",
+            "npm_scripts": []
+          },
+          {
+            "file": "scripts/test-x-execute-x-task.mjs",
+            "command": "node --test scripts/test-x-execute-x-task.mjs",
+            "npm_scripts": []
+          },
+          {
+            "file": "scripts/test-x-local-executor.mjs",
+            "command": "node --test scripts/test-x-local-executor.mjs",
+            "npm_scripts": []
+          },
+          {
+            "file": "scripts/test-x-mcp-tools.mjs",
+            "command": "node --test scripts/test-x-mcp-tools.mjs",
+            "npm_scripts": []
+          },
+          {
+            "file": "scripts/test-x-queue-coordinator.mjs",
+            "command": "node --test scripts/test-x-queue-coordinator.mjs",
+            "npm_scripts": []
+          },
+          {
+            "file": "scripts/test-x-repair-loop.mjs",
+            "command": "node --test scripts/test-x-repair-loop.mjs",
+            "npm_scripts": []
+          },
+          {
+            "file": "scripts/test-x-skill-integration.mjs",
+            "command": "node --test scripts/test-x-skill-integration.mjs",
+            "npm_scripts": []
+          },
+          {
+            "file": "scripts/test-x-terminal-event.mjs",
+            "command": "node --test scripts/test-x-terminal-event.mjs",
+            "npm_scripts": []
+          }
+        ]
+      },
+      "score": 6
+    },
+    {
+      "commit": "270d62491ff4df3b2c4bb079b1d2a9a58fcac8d6",
+      "parent": "79664a00cc8500c27b0a10bde855cc2473b79384",
+      "date": "2026-09-15T10:12:32+07:00",
+      "subject": "fix: make approval lifecycle durable in UI",
+      "type": "fix",
+      "fix_like": true,
+      "changed_files": [
+        "electron/main.cjs",
+        "mcp/http.mjs",
+        "scripts/test-electron-x-approval-lifecycle.mjs",
+        "scripts/test-http-approval-lifecycle.mjs",
+        "scripts/test-renderer-approval-fifo.mjs",
+        "src/App.tsx",
+        "src/electron.d.ts"
+      ],
+      "source_files": [
+        "electron/main.cjs",
+        "mcp/http.mjs",
+        "src/App.tsx",
+        "src/electron.d.ts"
+      ],
+      "test_files": [
+        "scripts/test-electron-x-approval-lifecycle.mjs",
+        "scripts/test-http-approval-lifecycle.mjs",
+        "scripts/test-renderer-approval-fifo.mjs"
+      ],
+      "other_files": [],
+      "generated_files_ignored": [],
+      "new_source_files": [],
+      "insertions": 114,
+      "deletions": 19,
+      "test_insertions": 669,
+      "test_deletions": 0,
+      "touches_electron_main": true,
+      "touches_x_core": false,
+      "touches_ui": true,
+      "validation": {
+        "strength": "in_commit",
+        "tests": [
+          {
+            "file": "scripts/test-electron-x-approval-lifecycle.mjs",
+            "command": "node --test scripts/test-electron-x-approval-lifecycle.mjs",
+            "npm_scripts": []
+          },
+          {
+            "file": "scripts/test-http-approval-lifecycle.mjs",
+            "command": "node --test scripts/test-http-approval-lifecycle.mjs",
+            "npm_scripts": []
+          },
+          {
+            "file": "scripts/test-renderer-approval-fifo.mjs",
+            "command": "node --test scripts/test-renderer-approval-fifo.mjs",
+            "npm_scripts": []
+          }
+        ]
+      },
+      "score": 6
+    },
+    {
+      "commit": "a3a76ef804a34d868f58a8d87ce48803f6ce4188",
+      "parent": "6649ba14026c6366feed6981342fa89c682edc44",
+      "date": "2026-09-14T19:21:49+07:00",
+      "subject": "feat: notify after Antigravity admission release",
+      "type": "feat",
+      "fix_like": false,
+      "changed_files": [
+        "mcp/executors/antigravity-admission.mjs",
+        "scripts/test-antigravity-admission-released.mjs"
+      ],
+      "source_files": [
+        "mcp/executors/antigravity-admission.mjs"
+      ],
+      "test_files": [
+        "scripts/test-antigravity-admission-released.mjs"
+      ],
+      "other_files": [],
+      "generated_files_ignored": [],
+      "new_source_files": [],
+      "insertions": 43,
+      "deletions": 1,
+      "test_insertions": 238,
+      "test_deletions": 0,
+      "touches_electron_main": false,
+      "touches_x_core": false,
+      "touches_ui": false,
+      "validation": {
+        "strength": "in_commit",
+        "tests": [
+          {
+            "file": "scripts/test-antigravity-admission-released.mjs",
+            "command": "node --test scripts/test-antigravity-admission-released.mjs",
+            "npm_scripts": []
+          }
+        ]
+      },
+      "score": 6
+    },
+    {
+      "commit": "5df52527aef2fbe987a6b29841cad85fee3ee521",
+      "parent": "a7a56ada451c54591c57a7d00610f9b40385742d",
+      "date": "2026-09-14T13:51:54+07:00",
+      "subject": "feat: reconcile X runtime state on startup",
+      "type": "feat",
+      "fix_like": false,
+      "changed_files": [
+        "mcp/x/production-runtime.mjs",
+        "scripts/test-x-startup-reconciliation.mjs",
+        "scripts/test-x-validation-cancellation.mjs"
+      ],
+      "source_files": [
+        "mcp/x/production-runtime.mjs"
+      ],
+      "test_files": [
+        "scripts/test-x-startup-reconciliation.mjs",
+        "scripts/test-x-validation-cancellation.mjs"
+      ],
+      "other_files": [],
+      "generated_files_ignored": [],
+      "new_source_files": [],
+      "insertions": 39,
+      "deletions": 2,
+      "test_insertions": 475,
+      "test_deletions": 0,
+      "touches_electron_main": false,
+      "touches_x_core": true,
+      "touches_ui": false,
+      "validation": {
+        "strength": "in_commit",
+        "tests": [
+          {
+            "file": "scripts/test-x-startup-reconciliation.mjs",
+            "command": "node --test scripts/test-x-startup-reconciliation.mjs",
+            "npm_scripts": []
+          },
+          {
+            "file": "scripts/test-x-validation-cancellation.mjs",
+            "command": "node --test scripts/test-x-validation-cancellation.mjs",
+            "npm_scripts": []
+          }
+        ]
+      },
+      "score": 6
+    },
+    {
+      "commit": "b921befd029ad9196488c7241d4445068d8251d9",
+      "parent": "ff81398bb3b49d8e45a2f57ba044383b172dc3e7",
+      "date": "2026-09-14T12:26:43+07:00",
+      "subject": "feat: add atomic X run lease fencing",
+      "type": "feat",
+      "fix_like": false,
+      "changed_files": [
+        "mcp/x/run-store.mjs",
+        "scripts/test-x-run-fencing.mjs"
+      ],
+      "source_files": [
+        "mcp/x/run-store.mjs"
+      ],
+      "test_files": [
+        "scripts/test-x-run-fencing.mjs"
+      ],
+      "other_files": [],
+      "generated_files_ignored": [],
+      "new_source_files": [],
+      "insertions": 62,
+      "deletions": 16,
+      "test_insertions": 200,
+      "test_deletions": 0,
+      "touches_electron_main": false,
+      "touches_x_core": true,
+      "touches_ui": false,
+      "validation": {
+        "strength": "in_commit",
+        "tests": [
+          {
+            "file": "scripts/test-x-run-fencing.mjs",
+            "command": "node --test scripts/test-x-run-fencing.mjs",
+            "npm_scripts": []
+          }
+        ]
+      },
+      "score": 6
+    },
+    {
+      "commit": "ff81398bb3b49d8e45a2f57ba044383b172dc3e7",
+      "parent": "57bcf9b5d7ea2d14562224db7f49d75519d52abd",
+      "date": "2026-09-14T12:13:59+07:00",
+      "subject": "feat: compose X task execution pipeline",
+      "type": "feat",
+      "fix_like": false,
+      "changed_files": [
+        "mcp/x/execute-x-task.mjs",
+        "scripts/test-x-execute-x-task.mjs"
+      ],
+      "source_files": [
+        "mcp/x/execute-x-task.mjs"
+      ],
+      "test_files": [
+        "scripts/test-x-execute-x-task.mjs"
+      ],
+      "other_files": [],
+      "generated_files_ignored": [],
+      "new_source_files": [
+        "mcp/x/execute-x-task.mjs"
+      ],
+      "insertions": 12,
+      "deletions": 0,
+      "test_insertions": 120,
+      "test_deletions": 0,
+      "touches_electron_main": false,
+      "touches_x_core": true,
+      "touches_ui": false,
+      "validation": {
+        "strength": "in_commit",
+        "tests": [
+          {
+            "file": "scripts/test-x-execute-x-task.mjs",
+            "command": "node --test scripts/test-x-execute-x-task.mjs",
+            "npm_scripts": []
+          }
+        ]
+      },
+      "score": 6
+    },
+    {
+      "commit": "66b4ef3012c0910ed58a201ba0f7607619780174",
+      "parent": "9b056eef7eaf5c3af9f68c63b8bf639ce57afe18",
+      "date": "2026-09-14T10:36:20+07:00",
+      "subject": "feat: add shared Hearth runtime database path",
+      "type": "feat",
+      "fix_like": false,
+      "changed_files": [
+        "mcp/x/runtime-paths.mjs",
+        "scripts/test-x-runtime-paths.mjs"
+      ],
+      "source_files": [
+        "mcp/x/runtime-paths.mjs"
+      ],
+      "test_files": [
+        "scripts/test-x-runtime-paths.mjs"
+      ],
+      "other_files": [],
+      "generated_files_ignored": [],
+      "new_source_files": [
+        "mcp/x/runtime-paths.mjs"
+      ],
+      "insertions": 45,
+      "deletions": 0,
+      "test_insertions": 82,
+      "test_deletions": 0,
+      "touches_electron_main": false,
+      "touches_x_core": true,
+      "touches_ui": false,
+      "validation": {
+        "strength": "in_commit",
+        "tests": [
+          {
+            "file": "scripts/test-x-runtime-paths.mjs",
+            "command": "node --test scripts/test-x-runtime-paths.mjs",
+            "npm_scripts": []
+          }
+        ]
+      },
+      "score": 6
+    },
+    {
+      "commit": "0885d81be4f455f3065954229fb9579c5f51ba67",
+      "parent": "7738eec7f97c6e4e890c2e7ef1afaaf2a5b8229f",
+      "date": "2026-09-13T22:32:11+07:00",
+      "subject": "feat: add executor contract and antigravity adapter",
+      "type": "feat",
+      "fix_like": false,
+      "changed_files": [
+        "mcp/x/antigravity-executor.mjs",
+        "mcp/x/executor.mjs",
+        "scripts/test-x-executor.mjs"
+      ],
+      "source_files": [
+        "mcp/x/antigravity-executor.mjs",
+        "mcp/x/executor.mjs"
+      ],
+      "test_files": [
+        "scripts/test-x-executor.mjs"
+      ],
+      "other_files": [],
+      "generated_files_ignored": [],
+      "new_source_files": [
+        "mcp/x/antigravity-executor.mjs",
+        "mcp/x/executor.mjs"
+      ],
+      "insertions": 77,
+      "deletions": 0,
+      "test_insertions": 101,
+      "test_deletions": 0,
+      "touches_electron_main": false,
+      "touches_x_core": true,
+      "touches_ui": false,
+      "validation": {
+        "strength": "in_commit",
+        "tests": [
+          {
+            "file": "scripts/test-x-executor.mjs",
+            "command": "node --test scripts/test-x-executor.mjs",
+            "npm_scripts": []
+          }
+        ]
+      },
+      "score": 6
+    },
+    {
+      "commit": "7865119f9e242099db9ba30b9215e0fd5dfd9a8d",
+      "parent": "bddfb90ec9b12a9eb0a0cd4d1fed33f0a0d726ed",
+      "date": "2026-09-20T06:10:14+07:00",
+      "subject": "feat(console): add operational connections and evidence UI",
+      "type": "feat",
+      "fix_like": false,
+      "changed_files": [
+        "README.md",
+        "docs/HEARTH-OPERATIONAL-CONSOLE-V1.md",
+        "package.json",
+        "scripts/test-p7-console-boundary.mjs",
+        "src/App.tsx",
+        "src/styles.css"
+      ],
+      "source_files": [
+        "src/App.tsx"
+      ],
+      "test_files": [
+        "scripts/test-p7-console-boundary.mjs"
+      ],
+      "other_files": [
+        "README.md",
+        "docs/HEARTH-OPERATIONAL-CONSOLE-V1.md",
+        "package.json",
+        "src/styles.css"
+      ],
+      "generated_files_ignored": [],
+      "new_source_files": [],
+      "insertions": 335,
+      "deletions": 6,
+      "test_insertions": 95,
+      "test_deletions": 0,
+      "touches_electron_main": false,
+      "touches_x_core": false,
+      "touches_ui": true,
+      "validation": {
+        "strength": "in_commit",
+        "tests": [
+          {
+            "file": "scripts/test-p7-console-boundary.mjs",
+            "command": "node --test scripts/test-p7-console-boundary.mjs",
+            "npm_scripts": [
+              "npm run test:console"
+            ]
+          }
+        ]
+      },
+      "score": 5
+    },
+    {
+      "commit": "8854e623aea473bb54b5c6a0376ffbc1bf7cceb9",
+      "parent": "2b50ef1bf0bdb801fee9ef68a9c9eee41a975e91",
+      "date": "2026-09-18T09:27:33+07:00",
+      "subject": "Hearth P2C: stage verified DMG updates safely",
+      "type": null,
+      "fix_like": false,
+      "changed_files": [
+        "electron/remote-update-stager.cjs",
+        "scripts/test-remote-updater.mjs"
+      ],
+      "source_files": [
+        "electron/remote-update-stager.cjs"
+      ],
+      "test_files": [
+        "scripts/test-remote-updater.mjs"
+      ],
+      "other_files": [],
+      "generated_files_ignored": [],
+      "new_source_files": [
+        "electron/remote-update-stager.cjs"
+      ],
+      "insertions": 302,
+      "deletions": 0,
+      "test_insertions": 716,
+      "test_deletions": 0,
+      "touches_electron_main": false,
+      "touches_x_core": false,
+      "touches_ui": false,
+      "validation": {
+        "strength": "in_commit",
+        "tests": [
+          {
+            "file": "scripts/test-remote-updater.mjs",
+            "command": "node --test scripts/test-remote-updater.mjs",
+            "npm_scripts": []
+          }
+        ]
+      },
+      "score": 5
+    },
+    {
+      "commit": "5f9f4810996c953a515387915ea0bfd9956125f9",
+      "parent": "cc5c3467a9e26af0fa820d164c103e035ffd0921",
+      "date": "2026-09-16T08:38:49+07:00",
+      "subject": "feat: add durable goal review queue",
+      "type": "feat",
+      "fix_like": false,
+      "changed_files": [
+        "mcp/goals/model.mjs",
+        "mcp/goals/runner.mjs",
+        "scripts/test-goal-review-queue.mjs"
+      ],
+      "source_files": [
+        "mcp/goals/model.mjs",
+        "mcp/goals/runner.mjs"
+      ],
+      "test_files": [
+        "scripts/test-goal-review-queue.mjs"
+      ],
+      "other_files": [],
+      "generated_files_ignored": [],
+      "new_source_files": [],
+      "insertions": 238,
+      "deletions": 8,
+      "test_insertions": 361,
+      "test_deletions": 0,
+      "touches_electron_main": false,
+      "touches_x_core": false,
+      "touches_ui": false,
+      "validation": {
+        "strength": "in_commit",
+        "tests": [
+          {
+            "file": "scripts/test-goal-review-queue.mjs",
+            "command": "node scripts/test-goal-review-queue.mjs",
+            "npm_scripts": []
+          }
+        ]
+      },
+      "score": 5
+    },
+    {
+      "commit": "474292fb7844c8c248d45644d897b933fc5b8dfa",
+      "parent": "af9dc24d6bcfce5e8129b23276a41bc9cffb6a44",
+      "date": "2026-09-15T00:13:08+07:00",
+      "subject": "fix: recover X runs after lease expiry",
+      "type": "fix",
+      "fix_like": true,
+      "changed_files": [
+        "electron/main.cjs",
+        "mcp/tools.mjs",
+        "mcp/x/production-runtime.mjs",
+        "mcp/x/queue-coordinator.mjs",
+        "mcp/x/run-store.mjs",
+        "scripts/test-electron-x-wakeup.mjs",
+        "scripts/test-x-mcp-tools.mjs",
+        "scripts/test-x-queue-coordinator.mjs",
+        "scripts/test-x-run-store.mjs",
+        "scripts/test-x-startup-reconciliation.mjs",
+        "scripts/test-x-terminal-event.mjs"
+      ],
+      "source_files": [
+        "electron/main.cjs",
+        "mcp/tools.mjs",
+        "mcp/x/production-runtime.mjs",
+        "mcp/x/queue-coordinator.mjs",
+        "mcp/x/run-store.mjs"
+      ],
+      "test_files": [
+        "scripts/test-electron-x-wakeup.mjs",
+        "scripts/test-x-mcp-tools.mjs",
+        "scripts/test-x-queue-coordinator.mjs",
+        "scripts/test-x-run-store.mjs",
+        "scripts/test-x-startup-reconciliation.mjs",
+        "scripts/test-x-terminal-event.mjs"
+      ],
+      "other_files": [],
+      "generated_files_ignored": [],
+      "new_source_files": [],
+      "insertions": 160,
+      "deletions": 8,
+      "test_insertions": 784,
+      "test_deletions": 14,
+      "touches_electron_main": true,
+      "touches_x_core": true,
+      "touches_ui": false,
+      "validation": {
+        "strength": "in_commit",
+        "tests": [
+          {
+            "file": "scripts/test-electron-x-wakeup.mjs",
+            "command": "node --test scripts/test-electron-x-wakeup.mjs",
+            "npm_scripts": []
+          },
+          {
+            "file": "scripts/test-x-mcp-tools.mjs",
+            "command": "node --test scripts/test-x-mcp-tools.mjs",
+            "npm_scripts": []
+          },
+          {
+            "file": "scripts/test-x-queue-coordinator.mjs",
+            "command": "node --test scripts/test-x-queue-coordinator.mjs",
+            "npm_scripts": []
+          },
+          {
+            "file": "scripts/test-x-run-store.mjs",
+            "command": "node --test scripts/test-x-run-store.mjs",
+            "npm_scripts": []
+          },
+          {
+            "file": "scripts/test-x-startup-reconciliation.mjs",
+            "command": "node --test scripts/test-x-startup-reconciliation.mjs",
+            "npm_scripts": []
+          },
+          {
+            "file": "scripts/test-x-terminal-event.mjs",
+            "command": "node --test scripts/test-x-terminal-event.mjs",
+            "npm_scripts": []
+          }
+        ]
+      },
+      "score": 5
+    },
+    {
+      "commit": "a7a56ada451c54591c57a7d00610f9b40385742d",
+      "parent": "ac761bbafbe0786bae19a2bb9aedd50e7acb281f",
+      "date": "2026-09-14T13:28:09+07:00",
+      "subject": "feat: expose X start and task MCP tools",
+      "type": "feat",
+      "fix_like": false,
+      "changed_files": [
+        "mcp/tools.mjs",
+        "mcp/x/production-runtime.mjs",
+        "scripts/test-x-mcp-tools.mjs"
+      ],
+      "source_files": [
+        "mcp/tools.mjs",
+        "mcp/x/production-runtime.mjs"
+      ],
+      "test_files": [
+        "scripts/test-x-mcp-tools.mjs"
+      ],
+      "other_files": [],
+      "generated_files_ignored": [],
+      "new_source_files": [
+        "mcp/x/production-runtime.mjs"
+      ],
+      "insertions": 107,
+      "deletions": 0,
+      "test_insertions": 331,
+      "test_deletions": 0,
+      "touches_electron_main": false,
+      "touches_x_core": true,
+      "touches_ui": false,
+      "validation": {
+        "strength": "in_commit",
+        "tests": [
+          {
+            "file": "scripts/test-x-mcp-tools.mjs",
+            "command": "node --test scripts/test-x-mcp-tools.mjs",
+            "npm_scripts": []
+          }
+        ]
+      },
+      "score": 5
+    },
+    {
+      "commit": "ac761bbafbe0786bae19a2bb9aedd50e7acb281f",
+      "parent": "99696e769f117493da2cd4f76ee932a930050901",
+      "date": "2026-09-14T13:00:18+07:00",
+      "subject": "feat: add X production task runner",
+      "type": "feat",
+      "fix_like": false,
+      "changed_files": [
+        "mcp/x/run-x-task.mjs",
+        "scripts/test-x-run-x-task.mjs"
+      ],
+      "source_files": [
+        "mcp/x/run-x-task.mjs"
+      ],
+      "test_files": [
+        "scripts/test-x-run-x-task.mjs"
+      ],
+      "other_files": [],
+      "generated_files_ignored": [],
+      "new_source_files": [
+        "mcp/x/run-x-task.mjs"
+      ],
+      "insertions": 147,
+      "deletions": 0,
+      "test_insertions": 430,
+      "test_deletions": 0,
+      "touches_electron_main": false,
+      "touches_x_core": true,
+      "touches_ui": false,
+      "validation": {
+        "strength": "in_commit",
+        "tests": [
+          {
+            "file": "scripts/test-x-run-x-task.mjs",
+            "command": "node --test scripts/test-x-run-x-task.mjs",
+            "npm_scripts": []
+          }
+        ]
+      },
+      "score": 5
+    },
+    {
+      "commit": "57bcf9b5d7ea2d14562224db7f49d75519d52abd",
+      "parent": "173bf561c485b71575dce66adb60aca0be0ff408",
+      "date": "2026-09-14T11:59:59+07:00",
+      "subject": "feat: add shared X lease keeper",
+      "type": "feat",
+      "fix_like": false,
+      "changed_files": [
+        "mcp/x/lease-keeper.mjs",
+        "scripts/test-x-lease-keeper.mjs"
+      ],
+      "source_files": [
+        "mcp/x/lease-keeper.mjs"
+      ],
+      "test_files": [
+        "scripts/test-x-lease-keeper.mjs"
+      ],
+      "other_files": [],
+      "generated_files_ignored": [],
+      "new_source_files": [
+        "mcp/x/lease-keeper.mjs"
+      ],
+      "insertions": 110,
+      "deletions": 0,
+      "test_insertions": 178,
+      "test_deletions": 0,
+      "touches_electron_main": false,
+      "touches_x_core": true,
+      "touches_ui": false,
+      "validation": {
+        "strength": "in_commit",
+        "tests": [
+          {
+            "file": "scripts/test-x-lease-keeper.mjs",
+            "command": "node --test scripts/test-x-lease-keeper.mjs",
+            "npm_scripts": []
+          }
+        ]
+      },
+      "score": 5
+    },
+    {
+      "commit": "ea878b25db43c8d83783cf3d887af681b55a7ab4",
+      "parent": "ac855c751542150561e287914e7cd92cf5e9d4fb",
+      "date": "2026-09-13T22:44:00+07:00",
+      "subject": "feat: add x-task-v1 contract and validator",
+      "type": "feat",
+      "fix_like": false,
+      "changed_files": [
+        "mcp/x/task-contract.mjs",
+        "scripts/test-x-task-contract.mjs"
+      ],
+      "source_files": [
+        "mcp/x/task-contract.mjs"
+      ],
+      "test_files": [
+        "scripts/test-x-task-contract.mjs"
+      ],
+      "other_files": [],
+      "generated_files_ignored": [],
+      "new_source_files": [
+        "mcp/x/task-contract.mjs"
+      ],
+      "insertions": 242,
+      "deletions": 0,
+      "test_insertions": 100,
+      "test_deletions": 0,
+      "touches_electron_main": false,
+      "touches_x_core": true,
+      "touches_ui": false,
+      "validation": {
+        "strength": "in_commit",
+        "tests": [
+          {
+            "file": "scripts/test-x-task-contract.mjs",
+            "command": "node --test scripts/test-x-task-contract.mjs",
+            "npm_scripts": []
+          }
+        ]
+      },
+      "score": 5
+    },
+    {
+      "commit": "ac855c751542150561e287914e7cd92cf5e9d4fb",
+      "parent": "0885d81be4f455f3065954229fb9579c5f51ba67",
+      "date": "2026-09-13T22:38:45+07:00",
+      "subject": "feat: add local model adapter",
+      "type": "feat",
+      "fix_like": false,
+      "changed_files": [
+        "mcp/x/model-adapter.mjs",
+        "scripts/test-x-model-adapter.mjs"
+      ],
+      "source_files": [
+        "mcp/x/model-adapter.mjs"
+      ],
+      "test_files": [
+        "scripts/test-x-model-adapter.mjs"
+      ],
+      "other_files": [],
+      "generated_files_ignored": [],
+      "new_source_files": [
+        "mcp/x/model-adapter.mjs"
+      ],
+      "insertions": 143,
+      "deletions": 0,
+      "test_insertions": 113,
+      "test_deletions": 0,
+      "touches_electron_main": false,
+      "touches_x_core": true,
+      "touches_ui": false,
+      "validation": {
+        "strength": "in_commit",
+        "tests": [
+          {
+            "file": "scripts/test-x-model-adapter.mjs",
+            "command": "node --test scripts/test-x-model-adapter.mjs",
+            "npm_scripts": []
+          }
+        ]
+      },
+      "score": 5
+    },
+    {
+      "commit": "2360255fb40b36914e7a3f777e3a52d49a9ef9d5",
+      "parent": "8c266afd85666e7c8d98fb313fee3707674a02f4",
+      "date": "2026-09-20T22:28:12+07:00",
+      "subject": "chore(updater): add gated diagnostic logging",
+      "type": "chore",
+      "fix_like": false,
+      "changed_files": [
+        "electron/main.cjs",
+        "electron/updater.cjs"
+      ],
+      "source_files": [
+        "electron/main.cjs",
+        "electron/updater.cjs"
+      ],
+      "test_files": [],
+      "other_files": [],
+      "generated_files_ignored": [],
+      "new_source_files": [],
+      "insertions": 64,
+      "deletions": 3,
+      "test_insertions": 0,
+      "test_deletions": 0,
+      "touches_electron_main": true,
+      "touches_x_core": false,
+      "touches_ui": false,
+      "validation": {
+        "strength": "existing_related",
+        "tests": [
+          {
+            "file": "scripts/test-bridge.mjs",
+            "command": "node scripts/test-bridge.mjs",
+            "npm_scripts": [
+              "npm run test:bridge"
+            ]
+          },
+          {
+            "file": "scripts/test-connection-main-boundary.mjs",
+            "command": "node --test scripts/test-connection-main-boundary.mjs",
+            "npm_scripts": [
+              "npm run test:connections"
+            ]
+          },
+          {
+            "file": "scripts/test-context-inspector.mjs",
+            "command": "node --test scripts/test-context-inspector.mjs",
+            "npm_scripts": [
+              "npm run test:context-inspector"
+            ]
+          },
+          {
+            "file": "scripts/test-continuation-recovery.mjs",
+            "command": "node --test scripts/test-continuation-recovery.mjs",
+            "npm_scripts": [
+              "npm run test:continuation"
+            ]
+          },
+          {
+            "file": "scripts/test-electron-public-x-auth.mjs",
+            "command": "node --test scripts/test-electron-public-x-auth.mjs",
+            "npm_scripts": [
+              "npm run test:supabase"
+            ]
+          },
+          {
+            "file": "scripts/test-electron-remote-x-approval.mjs",
+            "command": "node --test scripts/test-electron-remote-x-approval.mjs",
+            "npm_scripts": []
+          }
+        ]
+      },
+      "score": 4
+    },
+    {
+      "commit": "d8d5468341493bc9b949d0eab6e0eb060541244d",
+      "parent": "30e5383e5bfe4d08defb7294ecf2368639f58dfd",
+      "date": "2026-09-14T17:31:11+07:00",
+      "subject": "feat: emit X terminal runtime events",
+      "type": "feat",
+      "fix_like": false,
+      "changed_files": [
+        "electron/main.cjs",
+        "mcp/tools.mjs",
+        "scripts/test-x-terminal-event.mjs"
+      ],
+      "source_files": [
+        "electron/main.cjs",
+        "mcp/tools.mjs"
+      ],
+      "test_files": [
+        "scripts/test-x-terminal-event.mjs"
+      ],
+      "other_files": [],
+      "generated_files_ignored": [],
+      "new_source_files": [],
+      "insertions": 42,
+      "deletions": 3,
+      "test_insertions": 544,
+      "test_deletions": 0,
+      "touches_electron_main": true,
+      "touches_x_core": false,
+      "touches_ui": false,
+      "validation": {
+        "strength": "in_commit",
+        "tests": [
+          {
+            "file": "scripts/test-x-terminal-event.mjs",
+            "command": "node --test scripts/test-x-terminal-event.mjs",
+            "npm_scripts": []
+          }
+        ]
+      },
+      "score": 4
+    },
+    {
+      "commit": "173bf561c485b71575dce66adb60aca0be0ff408",
+      "parent": "66b4ef3012c0910ed58a201ba0f7607619780174",
+      "date": "2026-09-14T11:15:28+07:00",
+      "subject": "feat: add persistent X run store",
+      "type": "feat",
+      "fix_like": false,
+      "changed_files": [
+        "mcp/x/run-store.mjs",
+        "scripts/test-x-run-store.mjs"
+      ],
+      "source_files": [
+        "mcp/x/run-store.mjs"
+      ],
+      "test_files": [
+        "scripts/test-x-run-store.mjs"
+      ],
+      "other_files": [],
+      "generated_files_ignored": [],
+      "new_source_files": [
+        "mcp/x/run-store.mjs"
+      ],
+      "insertions": 388,
+      "deletions": 0,
+      "test_insertions": 569,
+      "test_deletions": 0,
+      "touches_electron_main": false,
+      "touches_x_core": true,
+      "touches_ui": false,
+      "validation": {
+        "strength": "in_commit",
+        "tests": [
+          {
+            "file": "scripts/test-x-run-store.mjs",
+            "command": "node --test scripts/test-x-run-store.mjs",
+            "npm_scripts": []
+          }
+        ]
+      },
+      "score": 4
+    },
+    {
+      "commit": "bdc11447e95afc73e53f633e1f75d5b054fb6c8f",
+      "parent": "70a5ece7c1162495613a5e52a7a499718380145e",
+      "date": "2026-09-14T09:10:49+07:00",
+      "subject": "feat: add X deterministic result gate",
+      "type": "feat",
+      "fix_like": false,
+      "changed_files": [
+        "mcp/x/result-gate.mjs",
+        "scripts/test-x-result-gate.mjs"
+      ],
+      "source_files": [
+        "mcp/x/result-gate.mjs"
+      ],
+      "test_files": [
+        "scripts/test-x-result-gate.mjs"
+      ],
+      "other_files": [],
+      "generated_files_ignored": [],
+      "new_source_files": [
+        "mcp/x/result-gate.mjs"
+      ],
+      "insertions": 274,
+      "deletions": 0,
+      "test_insertions": 228,
+      "test_deletions": 0,
+      "touches_electron_main": false,
+      "touches_x_core": true,
+      "touches_ui": false,
+      "validation": {
+        "strength": "in_commit",
+        "tests": [
+          {
+            "file": "scripts/test-x-result-gate.mjs",
+            "command": "node --test scripts/test-x-result-gate.mjs",
+            "npm_scripts": []
+          }
+        ]
+      },
+      "score": 4
+    },
+    {
+      "commit": "d55d05d34f0e0b78b326740f63c066588a88c505",
+      "parent": "a40d67b38c62254cd8d6183f59f514cfd850d9d3",
+      "date": "2026-09-14T08:32:50+07:00",
+      "subject": "feat: add X validation runner",
+      "type": "feat",
+      "fix_like": false,
+      "changed_files": [
+        "mcp/x/validation-runner.mjs",
+        "scripts/test-x-validation-runner.mjs"
+      ],
+      "source_files": [
+        "mcp/x/validation-runner.mjs"
+      ],
+      "test_files": [
+        "scripts/test-x-validation-runner.mjs"
+      ],
+      "other_files": [],
+      "generated_files_ignored": [],
+      "new_source_files": [
+        "mcp/x/validation-runner.mjs"
+      ],
+      "insertions": 290,
+      "deletions": 0,
+      "test_insertions": 269,
+      "test_deletions": 0,
+      "touches_electron_main": false,
+      "touches_x_core": true,
+      "touches_ui": false,
+      "validation": {
+        "strength": "in_commit",
+        "tests": [
+          {
+            "file": "scripts/test-x-validation-runner.mjs",
+            "command": "node --test scripts/test-x-validation-runner.mjs",
+            "npm_scripts": []
+          }
+        ]
+      },
+      "score": 4
+    },
+    {
+      "commit": "7738eec7f97c6e4e890c2e7ef1afaaf2a5b8229f",
+      "parent": "3b3952d41f7efc28143994ad37acf69e32082d71",
+      "date": "2026-09-13T22:25:36+07:00",
+      "subject": "feat: add lifecycle-safe antigravity stop contract",
+      "type": "feat",
+      "fix_like": false,
+      "changed_files": [
+        "mcp/executors/antigravity.mjs",
+        "mcp/executors/task-store.mjs",
+        "mcp/runtime/job-manager.mjs",
+        "scripts/test-antigravity-stop.mjs"
+      ],
+      "source_files": [
+        "mcp/executors/antigravity.mjs",
+        "mcp/executors/task-store.mjs",
+        "mcp/runtime/job-manager.mjs"
+      ],
+      "test_files": [
+        "scripts/test-antigravity-stop.mjs"
+      ],
+      "other_files": [],
+      "generated_files_ignored": [],
+      "new_source_files": [],
+      "insertions": 131,
+      "deletions": 6,
+      "test_insertions": 275,
+      "test_deletions": 0,
+      "touches_electron_main": false,
+      "touches_x_core": false,
+      "touches_ui": false,
+      "validation": {
+        "strength": "in_commit",
+        "tests": [
+          {
+            "file": "scripts/test-antigravity-stop.mjs",
+            "command": "node --test scripts/test-antigravity-stop.mjs",
+            "npm_scripts": []
+          }
+        ]
+      },
+      "score": 4
+    },
+    {
+      "commit": "ca389fef6280efc294e4eded6271e23feb36f80c",
+      "parent": "4ee7a6468d831c6fccef8e10bd6f8901ed0c3b36",
+      "date": "2026-09-20T21:46:25+07:00",
+      "subject": "feat(market): expose Invest controls in desktop UI",
+      "type": "feat",
+      "fix_like": false,
+      "changed_files": [
+        "docs/HEARTH-MARKET-SPECIALISTS-V1.md",
+        "electron/main.cjs",
+        "electron/preload.cjs",
+        "package.json",
+        "scripts/test-invest-ui-boundary.mjs",
+        "scripts/test-market-main-boundary.mjs",
+        "src/App.tsx",
+        "src/calm-control.css",
+        "src/electron.d.ts"
+      ],
+      "source_files": [
+        "electron/main.cjs",
+        "electron/preload.cjs",
+        "src/App.tsx",
+        "src/electron.d.ts"
+      ],
+      "test_files": [
+        "scripts/test-invest-ui-boundary.mjs",
+        "scripts/test-market-main-boundary.mjs"
+      ],
+      "other_files": [
+        "docs/HEARTH-MARKET-SPECIALISTS-V1.md",
+        "package.json",
+        "src/calm-control.css"
+      ],
+      "generated_files_ignored": [],
+      "new_source_files": [],
+      "insertions": 144,
+      "deletions": 6,
+      "test_insertions": 47,
+      "test_deletions": 3,
+      "touches_electron_main": true,
+      "touches_x_core": false,
+      "touches_ui": true,
+      "validation": {
+        "strength": "in_commit",
+        "tests": [
+          {
+            "file": "scripts/test-invest-ui-boundary.mjs",
+            "command": "node --test scripts/test-invest-ui-boundary.mjs",
+            "npm_scripts": [
+              "npm run test:market"
+            ]
+          },
+          {
+            "file": "scripts/test-market-main-boundary.mjs",
+            "command": "node --test scripts/test-market-main-boundary.mjs",
+            "npm_scripts": [
+              "npm run test:market"
+            ]
+          }
+        ]
+      },
+      "score": 3
+    },
+    {
+      "commit": "4f5f1d3005fa62fd04d9b098109021a2cbc6af7c",
+      "parent": "5f9f4810996c953a515387915ea0bfd9956125f9",
+      "date": "2026-09-16T08:54:41+07:00",
+      "subject": "feat: expose goal review queue over MCP",
+      "type": "feat",
+      "fix_like": false,
+      "changed_files": [
+        "electron/main.cjs",
+        "mcp/http.mjs",
+        "mcp/tools.mjs",
+        "scripts/test-review-queue-mcp-tool.mjs"
+      ],
+      "source_files": [
+        "electron/main.cjs",
+        "mcp/http.mjs",
+        "mcp/tools.mjs"
+      ],
+      "test_files": [
+        "scripts/test-review-queue-mcp-tool.mjs"
+      ],
+      "other_files": [],
+      "generated_files_ignored": [],
+      "new_source_files": [],
+      "insertions": 75,
+      "deletions": 4,
+      "test_insertions": 209,
+      "test_deletions": 0,
+      "touches_electron_main": true,
+      "touches_x_core": false,
+      "touches_ui": false,
+      "validation": {
+        "strength": "in_commit",
+        "tests": [
+          {
+            "file": "scripts/test-review-queue-mcp-tool.mjs",
+            "command": "node --test scripts/test-review-queue-mcp-tool.mjs",
+            "npm_scripts": []
+          }
+        ]
+      },
+      "score": 3
+    },
+    {
+      "commit": "a2aec21801b329df97c6c414bdcf61483e272488",
+      "parent": "ab7ff3e89757168e0cc8aea9098fecb8c1fe456e",
+      "date": "2026-09-14T21:00:17+07:00",
+      "subject": "feat: reconcile persisted X queue on startup",
+      "type": "feat",
+      "fix_like": false,
+      "changed_files": [
+        "electron/main.cjs",
+        "mcp/x/queue-coordinator.mjs",
+        "mcp/x/queue-store.mjs",
+        "scripts/test-electron-x-queue-integration.mjs",
+        "scripts/test-x-queue-coordinator.mjs",
+        "scripts/test-x-queue-store.mjs",
+        "scripts/test-x-terminal-event.mjs"
+      ],
+      "source_files": [
+        "electron/main.cjs",
+        "mcp/x/queue-coordinator.mjs",
+        "mcp/x/queue-store.mjs"
+      ],
+      "test_files": [
+        "scripts/test-electron-x-queue-integration.mjs",
+        "scripts/test-x-queue-coordinator.mjs",
+        "scripts/test-x-queue-store.mjs",
+        "scripts/test-x-terminal-event.mjs"
+      ],
+      "other_files": [],
+      "generated_files_ignored": [],
+      "new_source_files": [],
+      "insertions": 28,
+      "deletions": 8,
+      "test_insertions": 471,
+      "test_deletions": 3,
+      "touches_electron_main": true,
+      "touches_x_core": true,
+      "touches_ui": false,
+      "validation": {
+        "strength": "in_commit",
+        "tests": [
+          {
+            "file": "scripts/test-electron-x-queue-integration.mjs",
+            "command": "node --test scripts/test-electron-x-queue-integration.mjs",
+            "npm_scripts": []
+          },
+          {
+            "file": "scripts/test-x-queue-coordinator.mjs",
+            "command": "node --test scripts/test-x-queue-coordinator.mjs",
+            "npm_scripts": []
+          },
+          {
+            "file": "scripts/test-x-queue-store.mjs",
+            "command": "node --test scripts/test-x-queue-store.mjs",
+            "npm_scripts": []
+          },
+          {
+            "file": "scripts/test-x-terminal-event.mjs",
+            "command": "node --test scripts/test-x-terminal-event.mjs",
+            "npm_scripts": []
+          }
+        ]
+      },
+      "score": 3
+    },
+    {
+      "commit": "ab7ff3e89757168e0cc8aea9098fecb8c1fe456e",
+      "parent": "a3a76ef804a34d868f58a8d87ce48803f6ce4188",
+      "date": "2026-09-14T19:21:54+07:00",
+      "subject": "feat: wire X queue coordinator into Electron",
+      "type": "feat",
+      "fix_like": false,
+      "changed_files": [
+        "electron/main.cjs"
+      ],
+      "source_files": [
+        "electron/main.cjs"
+      ],
+      "test_files": [],
+      "other_files": [],
+      "generated_files_ignored": [],
+      "new_source_files": [],
+      "insertions": 27,
+      "deletions": 1,
+      "test_insertions": 0,
+      "test_deletions": 0,
+      "touches_electron_main": true,
+      "touches_x_core": false,
+      "touches_ui": false,
+      "validation": {
+        "strength": "existing_related",
+        "tests": [
+          {
+            "file": "scripts/test-bridge.mjs",
+            "command": "node scripts/test-bridge.mjs",
+            "npm_scripts": [
+              "npm run test:bridge"
+            ]
+          },
+          {
+            "file": "scripts/test-context-inspector.mjs",
+            "command": "node --test scripts/test-context-inspector.mjs",
+            "npm_scripts": [
+              "npm run test:context-inspector"
+            ]
+          },
+          {
+            "file": "scripts/test-continuation-recovery.mjs",
+            "command": "node --test scripts/test-continuation-recovery.mjs",
+            "npm_scripts": [
+              "npm run test:continuation"
+            ]
+          },
+          {
+            "file": "scripts/test-grounding-gate.mjs",
+            "command": "node --test scripts/test-grounding-gate.mjs",
+            "npm_scripts": [
+              "npm run test:local-skills"
+            ]
+          },
+          {
+            "file": "scripts/test-job-runtime.mjs",
+            "command": "node scripts/test-job-runtime.mjs",
+            "npm_scripts": [
+              "npm run test:jobs"
+            ]
+          },
+          {
+            "file": "scripts/test-storage-audit.mjs",
+            "command": "node --test scripts/test-storage-audit.mjs",
+            "npm_scripts": [
+              "npm run test:storage-audit"
+            ]
+          }
+        ]
+      },
+      "score": 3
+    },
+    {
+      "commit": "3ae11cf7357018af52c45ece170cb8aae77b7334",
+      "parent": "ea878b25db43c8d83783cf3d887af681b55a7ab4",
+      "date": "2026-09-13T23:32:48+07:00",
+      "subject": "feat: add serial X task dispatcher and execution lease",
+      "type": "feat",
+      "fix_like": false,
+      "changed_files": [
+        "mcp/x/claim-store.mjs",
+        "mcp/x/dispatcher.mjs",
+        "scripts/test-x-claim-store.mjs",
+        "scripts/test-x-dispatcher.mjs",
+        "scripts/x-claim-race-worker.mjs"
+      ],
+      "source_files": [
+        "mcp/x/claim-store.mjs",
+        "mcp/x/dispatcher.mjs",
+        "scripts/x-claim-race-worker.mjs"
+      ],
+      "test_files": [
+        "scripts/test-x-claim-store.mjs",
+        "scripts/test-x-dispatcher.mjs"
+      ],
+      "other_files": [],
+      "generated_files_ignored": [],
+      "new_source_files": [
+        "mcp/x/claim-store.mjs",
+        "mcp/x/dispatcher.mjs",
+        "scripts/x-claim-race-worker.mjs"
+      ],
+      "insertions": 365,
+      "deletions": 0,
+      "test_insertions": 379,
+      "test_deletions": 0,
+      "touches_electron_main": false,
+      "touches_x_core": true,
+      "touches_ui": false,
+      "validation": {
+        "strength": "in_commit",
+        "tests": [
+          {
+            "file": "scripts/test-x-claim-store.mjs",
+            "command": "node --test scripts/test-x-claim-store.mjs",
+            "npm_scripts": []
+          },
+          {
+            "file": "scripts/test-x-dispatcher.mjs",
+            "command": "node --test scripts/test-x-dispatcher.mjs",
+            "npm_scripts": []
+          }
+        ]
+      },
+      "score": 3
+    },
+    {
+      "commit": "af9dc24d6bcfce5e8129b23276a41bc9cffb6a44",
+      "parent": "a2aec21801b329df97c6c414bdcf61483e272488",
+      "date": "2026-09-14T22:27:36+07:00",
+      "subject": "feat: correlate X dispatch recovery by run id",
+      "type": "feat",
+      "fix_like": false,
+      "changed_files": [
+        "electron/main.cjs",
+        "mcp/x/queue-coordinator.mjs",
+        "mcp/x/queue-store.mjs",
+        "scripts/test-electron-x-queue-integration.mjs",
+        "scripts/test-x-queue-coordinator.mjs",
+        "scripts/test-x-queue-store.mjs"
+      ],
+      "source_files": [
+        "electron/main.cjs",
+        "mcp/x/queue-coordinator.mjs",
+        "mcp/x/queue-store.mjs"
+      ],
+      "test_files": [
+        "scripts/test-electron-x-queue-integration.mjs",
+        "scripts/test-x-queue-coordinator.mjs",
+        "scripts/test-x-queue-store.mjs"
+      ],
+      "other_files": [],
+      "generated_files_ignored": [],
+      "new_source_files": [],
+      "insertions": 152,
+      "deletions": 23,
+      "test_insertions": 593,
+      "test_deletions": 26,
+      "touches_electron_main": true,
+      "touches_x_core": true,
+      "touches_ui": false,
+      "validation": {
+        "strength": "in_commit",
+        "tests": [
+          {
+            "file": "scripts/test-electron-x-queue-integration.mjs",
+            "command": "node --test scripts/test-electron-x-queue-integration.mjs",
+            "npm_scripts": []
+          },
+          {
+            "file": "scripts/test-x-queue-coordinator.mjs",
+            "command": "node --test scripts/test-x-queue-coordinator.mjs",
+            "npm_scripts": []
+          },
+          {
+            "file": "scripts/test-x-queue-store.mjs",
+            "command": "node --test scripts/test-x-queue-store.mjs",
+            "npm_scripts": []
+          }
+        ]
+      },
+      "score": 2
+    },
+    {
+      "commit": "cb5398639231f0ec1a908ae6275b44a407595f06",
+      "parent": "4f5f1d3005fa62fd04d9b098109021a2cbc6af7c",
+      "date": "2026-09-16T10:53:00+07:00",
+      "subject": "feat: project review queue to Project X",
+      "type": "feat",
+      "fix_like": false,
+      "changed_files": [
+        "electron/main.cjs",
+        "mcp/bridge/review-queue-sync.mjs",
+        "mcp/goals/runner.mjs",
+        "scripts/test-electron-public-x-auth.mjs",
+        "scripts/test-review-queue-sync.mjs",
+        "supabase/migrations/20260916_review_items_v1.sql"
+      ],
+      "source_files": [
+        "electron/main.cjs",
+        "mcp/bridge/review-queue-sync.mjs",
+        "mcp/goals/runner.mjs"
+      ],
+      "test_files": [
+        "scripts/test-electron-public-x-auth.mjs",
+        "scripts/test-review-queue-sync.mjs"
+      ],
+      "other_files": [
+        "supabase/migrations/20260916_review_items_v1.sql"
+      ],
+      "generated_files_ignored": [],
+      "new_source_files": [
+        "mcp/bridge/review-queue-sync.mjs"
+      ],
+      "insertions": 284,
+      "deletions": 4,
+      "test_insertions": 334,
+      "test_deletions": 5,
+      "touches_electron_main": true,
+      "touches_x_core": false,
+      "touches_ui": false,
+      "validation": {
+        "strength": "in_commit",
+        "tests": [
+          {
+            "file": "scripts/test-electron-public-x-auth.mjs",
+            "command": "node --test scripts/test-electron-public-x-auth.mjs",
+            "npm_scripts": []
+          },
+          {
+            "file": "scripts/test-review-queue-sync.mjs",
+            "command": "node --test scripts/test-review-queue-sync.mjs",
+            "npm_scripts": []
+          }
+        ]
+      },
+      "score": 1
+    },
+    {
+      "commit": "cc5c3467a9e26af0fa820d164c103e035ffd0921",
+      "parent": "04ecd4cf45ef81b6f7915d97c2e252db2f50a99f",
+      "date": "2026-09-16T07:58:12+07:00",
+      "subject": "feat: run goal steps through X",
+      "type": "feat",
+      "fix_like": false,
+      "changed_files": [
+        "electron/main.cjs",
+        "mcp/goals/model.mjs",
+        "mcp/goals/runner.mjs",
+        "scripts/test-goal-runner-x.mjs",
+        "scripts/test-goal-x-approval.mjs"
+      ],
+      "source_files": [
+        "electron/main.cjs",
+        "mcp/goals/model.mjs",
+        "mcp/goals/runner.mjs"
+      ],
+      "test_files": [
+        "scripts/test-goal-runner-x.mjs",
+        "scripts/test-goal-x-approval.mjs"
+      ],
+      "other_files": [],
+      "generated_files_ignored": [],
+      "new_source_files": [],
+      "insertions": 284,
+      "deletions": 4,
+      "test_insertions": 1028,
+      "test_deletions": 0,
+      "touches_electron_main": true,
+      "touches_x_core": false,
+      "touches_ui": false,
+      "validation": {
+        "strength": "in_commit",
+        "tests": [
+          {
+            "file": "scripts/test-goal-runner-x.mjs",
+            "command": "node scripts/test-goal-runner-x.mjs",
+            "npm_scripts": []
+          },
+          {
+            "file": "scripts/test-goal-x-approval.mjs",
+            "command": "node --test scripts/test-goal-x-approval.mjs",
+            "npm_scripts": []
+          }
+        ]
+      },
+      "score": 1
+    },
+    {
+      "commit": "b374a3990302c71fc92722fd58e0b83e4fef803a",
+      "parent": "077c7be7eb5b9cd03e12d0b49c7e2afbb6d48a37",
+      "date": "2026-09-17T00:41:59+07:00",
+      "subject": "feat: add specialist result decisions",
+      "type": "feat",
+      "fix_like": false,
+      "changed_files": [
+        "electron/main.cjs",
+        "mcp/goals/model.mjs",
+        "mcp/goals/runner.mjs",
+        "mcp/specialist/contract.mjs",
+        "mcp/tools.mjs",
+        "scripts/test-specialist-result-decision.mjs"
+      ],
+      "source_files": [
+        "electron/main.cjs",
+        "mcp/goals/model.mjs",
+        "mcp/goals/runner.mjs",
+        "mcp/specialist/contract.mjs",
+        "mcp/tools.mjs"
+      ],
+      "test_files": [
+        "scripts/test-specialist-result-decision.mjs"
+      ],
+      "other_files": [],
+      "generated_files_ignored": [],
+      "new_source_files": [],
+      "insertions": 385,
+      "deletions": 5,
+      "test_insertions": 806,
+      "test_deletions": 0,
+      "touches_electron_main": true,
+      "touches_x_core": false,
+      "touches_ui": false,
+      "validation": {
+        "strength": "in_commit",
+        "tests": [
+          {
+            "file": "scripts/test-specialist-result-decision.mjs",
+            "command": "node scripts/test-specialist-result-decision.mjs",
+            "npm_scripts": []
+          }
+        ]
+      },
+      "score": 0
+    },
+    {
+      "commit": "11860e6e9998654245abff9d9cb07caf1adff19c",
+      "parent": "7f98a3d05185d66e5df9ccadb6196a0fd44308f6",
+      "date": "2026-09-16T22:45:05+07:00",
+      "subject": "feat: add durable X retry and recovery",
+      "type": "feat",
+      "fix_like": false,
+      "changed_files": [
+        "electron/main.cjs",
+        "mcp/goals/model.mjs",
+        "mcp/goals/runner.mjs",
+        "mcp/http.mjs",
+        "mcp/tools.mjs",
+        "scripts/test-goal-retry.mjs",
+        "scripts/test-goal-review-queue.mjs",
+        "scripts/test-goal-runner-x.mjs",
+        "scripts/test-goal-x-approval.mjs",
+        "scripts/test-review-queue-mcp-tool.mjs"
+      ],
+      "source_files": [
+        "electron/main.cjs",
+        "mcp/goals/model.mjs",
+        "mcp/goals/runner.mjs",
+        "mcp/http.mjs",
+        "mcp/tools.mjs"
+      ],
+      "test_files": [
+        "scripts/test-goal-retry.mjs",
+        "scripts/test-goal-review-queue.mjs",
+        "scripts/test-goal-runner-x.mjs",
+        "scripts/test-goal-x-approval.mjs",
+        "scripts/test-review-queue-mcp-tool.mjs"
+      ],
+      "other_files": [],
+      "generated_files_ignored": [],
+      "new_source_files": [],
+      "insertions": 334,
+      "deletions": 19,
+      "test_insertions": 673,
+      "test_deletions": 23,
+      "touches_electron_main": true,
+      "touches_x_core": false,
+      "touches_ui": false,
+      "validation": {
+        "strength": "in_commit",
+        "tests": [
+          {
+            "file": "scripts/test-goal-retry.mjs",
+            "command": "node scripts/test-goal-retry.mjs",
+            "npm_scripts": []
+          },
+          {
+            "file": "scripts/test-goal-review-queue.mjs",
+            "command": "node scripts/test-goal-review-queue.mjs",
+            "npm_scripts": []
+          },
+          {
+            "file": "scripts/test-goal-runner-x.mjs",
+            "command": "node scripts/test-goal-runner-x.mjs",
+            "npm_scripts": []
+          },
+          {
+            "file": "scripts/test-goal-x-approval.mjs",
+            "command": "node --test scripts/test-goal-x-approval.mjs",
+            "npm_scripts": []
+          },
+          {
+            "file": "scripts/test-review-queue-mcp-tool.mjs",
+            "command": "node --test scripts/test-review-queue-mcp-tool.mjs",
+            "npm_scripts": []
+          }
+        ]
+      },
+      "score": 0
+    },
+    {
+      "commit": "375e60355af5d9e2398c8cb551b179cf97e5ed8a",
+      "parent": "5df52527aef2fbe987a6b29841cad85fee3ee521",
+      "date": "2026-09-14T15:48:45+07:00",
+      "subject": "feat: share execution admission with Antigravity",
+      "type": "feat",
+      "fix_like": false,
+      "changed_files": [
+        "electron/main.cjs",
+        "mcp/executors/antigravity-admission.mjs",
+        "mcp/executors/antigravity.mjs",
+        "mcp/goals/runner.mjs",
+        "mcp/tools.mjs",
+        "scripts/test-antigravity-shared-admission.mjs"
+      ],
+      "source_files": [
+        "electron/main.cjs",
+        "mcp/executors/antigravity-admission.mjs",
+        "mcp/executors/antigravity.mjs",
+        "mcp/goals/runner.mjs",
+        "mcp/tools.mjs"
+      ],
+      "test_files": [
+        "scripts/test-antigravity-shared-admission.mjs"
+      ],
+      "other_files": [],
+      "generated_files_ignored": [],
+      "new_source_files": [
+        "mcp/executors/antigravity-admission.mjs"
+      ],
+      "insertions": 303,
+      "deletions": 5,
+      "test_insertions": 395,
+      "test_deletions": 0,
+      "touches_electron_main": true,
+      "touches_x_core": false,
+      "touches_ui": false,
+      "validation": {
+        "strength": "in_commit",
+        "tests": [
+          {
+            "file": "scripts/test-antigravity-shared-admission.mjs",
+            "command": "node --test scripts/test-antigravity-shared-admission.mjs",
+            "npm_scripts": []
+          }
+        ]
+      },
+      "score": 0
+    }
+  ],
+  "rejected": [
+    {
+      "commit": "8079ddb647",
+      "subject": "feat(invest): add live v2 coordinator and compact ui",
+      "reasons": [
+        "too_many_source_files",
+        "too_large_diff"
+      ]
+    },
+    {
+      "commit": "451de7d627",
+      "subject": "feat(invest): add demo auto execution pipeline",
+      "reasons": [
+        "too_many_source_files",
+        "too_large_diff"
+      ]
+    },
+    {
+      "commit": "2df2cb9814",
+      "subject": "docs(readme): checkpoint 0.4.10 market updater production e2e",
+      "reasons": [
+        "no_source_change:doc_only"
+      ]
+    },
+    {
+      "commit": "82e96c31ea",
+      "subject": "merge: Hearth Control 0.4.10 market v1",
+      "reasons": [
+        "merge_commit"
+      ]
+    },
+    {
+      "commit": "700a0498ef",
+      "subject": "chore(release): prepare Hearth Control 0.4.10",
+      "reasons": [
+        "release_metadata"
+      ]
+    },
+    {
+      "commit": "194d1c77d6",
+      "subject": "merge: Market Specialists V1 into main",
+      "reasons": [
+        "merge_commit"
+      ]
+    },
+    {
+      "commit": "5189edebf3",
+      "subject": "merge: sync main 0.4.9 into market specialists",
+      "reasons": [
+        "merge_commit"
+      ]
+    },
+    {
+      "commit": "afe78a7b3b",
+      "subject": "docs(readme): checkpoint 0.4.9 updater production e2e",
+      "reasons": [
+        "no_source_change:doc_only"
+      ]
+    },
+    {
+      "commit": "1de00f330b",
+      "subject": "merge: Hearth Control 0.4.9 updater diagnostic",
+      "reasons": [
+        "merge_commit"
+      ]
+    },
+    {
+      "commit": "d68da5bf3f",
+      "subject": "chore(release): prepare Hearth Control 0.4.9",
+      "reasons": [
+        "release_metadata"
+      ]
+    },
+    {
+      "commit": "1053bfd1a9",
+      "subject": "feat(market): add Invest monitor signals and notifications",
+      "reasons": [
+        "too_large_diff"
+      ]
+    },
+    {
+      "commit": "4ee7a6468d",
+      "subject": "feat(market): add XAUUSD Invest controls and MT5 bridge",
+      "reasons": [
+        "too_many_source_files",
+        "too_large_diff"
+      ]
+    },
+    {
+      "commit": "8c266afd85",
+      "subject": "feat: finalize P9 frontend and GitHub repository UX",
+      "reasons": [
+        "too_many_source_files",
+        "too_large_diff"
+      ]
+    },
+    {
+      "commit": "f99930f5c0",
+      "subject": "docs(readme): record P8 remote checkpoint",
+      "reasons": [
+        "no_source_change:doc_only"
+      ]
+    },
+    {
+      "commit": "311e19dd29",
+      "subject": "docs(readme): checkpoint P8 validation",
+      "reasons": [
+        "no_source_change:doc_only"
+      ]
+    },
+    {
+      "commit": "0162256158",
+      "subject": "feat(router): add universal Hearth job ingress",
+      "reasons": [
+        "too_large_diff"
+      ]
+    },
+    {
+      "commit": "d0278c4c6b",
+      "subject": "docs(readme): record P7 remote checkpoint",
+      "reasons": [
+        "no_source_change:doc_only"
+      ]
+    },
+    {
+      "commit": "2218c3a763",
+      "subject": "docs(readme): checkpoint P7 validation",
+      "reasons": [
+        "no_source_change:doc_only"
+      ]
+    },
+    {
+      "commit": "bddfb90ec9",
+      "subject": "docs(readme): record P6 remote checkpoint",
+      "reasons": [
+        "no_source_change:doc_only"
+      ]
+    },
+    {
+      "commit": "f0adadecb0",
+      "subject": "docs(readme): checkpoint P6 validation",
+      "reasons": [
+        "no_source_change:doc_only"
+      ]
+    },
+    {
+      "commit": "6fc48dd876",
+      "subject": "feat(vercel): add secure read-only connection",
+      "reasons": [
+        "too_many_source_files",
+        "too_large_diff"
+      ]
+    },
+    {
+      "commit": "8c561b7bef",
+      "subject": "docs(readme): record P5 remote checkpoint",
+      "reasons": [
+        "no_source_change:doc_only"
+      ]
+    },
+    {
+      "commit": "f6b8922e69",
+      "subject": "docs(readme): checkpoint P5 validation",
+      "reasons": [
+        "no_source_change:doc_only"
+      ]
+    },
+    {
+      "commit": "034e34479e",
+      "subject": "feat(supabase): add multi-project alias authority",
+      "reasons": [
+        "too_large_diff"
+      ]
+    },
+    {
+      "commit": "2299ce6def",
+      "subject": "docs(readme): checkpoint P4 validation",
+      "reasons": [
+        "no_source_change:doc_only"
+      ]
+    },
+    {
+      "commit": "cf9e24dd4e",
+      "subject": "feat(github): add multi-connection integration",
+      "reasons": [
+        "too_many_source_files",
+        "too_large_diff"
+      ]
+    },
+    {
+      "commit": "b381c54a3d",
+      "subject": "docs(github): lock P4 multi-connection design",
+      "reasons": [
+        "no_source_change:doc_only"
+      ]
+    },
+    {
+      "commit": "99c2b91c48",
+      "subject": "docs(readme): checkpoint P3 validation",
+      "reasons": [
+        "no_source_change:doc_only"
+      ]
+    },
+    {
+      "commit": "474a4f6f39",
+      "subject": "feat(connections): add secure connection registry foundation",
+      "reasons": [
+        "too_many_source_files",
+        "too_large_diff"
+      ]
+    },
+    {
+      "commit": "24a813f1f8",
+      "subject": "chore(release): prepare Hearth Control 0.4.7",
+      "reasons": [
+        "release_metadata"
+      ]
+    },
+    {
+      "commit": "f4f5e890b8",
+      "subject": "chore(release): prepare Hearth Control 0.4.6",
+      "reasons": [
+        "release_metadata"
+      ]
+    },
+    {
+      "commit": "010b3fede8",
+      "subject": "chore(release): prepare Hearth Control 0.4.5",
+      "reasons": [
+        "release_metadata"
+      ]
+    },
+    {
+      "commit": "b3186b8506",
+      "subject": "chore(release): prepare Hearth Control 0.4.4",
+      "reasons": [
+        "release_metadata"
+      ]
+    },
+    {
+      "commit": "8fcf08166d",
+      "subject": "docs: checkpoint Hearth P2 validated state",
+      "reasons": [
+        "no_source_change:doc_only"
+      ]
+    },
+    {
+      "commit": "301e64fa21",
+      "subject": "feat(updater): add secure remote one-click updater v1",
+      "reasons": [
+        "too_many_source_files",
+        "too_large_diff"
+      ]
+    },
+    {
+      "commit": "5dd71e75fb",
+      "subject": "Hearth P2B: add secure remote update delivery",
+      "reasons": [
+        "too_large_diff"
+      ]
+    },
+    {
+      "commit": "ce7cdbe1b0",
+      "subject": "Hearth P2A: add signed remote update manifest contract",
+      "reasons": [
+        "too_large_diff"
+      ]
+    },
+    {
+      "commit": "faefe8fd10",
+      "subject": "Hearth: advance canonical roadmap to P2",
+      "reasons": [
+        "no_source_change:doc_only"
+      ]
+    },
+    {
+      "commit": "afdf3578f1",
+      "subject": "Merge Hearth P1 validated baseline",
+      "reasons": [
+        "merge_commit"
+      ]
+    },
+    {
+      "commit": "66489b9134",
+      "subject": "Hearth P1: wire Skills into X and stabilize Goal sync",
+      "reasons": [
+        "too_many_source_files",
+        "too_large_diff"
+      ]
+    },
+    {
+      "commit": "7641167768",
+      "subject": "docs: record P0 validation evidence",
+      "reasons": [
+        "no_source_change:doc_only"
+      ]
+    },
+    {
+      "commit": "6d1c6d754d",
+      "subject": "docs: make Hearth handoff next action explicit",
+      "reasons": [
+        "no_source_change:doc_only"
+      ]
+    },
+    {
+      "commit": "4ce726ff3b",
+      "subject": "docs: add canonical progress checklist for chat handoff",
+      "reasons": [
+        "no_source_change:doc_only"
+      ]
+    },
+    {
+      "commit": "0dfd354be4",
+      "subject": "docs: lock canonical continuation roadmap",
+      "reasons": [
+        "no_source_change:doc_only"
+      ]
+    },
+    {
+      "commit": "78a1dddf78",
+      "subject": "docs: add canonical remote updater v1 spec",
+      "reasons": [
+        "no_source_change:doc_only"
+      ]
+    },
+    {
+      "commit": "832c724ed5",
+      "subject": "test(skills): cover initial Hearth skill definitions",
+      "reasons": [
+        "no_source_change:test_only"
+      ]
+    },
+    {
+      "commit": "f40cc441dc",
+      "subject": "docs(skills): index initial Hearth skill definitions",
+      "reasons": [
+        "no_source_change:doc_only"
+      ]
+    },
+    {
+      "commit": "e3a99cf376",
+      "subject": "feat(skills): add test-regression skill definition",
+      "reasons": [
+        "no_source_change:doc_only"
+      ]
+    },
+    {
+      "commit": "142f62b750",
+      "subject": "feat(skills): add bug-fix skill definition",
+      "reasons": [
+        "no_source_change:doc_only"
+      ]
+    },
+    {
+      "commit": "dfaf973cfb",
+      "subject": "test: add Hearth Skill registry script",
+      "reasons": [
+        "no_source_change:other_only"
+      ]
+    },
+    {
+      "commit": "e842910ac8",
+      "subject": "test: cover Hearth Skill registry loader",
+      "reasons": [
+        "no_source_change:test_only"
+      ]
+    },
+    {
+      "commit": "5e7010bf6b",
+      "subject": "feat: add Hearth Skill registry loader",
+      "reasons": [
+        "no_validation"
+      ]
+    },
+    {
+      "commit": "066fd8040b",
+      "subject": "feat: add repo-inspect Hearth skill",
+      "reasons": [
+        "no_source_change:doc_only"
+      ]
+    },
+    {
+      "commit": "3d29f682e8",
+      "subject": "docs: define Hearth Skill v1 format",
+      "reasons": [
+        "no_source_change:doc_only"
+      ]
+    },
+    {
+      "commit": "750e42be30",
+      "subject": "chore: align Supabase migration history",
+      "reasons": [
+        "no_source_change:other_only"
+      ]
+    },
+    {
+      "commit": "a8986b9ce3",
+      "subject": "feat: add remote goal ingress for Project X",
+      "reasons": [
+        "too_many_source_files",
+        "too_large_diff"
+      ]
+    },
+    {
+      "commit": "077c7be7eb",
+      "subject": "feat: add Codex specialist execution adapter",
+      "reasons": [
+        "too_many_source_files",
+        "too_large_diff"
+      ]
+    },
+    {
+      "commit": "c26538cda2",
+      "subject": "feat: add durable specialist handoff requests",
+      "reasons": [
+        "too_large_diff"
+      ]
+    },
+    {
+      "commit": "d1954dfdb7",
+      "subject": "feat: add durable X context handoff",
+      "reasons": [
+        "too_large_diff"
+      ]
+    },
+    {
+      "commit": "c118384a66",
+      "subject": "feat: harden goal autopilot coordination",
+      "reasons": [
+        "too_large_diff"
+      ]
+    },
+    {
+      "commit": "7f98a3d051",
+      "subject": "feat: add goal review decision foundation",
+      "reasons": [
+        "too_many_source_files"
+      ]
+    },
+    {
+      "commit": "04ecd4cf45",
+      "subject": "test: guard remote task approval boundary",
+      "reasons": [
+        "no_source_change:test_only"
+      ]
+    },
+    {
+      "commit": "b693cf3712",
+      "subject": "feat: route Project X remote tasks through X",
+      "reasons": [
+        "too_many_source_files",
+        "too_large_diff"
+      ]
+    },
+    {
+      "commit": "aa50d93162",
+      "subject": "feat: add production X queue ingress",
+      "reasons": [
+        "too_many_source_files",
+        "too_large_diff"
+      ]
+    },
+    {
+      "commit": "6649ba1402",
+      "subject": "feat: add persistent X queue coordinator",
+      "reasons": [
+        "too_large_diff"
+      ]
+    },
+    {
+      "commit": "30e5383e5b",
+      "subject": "test: add X and Antigravity production smoke",
+      "reasons": [
+        "too_large_diff"
+      ]
+    },
+    {
+      "commit": "99696e769f",
+      "subject": "feat: add cooperative X execution cancellation",
+      "reasons": [
+        "too_many_source_files"
+      ]
+    },
+    {
+      "commit": "9b056eef7e",
+      "subject": "test: add X core end-to-end coverage",
+      "reasons": [
+        "no_source_change:test_only"
+      ]
+    },
+    {
+      "commit": "470da93ca7",
+      "subject": "feat: add X result v1 builder",
+      "reasons": [
+        "too_large_diff"
+      ]
+    },
+    {
+      "commit": "a40d67b38c",
+      "subject": "feat: add X local executor",
+      "reasons": [
+        "too_large_diff"
+      ]
+    },
+    {
+      "commit": "98c1f73cd1",
+      "subject": "feat: add scoped X edit writer",
+      "reasons": [
+        "too_large_diff"
+      ]
+    },
+    {
+      "commit": "c495979e35",
+      "subject": "feat: add bounded X context loader and secret guard",
+      "reasons": [
+        "too_large_diff"
+      ]
+    },
+    {
+      "commit": "3b3952d41f",
+      "subject": "docs: resolve X executor lifecycle semantics",
+      "reasons": [
+        "no_source_change:doc_only"
+      ]
+    },
+    {
+      "commit": "e08499f174",
+      "subject": "docs: add X Executor v1 master implementation spec",
+      "reasons": [
+        "no_source_change:doc_only"
+      ]
+    },
+    {
+      "commit": "6f9baa073a",
+      "subject": "feat: add constrained local AI test runner",
+      "reasons": [
+        "too_many_source_files"
+      ]
+    },
+    {
+      "commit": "85cbb71cff",
+      "subject": "feat: add read-only local AI skills and grounding",
+      "reasons": [
+        "too_many_source_files",
+        "too_large_diff"
+      ]
+    },
+    {
+      "commit": "00ba9edd51",
+      "subject": "feat: add local AI context builder",
+      "reasons": [
+        "too_many_source_files"
+      ]
+    },
+    {
+      "commit": "9b93746596",
+      "subject": "feat: add read-only storage audit and local chat polish",
+      "reasons": [
+        "too_many_source_files"
+      ]
+    },
+    {
+      "commit": "ba4c5e7d92",
+      "subject": "feat: add streaming local chat UX",
+      "reasons": [
+        "too_many_source_files"
+      ]
+    },
+    {
+      "commit": "e16d74bfd7",
+      "subject": "feat: add Hearth Local AI v0.1 with Ollama chat",
+      "reasons": [
+        "too_many_source_files",
+        "too_large_diff"
+      ]
+    },
+    {
+      "commit": "16094873b2",
+      "subject": "chore: establish Hearth Control v0.4.3 stable baseline",
+      "reasons": [
+        "root_commit"
+      ]
+    }
+  ]
+}

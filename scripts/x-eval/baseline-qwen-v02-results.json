@@ -1,0 +1,593 @@
+{
+  "protocol": "x-eval-baseline-v1",
+  "started_at": "2026-09-21T06:14:44.784Z",
+  "adapter": "ollama",
+  "lane": "model_quality",
+  "lock_fingerprint": "f6ac8bfae42af5c5417e2da485f1b61f94c3e3ed6bb72cf5f3f8b142a9bdc03f",
+  "effective_config": {
+    "lane": "model_quality",
+    "model": "qwen3.5:9b-hermes",
+    "profile": "normal",
+    "think": false,
+    "maxBytesPerFile": 20000,
+    "num_ctx": 16384,
+    "num_predict": 4096,
+    "num_predict_note": "forced to max(value, 4096) by longResponse; not settable via modelOptions",
+    "temperature": 0,
+    "seed": 42,
+    "request_timeout_ms": 300000
+  },
+  "eval_overrides": [
+    {
+      "key": "maxBytesPerFile",
+      "eval": 20000,
+      "production": 8000,
+      "kind": "eval_override"
+    },
+    {
+      "key": "num_ctx",
+      "eval": 16384,
+      "production": 8192,
+      "kind": "eval_override"
+    },
+    {
+      "key": "temperature",
+      "eval": 0,
+      "production": "unset (provider/model default)",
+      "kind": "determinism_control"
+    },
+    {
+      "key": "seed",
+      "eval": 42,
+      "production": "unset",
+      "kind": "determinism_control"
+    }
+  ],
+  "runtime_protocol": {
+    "id": "runtime-protocol-amendment-2",
+    "interval_ms": 2000,
+    "baseline": {
+      "samples": 5,
+      "statistic": "median",
+      "refuse_start_if_baseline_pressure_at_least": 3,
+      "also_refuse_if_any_baseline_sample_hits_an_abort_threshold": true
+    },
+    "warn": {
+      "pressure_above_baseline_consecutive_samples": 3
+    },
+    "halt": {
+      "pressure_at_least_baseline_plus": 1,
+      "consecutive_samples": 15,
+      "swap_growth_mb_at_least": 512,
+      "free_pct_below": 10,
+      "free_consecutive_samples": 3
+    },
+    "abort": {
+      "pressure_level_at_least": 4,
+      "swap_growth_mb_at_least": 2048,
+      "free_pct_below": 5
+    }
+  },
+  "gold_v1_1_memory_guard_superseded": {
+    "interval_ms": 2000,
+    "abort": {
+      "pressure_level_at_least": 4,
+      "swap_growth_mb_at_least": 2048,
+      "free_pct_below": 5
+    },
+    "flag": {
+      "pressure_level_at_least": 2,
+      "consecutive_samples": 3,
+      "swap_growth_mb_at_least": 512,
+      "free_pct_below": 15
+    }
+  },
+  "executor": {
+    "repo_head": "11ef37b6fe73543477b1d8f4ffc5b0f102fbbfbb",
+    "mcp_x_index_sha256": "dc38aba303917d1bc9d2c72a142c4ef59d30b298cfc69ba7f91b9e75d52a8bbe",
+    "mcp_x_worktree_clean_vs_HEAD": false
+  },
+  "x_candidate": {
+    "manifest": "scripts/x-eval/x-v02-candidate.json",
+    "x_sha256": "d9c49582965623df968c9f3ce83065ba3e5ae9e5b2e09004f48a64dc1d774ace",
+    "tests_sha256": "cce34587ee2b493993ddbc36c743cfd2d967e1cc9bfc58e98f14b15fbba5321e",
+    "x_file_count": 37,
+    "verified_at_start": true
+  },
+  "machine": {
+    "model": "Mac17,3",
+    "chip": "Apple M5",
+    "ram_gb": 16,
+    "macos": "26.6.2",
+    "node": "v24.19.0"
+  },
+  "host_before": {
+    "t": 1789971284909,
+    "pressure_level": 1,
+    "swap_used_mb": 8057.25,
+    "free_pct": 23,
+    "ollama_rss_mb": 6071
+  },
+  "ollama": {
+    "version": "0.33.2",
+    "model": "qwen3.5:9b-hermes",
+    "digest": "1af3a80989f1297335151a561d290979ed4abdef04fd08fbd5f4a8eb931397fe",
+    "size_bytes": 6594474465,
+    "details": {
+      "parent_model": "qwen3.5:9b",
+      "format": "gguf",
+      "family": "qwen35",
+      "families": [
+        "qwen35"
+      ],
+      "parameter_size": "9.7B",
+      "quantization_level": "Q4_K_M",
+      "context_length": 262144,
+      "embedding_length": 4096
+    }
+  },
+  "warmup": {
+    "ms": 3541,
+    "ok": true,
+    "finish_reason": "stop",
+    "error": null,
+    "text": "{\"ok\":true}",
+    "ollama_ps": {
+      "models": [
+        {
+          "name": "qwen3.5:9b-hermes",
+          "model": "qwen3.5:9b-hermes",
+          "size": 5940130609,
+          "digest": "1af3a80989f1297335151a561d290979ed4abdef04fd08fbd5f4a8eb931397fe",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "9.7B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-09-21T13:19:48.448416+07:00",
+          "size_vram": 5940130609,
+          "context_length": 16384
+        }
+      ]
+    }
+  },
+  "baseline_measurement": {
+    "samples": [
+      {
+        "t": 1789971288507,
+        "pressure_level": 2,
+        "swap_used_mb": 8214.38,
+        "free_pct": 16,
+        "ollama_rss_mb": 6562
+      },
+      {
+        "t": 1789971290546,
+        "pressure_level": 2,
+        "swap_used_mb": 8206.38,
+        "free_pct": 17,
+        "ollama_rss_mb": 6553
+      },
+      {
+        "t": 1789971292586,
+        "pressure_level": 2,
+        "swap_used_mb": 8206.38,
+        "free_pct": 22,
+        "ollama_rss_mb": 6503
+      },
+      {
+        "t": 1789971294626,
+        "pressure_level": 2,
+        "swap_used_mb": 8206.38,
+        "free_pct": 22,
+        "ollama_rss_mb": 6503
+      },
+      {
+        "t": 1789971296666,
+        "pressure_level": 2,
+        "swap_used_mb": 8206.38,
+        "free_pct": 23,
+        "ollama_rss_mb": 6503
+      }
+    ],
+    "baseline_pressure": 2,
+    "baseline_free_pct_min": 16,
+    "swap_used_mb": 8206.38,
+    "start_allowed": true,
+    "refusals": []
+  },
+  "runs": [
+    {
+      "task": "c1d6770715",
+      "gold_class": "MEASURABLE",
+      "interpretation": "contract_explicit",
+      "tier": "A",
+      "provenance": "historical",
+      "outcome": {
+        "label": "FAILURE",
+        "gate_status": "NEEDS_REVIEW",
+        "reason_code": "repair_budget_exhausted_transient",
+        "integrity_ok": false
+      },
+      "gate": {
+        "status": "NEEDS_REVIEW",
+        "reason_code": "repair_budget_exhausted_transient"
+      },
+      "repair_status": "escalation_required",
+      "rounds": 3,
+      "model_calls": 3,
+      "finish_reasons": [
+        "stop",
+        "stop",
+        "stop"
+      ],
+      "prompt_bytes": [
+        24316,
+        26617,
+        26572
+      ],
+      "response_chars": [
+        3116,
+        1391,
+        1003
+      ],
+      "call_ms": [
+        51903,
+        72532,
+        53605
+      ],
+      "x_ms": 178659,
+      "total_ms": 179604,
+      "diff": [
+        {
+          "path": "mcp/x/result-gate.mjs",
+          "insertions": 14,
+          "deletions": 2
+        }
+      ],
+      "hidden": "27/28",
+      "checks": {
+        "out_of_scope": [],
+        "test_tampering": [],
+        "wrong_file": false,
+        "head_unchanged": true,
+        "regressions": [
+          "scripts/test-x-result-gate.mjs: escalation_required: invalid_task_scope -> FAILED"
+        ]
+      },
+      "context_round1": [
+        {
+          "path": "mcp/x/result-gate.mjs",
+          "status": "ok",
+          "bytes": 14869
+        }
+      ],
+      "memory": {
+        "baseline_pressure": 2,
+        "samples": 88,
+        "start": {
+          "t": 1789971296954,
+          "pressure_level": 2,
+          "swap_used_mb": 8206.38,
+          "free_pct": 23,
+          "ollama_rss_mb": 6503
+        },
+        "end": {
+          "t": 1789971474569,
+          "pressure_level": 1,
+          "swap_used_mb": 8341.75,
+          "free_pct": 25,
+          "ollama_rss_mb": 6631
+        },
+        "max_pressure_level": 2,
+        "longest_run_above_baseline": 0,
+        "longest_run_pressure_ge2": 28,
+        "min_free_pct": 16,
+        "swap_growth_mb_max": 167.3700000000008,
+        "ollama_rss_mb_max": 7359,
+        "warnings": [],
+        "flags": [],
+        "aborted": null
+      },
+      "telemetry": {
+        "explanation_action_conflict": {
+          "tag": "EXPLANATION_ACTION_CONFLICT",
+          "used_for_outcome": false,
+          "calls_examined": 3,
+          "conflicts": []
+        }
+      },
+      "ollama_ps": {
+        "models": [
+          {
+            "name": "qwen3.5:9b-hermes",
+            "model": "qwen3.5:9b-hermes",
+            "size": 5940130609,
+            "digest": "1af3a80989f1297335151a561d290979ed4abdef04fd08fbd5f4a8eb931397fe",
+            "details": {
+              "parent_model": "",
+              "format": "gguf",
+              "family": "qwen35",
+              "families": [
+                "qwen35"
+              ],
+              "parameter_size": "9.7B",
+              "quantization_level": "Q4_K_M"
+            },
+            "expires_at": "2026-09-21T13:22:55.932089+07:00",
+            "size_vram": 5940130609,
+            "context_length": 16384
+          }
+        ]
+      },
+      "stop_reasons": [],
+      "artifacts_dir": "/tmp/x-v02-baseline-artifacts/c1d6770715-ollama-qwen3-5-9b-hermes-s0-muauozvy"
+    },
+    {
+      "task": "8d08bc3621",
+      "gold_class": "MEASURABLE",
+      "interpretation": "behavioral",
+      "tier": "A",
+      "provenance": "historical",
+      "outcome": {
+        "label": "FAILURE",
+        "gate_status": "NEEDS_REVIEW",
+        "reason_code": "repair_budget_exhausted_transient",
+        "integrity_ok": true
+      },
+      "gate": {
+        "status": "NEEDS_REVIEW",
+        "reason_code": "repair_budget_exhausted_transient"
+      },
+      "repair_status": "escalation_required",
+      "rounds": 3,
+      "model_calls": 3,
+      "finish_reasons": [
+        "stop",
+        "stop",
+        "stop"
+      ],
+      "prompt_bytes": [
+        22960,
+        25306,
+        25810
+      ],
+      "response_chars": [
+        1960,
+        2558,
+        352
+      ],
+      "call_ms": [
+        56739,
+        76383,
+        42233
+      ],
+      "x_ms": 176998,
+      "total_ms": 179603,
+      "diff": [
+        {
+          "path": "electron/remote-update-stager.cjs",
+          "insertions": 21,
+          "deletions": 6
+        }
+      ],
+      "hidden": "4/7",
+      "checks": {
+        "out_of_scope": [],
+        "test_tampering": [],
+        "wrong_file": false,
+        "head_unchanged": true,
+        "regressions": []
+      },
+      "context_round1": [
+        {
+          "path": "electron/remote-update-stager.cjs",
+          "status": "ok",
+          "bytes": 13616
+        }
+      ],
+      "memory": {
+        "baseline_pressure": 2,
+        "samples": 88,
+        "start": {
+          "t": 1789971476878,
+          "pressure_level": 1,
+          "swap_used_mb": 8341.75,
+          "free_pct": 25,
+          "ollama_rss_mb": 6633
+        },
+        "end": {
+          "t": 1789971654781,
+          "pressure_level": 2,
+          "swap_used_mb": 8496.75,
+          "free_pct": 18,
+          "ollama_rss_mb": 6530
+        },
+        "max_pressure_level": 2,
+        "longest_run_above_baseline": 0,
+        "longest_run_pressure_ge2": 33,
+        "min_free_pct": 16,
+        "swap_growth_mb_max": 203,
+        "ollama_rss_mb_max": 7233,
+        "warnings": [],
+        "flags": [],
+        "aborted": null
+      },
+      "telemetry": {
+        "explanation_action_conflict": {
+          "tag": "EXPLANATION_ACTION_CONFLICT",
+          "used_for_outcome": false,
+          "calls_examined": 3,
+          "conflicts": [
+            {
+              "tag": "EXPLANATION_ACTION_CONFLICT",
+              "call": 1,
+              "matched_phrase": "no actual change is needed",
+              "actions": 1,
+              "action_types": [
+                "patch"
+              ],
+              "edit_chars": 1426,
+              "explanation_excerpt": "The current code already uses fs.promises.cp with verbatimSymlinks, which correctly handles .asar files as plain files; the error likely stems from a different cause or is a red he"
+            }
+          ]
+        }
+      },
+      "ollama_ps": {
+        "models": [
+          {
+            "name": "qwen3.5:9b-hermes",
+            "model": "qwen3.5:9b-hermes",
+            "size": 6031262349,
+            "digest": "1af3a80989f1297335151a561d290979ed4abdef04fd08fbd5f4a8eb931397fe",
+            "details": {
+              "parent_model": "",
+              "format": "gguf",
+              "family": "qwen35",
+              "families": [
+                "qwen35"
+              ],
+              "parameter_size": "9.7B",
+              "quantization_level": "Q4_K_M"
+            },
+            "expires_at": "2026-09-21T13:25:54.505682+07:00",
+            "size_vram": 6031262349,
+            "context_length": 16384
+          }
+        ]
+      },
+      "stop_reasons": [],
+      "artifacts_dir": "/tmp/x-v02-baseline-artifacts/8d08bc3621-ollama-qwen3-5-9b-hermes-s0-muausup3"
+    },
+    {
+      "task": "070e9850b1",
+      "gold_class": "MEASURABLE",
+      "interpretation": "contract_explicit",
+      "tier": "A",
+      "provenance": "historical",
+      "outcome": {
+        "label": "FAILURE",
+        "gate_status": "NEEDS_REVIEW",
+        "reason_code": "repair_budget_exhausted_transient",
+        "integrity_ok": true
+      },
+      "gate": {
+        "status": "NEEDS_REVIEW",
+        "reason_code": "repair_budget_exhausted_transient"
+      },
+      "repair_status": "escalation_required",
+      "rounds": 3,
+      "model_calls": 3,
+      "finish_reasons": [
+        "stop",
+        "stop",
+        "stop"
+      ],
+      "prompt_bytes": [
+        21945,
+        24299,
+        23991
+      ],
+      "response_chars": [
+        3002,
+        4121,
+        13387
+      ],
+      "call_ms": [
+        83766,
+        138270,
+        299804
+      ],
+      "x_ms": 523173,
+      "total_ms": 524538,
+      "diff": [
+        {
+          "path": "electron/updater.cjs",
+          "insertions": 19,
+          "deletions": 8
+        }
+      ],
+      "hidden": "11/14",
+      "checks": {
+        "out_of_scope": [],
+        "test_tampering": [],
+        "wrong_file": false,
+        "head_unchanged": true,
+        "regressions": []
+      },
+      "context_round1": [
+        {
+          "path": "electron/updater.cjs",
+          "status": "ok",
+          "bytes": 13311
+        }
+      ],
+      "memory": {
+        "baseline_pressure": 2,
+        "samples": 257,
+        "start": {
+          "t": 1789971657084,
+          "pressure_level": 2,
+          "swap_used_mb": 8488.75,
+          "free_pct": 18,
+          "ollama_rss_mb": 6521
+        },
+        "end": {
+          "t": 1789972180414,
+          "pressure_level": 2,
+          "swap_used_mb": 8598.31,
+          "free_pct": 19,
+          "ollama_rss_mb": 6376
+        },
+        "max_pressure_level": 2,
+        "longest_run_above_baseline": 0,
+        "longest_run_pressure_ge2": 146,
+        "min_free_pct": 15,
+        "swap_growth_mb_max": 238.75,
+        "ollama_rss_mb_max": 6930,
+        "warnings": [],
+        "flags": [],
+        "aborted": null
+      },
+      "telemetry": {
+        "explanation_action_conflict": {
+          "tag": "EXPLANATION_ACTION_CONFLICT",
+          "used_for_outcome": false,
+          "calls_examined": 3,
+          "conflicts": []
+        }
+      },
+      "ollama_ps": {
+        "models": [
+          {
+            "name": "qwen3.5:9b-hermes",
+            "model": "qwen3.5:9b-hermes",
+            "size": 6031262349,
+            "digest": "1af3a80989f1297335151a561d290979ed4abdef04fd08fbd5f4a8eb931397fe",
+            "details": {
+              "parent_model": "",
+              "format": "gguf",
+              "family": "qwen35",
+              "families": [
+                "qwen35"
+              ],
+              "parameter_size": "9.7B",
+              "quantization_level": "Q4_K_M"
+            },
+            "expires_at": "2026-09-21T13:34:40.538937+07:00",
+            "size_vram": 6031262349,
+            "context_length": 16384
+          }
+        ]
+      },
+      "stop_reasons": [],
+      "artifacts_dir": "/tmp/x-v02-baseline-artifacts/070e9850b1-ollama-qwen3-5-9b-hermes-s0-muauwpr1"
+    }
+  ],
+  "halted": null,
+  "finished_at": "2026-09-21T06:29:42.424Z"
+}

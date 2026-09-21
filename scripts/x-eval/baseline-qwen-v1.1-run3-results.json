@@ -1,0 +1,332 @@
+{
+  "protocol": "x-eval-baseline-v1",
+  "started_at": "2026-09-21T04:26:36.927Z",
+  "adapter": "ollama",
+  "lane": "model_quality",
+  "lock_fingerprint": "a472f193ea1e788af8cc16d1cad1facaf9018acf18c6f491f7afc7a7f22f1d12",
+  "effective_config": {
+    "lane": "model_quality",
+    "model": "qwen3.5:9b-hermes",
+    "profile": "normal",
+    "think": false,
+    "maxBytesPerFile": 20000,
+    "num_ctx": 16384,
+    "num_predict": 4096,
+    "num_predict_note": "forced to max(value, 4096) by longResponse; not settable via modelOptions",
+    "temperature": 0,
+    "seed": 42,
+    "request_timeout_ms": 300000
+  },
+  "eval_overrides": [
+    {
+      "key": "maxBytesPerFile",
+      "eval": 20000,
+      "production": 8000,
+      "kind": "eval_override"
+    },
+    {
+      "key": "num_ctx",
+      "eval": 16384,
+      "production": 8192,
+      "kind": "eval_override"
+    },
+    {
+      "key": "temperature",
+      "eval": 0,
+      "production": "unset (provider/model default)",
+      "kind": "determinism_control"
+    },
+    {
+      "key": "seed",
+      "eval": 42,
+      "production": "unset",
+      "kind": "determinism_control"
+    }
+  ],
+  "runtime_protocol": {
+    "id": "runtime-protocol-amendment-2",
+    "interval_ms": 2000,
+    "baseline": {
+      "samples": 5,
+      "statistic": "median",
+      "refuse_start_if_baseline_pressure_at_least": 3,
+      "also_refuse_if_any_baseline_sample_hits_an_abort_threshold": true
+    },
+    "warn": {
+      "pressure_above_baseline_consecutive_samples": 3
+    },
+    "halt": {
+      "pressure_at_least_baseline_plus": 1,
+      "consecutive_samples": 15,
+      "swap_growth_mb_at_least": 512,
+      "free_pct_below": 10,
+      "free_consecutive_samples": 3
+    },
+    "abort": {
+      "pressure_level_at_least": 4,
+      "swap_growth_mb_at_least": 2048,
+      "free_pct_below": 5
+    }
+  },
+  "gold_v1_1_memory_guard_superseded": {
+    "interval_ms": 2000,
+    "abort": {
+      "pressure_level_at_least": 4,
+      "swap_growth_mb_at_least": 2048,
+      "free_pct_below": 5
+    },
+    "flag": {
+      "pressure_level_at_least": 2,
+      "consecutive_samples": 3,
+      "swap_growth_mb_at_least": 512,
+      "free_pct_below": 15
+    }
+  },
+  "executor": {
+    "repo_head": "11ef37b6fe73543477b1d8f4ffc5b0f102fbbfbb",
+    "mcp_x_index_sha256": "dc38aba303917d1bc9d2c72a142c4ef59d30b298cfc69ba7f91b9e75d52a8bbe",
+    "mcp_x_worktree_clean_vs_HEAD": true
+  },
+  "machine": {
+    "model": "Mac17,3",
+    "chip": "Apple M5",
+    "ram_gb": 16,
+    "macos": "26.6.2",
+    "node": "v24.19.0"
+  },
+  "host_before": {
+    "t": 1789964797010,
+    "pressure_level": 1,
+    "swap_used_mb": 8281.5,
+    "free_pct": 29,
+    "ollama_rss_mb": 6101
+  },
+  "ollama": {
+    "version": "0.33.2",
+    "model": "qwen3.5:9b-hermes",
+    "digest": "1af3a80989f1297335151a561d290979ed4abdef04fd08fbd5f4a8eb931397fe",
+    "size_bytes": 6594474465,
+    "details": {
+      "parent_model": "qwen3.5:9b",
+      "format": "gguf",
+      "family": "qwen35",
+      "families": [
+        "qwen35"
+      ],
+      "parameter_size": "9.7B",
+      "quantization_level": "Q4_K_M",
+      "context_length": 262144,
+      "embedding_length": 4096
+    }
+  },
+  "warmup": {
+    "ms": 3571,
+    "ok": true,
+    "finish_reason": "stop",
+    "error": null,
+    "text": "{\"ok\":true}",
+    "ollama_ps": {
+      "models": [
+        {
+          "name": "qwen3.5:9b-hermes",
+          "model": "qwen3.5:9b-hermes",
+          "size": 5940130609,
+          "digest": "1af3a80989f1297335151a561d290979ed4abdef04fd08fbd5f4a8eb931397fe",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "9.7B",
+            "quantization_level": "Q4_K_M"
+          },
+          "expires_at": "2026-09-21T11:31:40.58607+07:00",
+          "size_vram": 5940130609,
+          "context_length": 16384
+        }
+      ]
+    }
+  },
+  "baseline_measurement": {
+    "samples": [
+      {
+        "t": 1789964800645,
+        "pressure_level": 2,
+        "swap_used_mb": 8281.5,
+        "free_pct": 18,
+        "ollama_rss_mb": 6666
+      },
+      {
+        "t": 1789964802689,
+        "pressure_level": 2,
+        "swap_used_mb": 8281.5,
+        "free_pct": 18,
+        "ollama_rss_mb": 6569
+      },
+      {
+        "t": 1789964804725,
+        "pressure_level": 2,
+        "swap_used_mb": 8281.5,
+        "free_pct": 23,
+        "ollama_rss_mb": 6494
+      },
+      {
+        "t": 1789964806765,
+        "pressure_level": 2,
+        "swap_used_mb": 8281.5,
+        "free_pct": 24,
+        "ollama_rss_mb": 6494
+      },
+      {
+        "t": 1789964808809,
+        "pressure_level": 2,
+        "swap_used_mb": 8281.5,
+        "free_pct": 24,
+        "ollama_rss_mb": 6494
+      }
+    ],
+    "baseline_pressure": 2,
+    "baseline_free_pct_min": 18,
+    "swap_used_mb": 8281.5,
+    "start_allowed": true,
+    "refusals": []
+  },
+  "runs": [
+    {
+      "task": "070e9850b1",
+      "gold_class": "MEASURABLE",
+      "interpretation": "contract_explicit",
+      "tier": "A",
+      "provenance": "historical",
+      "outcome": {
+        "label": "FAILURE",
+        "gate_status": "NEEDS_REVIEW",
+        "reason_code": "repair_budget_exhausted_transient",
+        "integrity_ok": false
+      },
+      "gate": {
+        "status": "NEEDS_REVIEW",
+        "reason_code": "repair_budget_exhausted_transient"
+      },
+      "repair_status": "escalation_required",
+      "rounds": 3,
+      "model_calls": 3,
+      "finish_reasons": [
+        "stop",
+        "stop",
+        "stop"
+      ],
+      "prompt_bytes": [
+        21945,
+        24299,
+        24896
+      ],
+      "response_chars": [
+        3002,
+        4121,
+        13363
+      ],
+      "call_ms": [
+        47094,
+        68169,
+        277515
+      ],
+      "x_ms": 393718,
+      "total_ms": 395319,
+      "diff": [
+        {
+          "path": "electron/updater.cjs",
+          "insertions": 19,
+          "deletions": 8
+        }
+      ],
+      "hidden": "11/13",
+      "checks": {
+        "out_of_scope": [],
+        "test_tampering": [],
+        "wrong_file": false,
+        "head_unchanged": true,
+        "regressions": [
+          "scripts/test-updater.mjs: install creates backup in fixture and keeps user data untouched: The update is not newer than the running version.",
+          "scripts/test-updater.mjs: install preserves executable permissions and relative symlinks without touching /Applications: The update is not newer than the running version.",
+          "scripts/test-updater.mjs: rollback restores the fixture application: The update is not newer than the running version.",
+          "scripts/test-updater.mjs: rollback after startup failure runs exactly once and restores a launchable previous bundle: The update is not newer than the running version.",
+          "scripts/test-updater.mjs: startup marker prevents rollback: The update is not newer than the running version.",
+          "scripts/test-updater.mjs: restart state is returned only after helper is scheduled: The update is not newer than the running version.",
+          "scripts/test-updater.mjs: watchdog receives the final installed app path, never staging or backup: The update is not newer than the running version."
+        ]
+      },
+      "context_round1": [
+        {
+          "path": "electron/updater.cjs",
+          "status": "ok",
+          "bytes": 13311
+        }
+      ],
+      "memory": {
+        "baseline_pressure": 2,
+        "samples": 194,
+        "start": {
+          "t": 1789964809138,
+          "pressure_level": 2,
+          "swap_used_mb": 8281.5,
+          "free_pct": 24,
+          "ollama_rss_mb": 6494
+        },
+        "end": {
+          "t": 1789965202208,
+          "pressure_level": 2,
+          "swap_used_mb": 8113.5,
+          "free_pct": 20,
+          "ollama_rss_mb": 6370
+        },
+        "max_pressure_level": 2,
+        "longest_run_above_baseline": 0,
+        "longest_run_pressure_ge2": 141,
+        "min_free_pct": 15,
+        "swap_growth_mb_max": 0,
+        "ollama_rss_mb_max": 6987,
+        "warnings": [],
+        "flags": [],
+        "aborted": null
+      },
+      "telemetry": {
+        "explanation_action_conflict": {
+          "tag": "EXPLANATION_ACTION_CONFLICT",
+          "used_for_outcome": false,
+          "calls_examined": 3,
+          "conflicts": []
+        }
+      },
+      "ollama_ps": {
+        "models": [
+          {
+            "name": "qwen3.5:9b-hermes",
+            "model": "qwen3.5:9b-hermes",
+            "size": 5940130609,
+            "digest": "1af3a80989f1297335151a561d290979ed4abdef04fd08fbd5f4a8eb931397fe",
+            "details": {
+              "parent_model": "",
+              "format": "gguf",
+              "family": "qwen35",
+              "families": [
+                "qwen35"
+              ],
+              "parameter_size": "9.7B",
+              "quantization_level": "Q4_K_M"
+            },
+            "expires_at": "2026-09-21T11:38:23.387984+07:00",
+            "size_vram": 5940130609,
+            "context_length": 16384
+          }
+        ]
+      },
+      "stop_reasons": [],
+      "artifacts_dir": "/private/tmp/claude-501/-Users-illman-Documents-Codex-2026-09-09-referenced-chatgpt-conversation-this-is-an-2/049f0365-d4c9-434a-8496-ee0e7854917b/scratchpad/ra/070e9850b1-ollama-qwen3-5-9b-hermes-s0-muaqtxtm"
+    }
+  ],
+  "halted": null,
+  "finished_at": "2026-09-21T04:33:24.236Z"
+}
