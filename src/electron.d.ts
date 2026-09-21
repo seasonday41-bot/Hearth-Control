@@ -185,6 +185,18 @@ interface XQueueStatus {
   recovery_required?: boolean;
 }
 
+interface XRunSummary {
+  runId: string;
+  taskId: string;
+  status: 'queued' | 'running' | 'completed' | 'needs_review' | 'failed' | 'interrupted';
+  gateStatus: 'COMPLETED' | 'NEEDS_REVIEW' | 'FAILED' | null;
+  hearthOutcome: string | null;
+  error: string | null;
+  createdAt: number;
+  updatedAt: number;
+  result: any;
+}
+
 interface AntigravityTaskEvent {
   stepIndex: number;
   type: string;
@@ -372,6 +384,7 @@ interface Window { controlApp: {
   antigravityDismiss: (taskId: string) => Promise<AntigravityTaskData>;
   antigravityListTasks: () => Promise<AntigravityTaskData[]>;
   xQueueStatus: (requestId: string) => Promise<XQueueStatus>;
+  xListRuns: (limit?: number) => Promise<XRunSummary[]>;
   updaterGetInfo: () => Promise<UpdaterInfo>;
   updaterCheck: () => Promise<UpdateCheck>;
   updaterPrepare: () => Promise<UpdateCheck>;

@@ -224,6 +224,15 @@ export class XRunStore {
     return rowToRecord(row);
   }
 
+  /** Read-only: returns the most recently updated X runs, newest first. */
+  listRecentRuns(limit = 20) {
+    const bounded = Number.isInteger(limit) ? Math.max(1, Math.min(limit, 100)) : 20;
+    return this._getDb()
+      .prepare('SELECT * FROM x_runs ORDER BY updated_at DESC, rowid DESC LIMIT ?')
+      .all(bounded)
+      .map(rowToRecord);
+  }
+
   /**
    * Read-only: does ANY non-terminal (`queued`/`running`) run currently
    * carry this exact `claim_lease_id`? Lets a caller holding only a bare

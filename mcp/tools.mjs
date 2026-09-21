@@ -666,6 +666,15 @@ export const registerWorkspaceTools = (server, options) => {
     annotations: { destructiveHint: true },
   }, async ({ task }) => {
     try {
+      const label = typeof task?.objective === 'string' && task.objective.trim()
+        ? task.objective.trim().slice(0, 120)
+        : (typeof task?.task_id === 'string' ? task.task_id : 'X task');
+      // Production HTTP/MCP always carries the persisted X permission map.
+      // Test-only injected runtimes historically omit permissions entirely;
+      // keep those fixtures isolated while enforcing the real boundary.
+      if (!options.xRuntime || Object.hasOwn(permissions, 'X')) {
+        await requirePermission('X', `Start X coding task: ${label}`);
+      }
       const admitted = await runXTask(task, xRuntime.modelAdapter, {
         claimStore: xRuntime.claimStore, runStore: xRuntime.runStore, ownerId: xRuntime.ownerId,
       });

@@ -2620,6 +2620,21 @@ app.whenReady().then(async () => {
     }
     return xQueueReceiptStatus(xQueueStore?.getReceipt(requestId.trim()));
   });
+  ipcMain.handle('x:runs-list', (_event, limit = 20) => {
+    if (!xRunStore) return [];
+    const bounded = Number.isInteger(limit) ? Math.max(1, Math.min(limit, 100)) : 20;
+    return xRunStore.listRecentRuns(bounded).map((run) => ({
+      runId: run.runId,
+      taskId: run.taskId,
+      status: run.status,
+      gateStatus: run.gateStatus,
+      hearthOutcome: run.hearthOutcome,
+      error: run.error,
+      createdAt: run.createdAt,
+      updatedAt: run.updatedAt,
+      result: run.result,
+    }));
+  });
   ipcMain.handle('invest-mode:get', () => {
     if (!investModeController) throw new Error('invest_mode_controller_unavailable');
     return investModeController.getState();

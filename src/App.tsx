@@ -220,6 +220,7 @@ export default function App() {
   const [taskCenterTab, setTaskCenterTab] = useState<'x' | 'antigravity' | 'remote'>('x');
   const [activeXRequestId, setActiveXRequestId] = useState<string | null>(null);
   const [activeXStatus, setActiveXStatus] = useState<XQueueStatus | null>(null);
+  const [recentXRuns, setRecentXRuns] = useState<XRunSummary[]>([]);
   const [executorStatus, setExecutorStatus] = useState<AntigravityStatus | null>(null);
   const [codexStatus, setCodexStatus] = useState<{ available: boolean } | null>(null);
   const [claudeStatus, setClaudeStatus] = useState<{ available: boolean } | null>(null);
@@ -310,6 +311,24 @@ export default function App() {
       if (timer) clearInterval(timer);
     };
   }, [activeXRequestId]);
+
+  useEffect(() => {
+    let active = true;
+    const poll = async () => {
+      try {
+        const runs = await window.controlApp.xListRuns(20);
+        if (active) setRecentXRuns(runs);
+      } catch (error) {
+        if (active) console.error('X run list poll error:', error);
+      }
+    };
+    void poll();
+    const timer = setInterval(poll, 1500);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, []);
 
   useEffect(() => {
     document.documentElement.dataset.theme = dark ? 'dark' : 'light';
@@ -631,6 +650,7 @@ export default function App() {
 
   const xPerm = permissions.find((p) => p.name === 'X')?.value ?? 'Ask';
   const xReady = running && workspaceValid !== false && xPerm !== 'Blocked';
+  const liveXRuns = useMemo(() => recentXRuns.filter((run) => run.status === 'queued' || run.status === 'running'), [recentXRuns]);
   const xPendingTasks = useMemo(() => bridgeState?.pendingTasks.filter((task) => task.routedTo === 'x') ?? [], [bridgeState?.pendingTasks]);
   const remotePendingTasks = useMemo(() => bridgeState?.pendingTasks.filter((task) => task.routedTo !== 'x') ?? [], [bridgeState?.pendingTasks]);
   const codexPerm = permissions.find((p) => p.name === 'Codex')?.value ?? 'Ask';
@@ -1836,11 +1856,41 @@ export default function App() {
             <section className="metrics console-metrics" aria-label="Operational overview">
               <article><div className="metric-icon sage"><Icon name="activity" /></div><div><span>Connections</span><strong>{healthyConnections} healthy</strong><small>{attentionConnections > 0 ? `${attentionConnections} require attention` : 'No provider errors reported'}</small></div></article>
               <article><div className="metric-icon sand"><Icon name="lock" /></div><div><span>Approvals</span><strong>{approvalQueue.length} pending</strong><small>Decisions remain in the existing approval dialog</small></div></article>
-              <article><div className="metric-icon blue"><Icon name="terminal" /></div><div><span>Session evidence</span><strong>{logs.length + approvalEvidence.length} events</strong><small>Current app session only</small></div></article>
+              <article><div className="metric-icon blue"><Icon name="terminal" /></div><div><span>X runtime</span><strong>{liveXRuns.length} active</strong><small>{recentXRuns.length ? `${recentXRuns.length} recent run(s)` : 'No X run history yet'}</small></div></article>
               <article><div className="metric-icon purple"><Icon name="flag" /></div><div><span>Durable evidence</span><strong>{durableGoalEvidence.length} checkpoints</strong><small>Latest persisted Goal checkpoints</small></div></article>
             </section>
 
             <div className="console-grid">
+              <section className="soft-panel console-x-panel" aria-labelledby="console-x-title">
+                <div className="panel-title">
+                  <div><p className="section-kicker">X RUNTIME</p><h2 id="console-x-title">Live & recent runs</h2></div>
+                  <span className="panel-meta">{liveXRuns.length ? `${liveXRuns.length} active` : 'Idle'}</span>
+                </div>
+                {recentXRuns.length === 0 ? (
+                  <div className="console-empty"><Icon name="terminal" /><p>No X runs recorded</p><small>Direct and queued X work will appear here automatically.</small></div>
+                ) : (
+                  <div className="console-x-run-list">
+                    {recentXRuns.slice(0, 8).map((run) => {
+                      const detail = run.error || run.result?.blockers?.[0]?.detail || run.result?.reason_code || run.hearthOutcome || 'No additional detail';
+                      return (
+                        <article key={run.runId} className="console-x-run-row">
+                          <div className="console-x-run-main">
+                            <div>
+                              <strong>{run.taskId}</strong>
+                              <code>{run.runId}</code>
+                            </div>
+                            <span className={'task-status-pill ' + run.status}>{run.status}</span>
+                          </div>
+                          <p>{detail}</p>
+                          <small>{new Date(run.updatedAt).toLocaleString()} · {run.gateStatus || 'No gate result yet'}</small>
+                        </article>
+                      );
+                    })}
+                  </div>
+                )}
+                <p className="console-boundary-note">Read-only projection from XRunStore. Console never starts, retries, approves, or cancels X work.</p>
+              </section>
+
               <section className="soft-panel console-connections-panel" aria-labelledby="console-connections-title">
                 <div className="panel-title">
                   <div><p className="section-kicker">CONNECTIONS</p><h2 id="console-connections-title">Health</h2></div>
@@ -2112,6 +2162,39 @@ export default function App() {
                     )}
                   </div>
                 )}
+
+                <div className="x-runs-section">
+                  <div className="remote-inbox-header x-inbox-header">
+                    <div>
+                      <p className="kicker">X RUNTIME</p>
+                      <h2>Current & recent X runs</h2>
+                    </div>
+                    <span className="panel-meta">{liveXRuns.length ? `${liveXRuns.length} active` : 'Idle'}</span>
+                  </div>
+                  {recentXRuns.length === 0 ? (
+                    <div className="remote-inbox-empty compact">
+                      <Icon name="terminal" />
+                      <p>No X runs recorded</p>
+                      <small>Direct X work and approved Project X requests will appear here.</small>
+                    </div>
+                  ) : (
+                    <div className="x-run-list">
+                      {recentXRuns.slice(0, 6).map((run) => {
+                        const detail = run.error || run.result?.blockers?.[0]?.detail || run.result?.reason_code || run.hearthOutcome || 'No additional detail';
+                        return (
+                          <article className="x-run-row" key={run.runId}>
+                            <div className="x-run-row-head">
+                              <div><strong>{run.taskId}</strong><code>{run.runId}</code></div>
+                              <span className={'task-status-pill ' + run.status}>{run.status}</span>
+                            </div>
+                            <p>{detail}</p>
+                            <small>{new Date(run.updatedAt).toLocaleString()} · {run.gateStatus || 'No gate result yet'}</small>
+                          </article>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
 
                 <div className="remote-inbox-header x-inbox-header">
                   <div>

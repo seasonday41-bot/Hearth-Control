@@ -55,6 +55,7 @@ contextBridge.exposeInMainWorld('controlApp', {
   antigravityDismiss: (taskId) => ipcRenderer.invoke('antigravity:dismiss', taskId),
   antigravityListTasks: () => ipcRenderer.invoke('antigravity:list-tasks'),
   xQueueStatus: (requestId) => ipcRenderer.invoke('x:queue-status', requestId),
+  xListRuns: (limit = 20) => ipcRenderer.invoke('x:runs-list', limit),
   updaterGetInfo: () => ipcRenderer.invoke('updater:get-info'),
   updaterCheck: () => ipcRenderer.invoke('updater:check'),
   updaterPrepare: () => ipcRenderer.invoke('updater:prepare'),
