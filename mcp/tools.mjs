@@ -49,6 +49,9 @@ export const toolNames = [
   'review_queue_acknowledge',
   'review_queue_resolve',
   'review_queue_retry',
+  'goal_create',
+  'goal_run',
+  'goal_resume',
   'goal_get_context',
 ];
 
@@ -838,6 +841,60 @@ export const registerWorkspaceTools = (server, options) => {
       return text(JSON.stringify(result, null, 2));
     } catch (error) {
       return text(JSON.stringify({ ok: false, reason: error?.message || 'retry_failed' }));
+    }
+  });
+
+  server.registerTool('goal_create', {
+    title: 'Create a Goal',
+    description: 'Creates a Goal in the current Hearth workspace. Steps must be fully authored; route "x" steps require a complete xTask. Does not run or dispatch the Goal.',
+    inputSchema: {
+      title: z.string().min(1).max(200),
+      objective: z.string().min(1).max(4000),
+      steps: z.array(z.object({
+        id: z.string().min(1).max(200).optional(),
+        title: z.string().min(1).max(200),
+        description: z.string().max(2000).optional(),
+        route: z.enum(['auto', 'mcp', 'antigravity', 'manual', 'x']),
+        xTask: z.object({}).passthrough().optional(),
+        required: z.boolean().optional(),
+      })).min(1),
+      constraints: z.array(z.string().max(200)).max(20).optional(),
+    },
+  }, async ({ title, objective, steps, constraints } = {}) => {
+    const transport = options.goalTransport || options.reviewQueueTransport;
+    if (!transport?.createGoal) return text(JSON.stringify({ error: 'transport_unavailable' }));
+    try {
+      return text(JSON.stringify(await transport.createGoal({ title, objective, steps, constraints }), null, 2));
+    } catch (error) {
+      return text(JSON.stringify({ error: error?.message || 'goal_create_failed' }));
+    }
+  });
+
+  server.registerTool('goal_run', {
+    title: 'Run a Goal',
+    description: 'Starts an existing Goal through the live Hearth GoalRunner. X steps use the existing X permission and approval gates. Returns accepted and inProgress; use goal_get_context to check a long-running Goal.',
+    inputSchema: { goal_id: z.string().min(1).max(200) },
+  }, async ({ goal_id } = {}) => {
+    const transport = options.goalTransport || options.reviewQueueTransport;
+    if (!transport?.runGoal) return text(JSON.stringify({ error: 'transport_unavailable' }));
+    try {
+      return text(JSON.stringify(await transport.runGoal({ goalId: goal_id }), null, 2));
+    } catch (error) {
+      return text(JSON.stringify({ error: error?.message || 'goal_run_failed' }));
+    }
+  });
+
+  server.registerTool('goal_resume', {
+    title: 'Resume a Goal',
+    description: 'Resumes an existing paused or waiting Goal through the live Hearth GoalRunner, subject to existing review and X approval gates. Returns accepted and inProgress; use goal_get_context to check a long-running Goal.',
+    inputSchema: { goal_id: z.string().min(1).max(200) },
+  }, async ({ goal_id } = {}) => {
+    const transport = options.goalTransport || options.reviewQueueTransport;
+    if (!transport?.resumeGoal) return text(JSON.stringify({ error: 'transport_unavailable' }));
+    try {
+      return text(JSON.stringify(await transport.resumeGoal({ goalId: goal_id }), null, 2));
+    } catch (error) {
+      return text(JSON.stringify({ error: error?.message || 'goal_resume_failed' }));
     }
   });
 

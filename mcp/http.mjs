@@ -126,6 +126,10 @@ const vercelTransportFor = (response) => {
 const reviewQueueTransportFor = (response) => {
   const roundTrip = createRoundTripTransport(response);
   return {
+    createGoal: ({ title, objective, steps, constraints } = {}) =>
+      roundTrip('goal_create_request', { title, objective, steps, constraints }),
+    runGoal: ({ goalId } = {}) => roundTrip('goal_run_request', { goalId }),
+    resumeGoal: ({ goalId } = {}) => roundTrip('goal_resume_request', { goalId }),
     list: ({ goalId } = {}) => roundTrip('review_queue_list_request', { goalId: goalId || null }),
     acknowledge: ({ goalId, reviewItemId, actor, note } = {}) =>
       roundTrip('review_queue_acknowledge_request', { goalId, reviewItemId, actor: actor || null, note: note || null }),
@@ -218,6 +222,9 @@ process.on('message', (message) => {
   }
   if (message?.type === 'goal_get_context_ack') {
     queueReplies.get(message.transportId)?.finish(null, message.ok ? message.context : { error: message.error });
+  }
+  if (['goal_create_ack', 'goal_run_ack', 'goal_resume_ack'].includes(message?.type)) {
+    queueReplies.get(message.transportId)?.finish(null, message.ok ? message.result : { error: message.error });
   }
   if (typeof message?.type === 'string' && message.type.startsWith('github_') && message.type.endsWith('_ack')) {
     queueReplies.get(message.transportId)?.finish(

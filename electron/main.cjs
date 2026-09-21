@@ -1990,6 +1990,52 @@ const startServer = async ({ workspace, port }) => {
         catch (sendError) { console.error('[Electron] Review Queue retry ack failed:', sendError); }
       }
     }
+    if (['goal_create_request', 'goal_run_request', 'goal_resume_request'].includes(message?.type)) {
+      if (typeof message.transportId !== 'string' || !/^[0-9a-f-]{36}$/i.test(message.transportId)) return;
+      let result = null;
+      let ok = true;
+      let error = null;
+      try {
+        if (!goalRunner) throw new Error('goal_runner_unavailable');
+        const settings = readSettings();
+        if (message.type === 'goal_create_request') {
+          if (!settings.workspace) throw new Error('Workspace is required to create a goal');
+          result = await goalRunner.create_goal({
+            title: message.title,
+            objective: message.objective,
+            workspace: settings.workspace,
+            steps: message.steps,
+            constraints: message.constraints,
+          });
+          sendEvent({ type: 'goals:updated', goal: result });
+        } else {
+          const onProgress = (goal) => sendEvent({ type: 'goals:updated', goal });
+          const run = message.type === 'goal_run_request'
+            ? goalRunner.run_goal(message.goalId, { permissions: settings.permissions, onProgress })
+            : goalRunner.resume_goal(message.goalId, { permissions: settings.permissions, onProgress });
+          let timer;
+          try {
+            const goal = await Promise.race([
+              run,
+              new Promise((resolve) => { timer = setTimeout(() => resolve(null), 1000); }),
+            ]);
+            result = goal
+              ? { accepted: true, inProgress: false, goal }
+              : { accepted: true, inProgress: true, goalId: message.goalId };
+            if (!goal) void run.catch((err) => console.error('[Electron] Background Goal run failed:', err));
+          } finally {
+            clearTimeout(timer);
+          }
+        }
+      } catch (err) {
+        ok = false;
+        error = err?.message || 'goal_request_failed';
+      }
+      if (serverProcess === child) {
+        try { child.send({ type: message.type.replace(/_request$/, '_ack'), transportId: message.transportId, ok, result, error }); }
+        catch (sendError) { console.error('[Electron] Goal request ack failed:', sendError); }
+      }
+    }
     if (message?.type === 'goal_get_context_request') {
       if (typeof message.transportId !== 'string' || !/^[0-9a-f-]{36}$/i.test(message.transportId)) return;
       let context = null;
