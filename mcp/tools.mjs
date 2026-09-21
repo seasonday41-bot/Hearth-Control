@@ -4,6 +4,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import * as z from 'zod/v4';
 import { createWorkspaceGuard } from './workspace.mjs';
+import { createHearthSkillRegistry } from './skills/registry.mjs';
 import {
   detectAntigravity,
   startAntigravityTask,
@@ -16,6 +17,8 @@ import { getProductionXRuntime } from './x/production-runtime.mjs';
 const execFileAsync = promisify(execFile);
 export const toolNames = [
   'workspace_info',
+  'skill_list',
+  'skill_load',
   'list_files',
   'search_files',
   'read_file',
@@ -146,6 +149,7 @@ const WRITE_FILE_MAX_BYTES = 10 * 1024 * 1024; // 10 MB
 // ---------------------------------------------------------------------------
 export const registerWorkspaceTools = (server, options) => {
   const guard = createWorkspaceGuard(options.workspace);
+  const skillRegistry = createHearthSkillRegistry();
   const permissions = options.permissions ?? {};
   const requirePermission = async (name, action) => {
     const level = permissions[name] ?? (name === 'Antigravity' ? 'Ask' : 'Blocked');
@@ -219,6 +223,30 @@ export const registerWorkspaceTools = (server, options) => {
     description: 'Show the workspace root and active permission levels.',
     inputSchema: {},
   }, async () => text(JSON.stringify({ workspace: guard.root || null, permissions }, null, 2)));
+
+  server.registerTool('skill_list', {
+    title: 'List Claude skills',
+    description: 'List read-only Hearth Skill metadata declared for Claude. Grants no tools or permissions.',
+    inputSchema: { agent: z.literal('claude').default('claude') },
+  }, async ({ agent = 'claude' } = {}) => {
+    try {
+      if (agent !== 'claude') throw new Error('Only Claude skill access is available through this tool.');
+      const skills = await skillRegistry.listMetadata({ agent });
+      return text(JSON.stringify({ agent, skills }));
+    } catch (error) { return failure(error); }
+  });
+
+  server.registerTool('skill_load', {
+    title: 'Load Claude skill',
+    description: 'Read one Hearth Skill declared for Claude. Does not execute instructions or grant tools or permissions.',
+    inputSchema: { id: z.string().min(1), agent: z.literal('claude').default('claude') },
+  }, async ({ id, agent = 'claude' } = {}) => {
+    try {
+      if (agent !== 'claude') throw new Error('Only Claude skill access is available through this tool.');
+      const skill = await skillRegistry.load(id, { agent, availableTools: [] });
+      return text(JSON.stringify(skill));
+    } catch (error) { return failure(error); }
+  });
 
   server.registerTool('list_files', {
     title: 'List files',

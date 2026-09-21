@@ -219,6 +219,7 @@ export default function App() {
   // Task Console states
   const [executorStatus, setExecutorStatus] = useState<AntigravityStatus | null>(null);
   const [codexStatus, setCodexStatus] = useState<{ available: boolean } | null>(null);
+  const [claudeStatus, setClaudeStatus] = useState<{ available: boolean } | null>(null);
   const [taskPrompt, setTaskPrompt] = useState('');
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [activeTaskSource, setActiveTaskSource] = useState<'Local' | 'Remote'>('Local');
@@ -294,6 +295,7 @@ export default function App() {
       window.controlApp.getServerState(),
       window.controlApp.antigravityStatus().catch(() => null),
       window.controlApp.codexStatus().catch(() => null),
+      window.controlApp.claudeStatus().catch(() => null),
       window.controlApp.bridgeGetState().catch(() => null),
       window.controlApp.publicTasksGetState().catch(() => null),
       window.controlApp.updaterGetInfo().catch(() => null),
@@ -302,7 +304,7 @@ export default function App() {
       window.controlApp.antigravityListTasks().catch(() => []),
       window.controlApp.connectionsList().catch(() => []),
       window.controlApp.investStatusGet().catch(() => null),
-    ]).then(([settings, state, executor, codex, bridge, publicX, updateInfo, update, goalsList, taskList, connectionList, invest]) => {
+    ]).then(([settings, state, executor, codex, claude, bridge, publicX, updateInfo, update, goalsList, taskList, connectionList, invest]) => {
       if (!active) return;
       if (settings.workspace) setWorkspace(settings.workspace);
       setPort(settings.port);
@@ -312,6 +314,7 @@ export default function App() {
       setPid(state.pid);
       if (executor) setExecutorStatus(executor);
       if (codex) setCodexStatus(codex);
+      if (claude) setClaudeStatus(claude);
       if (bridge) setBridgeState(bridge);
       if (publicX) setPublicXState(publicX);
       if (updateInfo) setUpdaterInfo(updateInfo);
@@ -617,6 +620,7 @@ export default function App() {
     const gptEnabled = bridgeState?.enabled === true;
     const gptConnected = bridgeState?.connected === true;
     const codexAvailable = codexStatus?.available === true;
+    const claudeAvailable = claudeStatus?.available === true;
     const antiAvailable = executorStatus?.available === true;
 
     return [
@@ -673,16 +677,16 @@ export default function App() {
         id: 'claude',
         name: 'Claude',
         badge: 'Cl',
-        role: 'Claude connector',
-        detail: 'No first-class Claude connector is installed in Hearth yet',
-        state: 'Not connected',
-        tone: 'unavailable',
+        role: 'Claude Code · Hearth MCP (stdio)',
+        detail: claudeAvailable ? 'Claude CLI detected; Hearth session not verified' : 'Claude CLI is not available on this Mac',
+        state: claudeAvailable ? 'Available' : 'Unavailable',
+        tone: claudeAvailable ? 'ready' : 'unavailable',
         enabled: false,
         canToggle: false,
-        hint: 'Not installed',
+        hint: claudeAvailable ? 'CLI detected' : 'CLI missing',
       },
     ];
-  }, [running, workspaceValid, xPerm, bridgeState?.signedIn, bridgeState?.enabled, bridgeState?.connected, bridgeBusy, codexStatus?.available, codexPerm, executorStatus?.available, antigravityPerm]);
+  }, [running, workspaceValid, xPerm, bridgeState?.signedIn, bridgeState?.enabled, bridgeState?.connected, bridgeBusy, codexStatus?.available, claudeStatus?.available, codexPerm, executorStatus?.available, antigravityPerm]);
 
   const setConnectorEnabled = (connectorId: AIConnectorItem['id'], enabled: boolean) => {
     if (connectorId === 'x') {

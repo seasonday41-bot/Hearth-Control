@@ -2981,6 +2981,24 @@ app.whenReady().then(async () => {
       return { available: false };
     }
   });
+  ipcMain.handle('specialists:claude-status', async () => {
+    const home = app.getPath('home');
+    const candidates = [
+      path.join(home, '.local', 'bin', 'claude'),
+      path.join(home, '.claude', 'local', 'claude'),
+      '/opt/homebrew/bin/claude',
+      '/usr/local/bin/claude',
+      ...(process.env.PATH || '').split(path.delimiter).filter(Boolean).map((directory) => path.join(directory, 'claude')),
+    ];
+    for (const candidate of candidates) {
+      try {
+        if (!(await fs.promises.stat(candidate)).isFile()) continue;
+        await fs.promises.access(candidate, fs.constants.X_OK);
+        return { available: true };
+      } catch {}
+    }
+    return { available: false };
+  });
   ipcMain.handle('goals:clear-history', async () => {
     if (!goalRunner) throw new Error('Goal runner not initialized');
     const result = goalRunner.clear_goal_history();

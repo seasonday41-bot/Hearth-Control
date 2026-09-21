@@ -9,8 +9,8 @@ const scripts = JSON.parse(await fs.readFile(new URL('package.json', root), 'utf
 
 test('stable metadata is a valid version-matched checkpoint', () => {
   assert.equal(stable.version, packageJson.version);
-  assert.match(stable.buildId, /^0\.4\.15-\d{14}-[0-9a-f]{6}$/);
-  assert.equal(stable.buildId, '0.4.15-20260921071121-3f29b1');
+  assert.match(stable.buildId, /^0\.4\.16-\d{14}-[0-9a-f]{6}$/);
+  assert.equal(stable.buildId, '0.4.16-20260921085152-b173d4');
 });
 
 test('dev and start restore the stable checkpoint before Electron loads metadata', () => {

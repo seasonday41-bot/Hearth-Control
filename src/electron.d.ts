@@ -379,6 +379,7 @@ interface Window { controlApp: {
   publicTasksSignOut: () => Promise<PublicTasksState>;
   goalsList: () => Promise<Goal[]>;
   codexStatus: () => Promise<{ available: boolean }>;
+  claudeStatus: () => Promise<{ available: boolean }>;
   goalsClearHistory: () => Promise<{ removedIds: string[]; remaining: Goal[] }>;
   goalsGet: (goalId: string) => Promise<Goal | null>;
   goalsCreate: (data: { title: string; objective: string; workspace?: string; steps: Partial<GoalStep>[]; constraints?: string[]; route?: 'mcp' | 'antigravity' | 'hybrid' }) => Promise<Goal>;

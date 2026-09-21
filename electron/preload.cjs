@@ -80,6 +80,7 @@ contextBridge.exposeInMainWorld('controlApp', {
   publicTasksSignOut: () => ipcRenderer.invoke('publicTasks:sign-out'),
   goalsList: () => ipcRenderer.invoke('goals:list'),
   codexStatus: () => ipcRenderer.invoke('specialists:codex-status'),
+  claudeStatus: () => ipcRenderer.invoke('specialists:claude-status'),
   goalsClearHistory: () => ipcRenderer.invoke('goals:clear-history'),
   goalsGet: (goalId) => ipcRenderer.invoke('goals:get', goalId),
   goalsCreate: (data) => ipcRenderer.invoke('goals:create', data),

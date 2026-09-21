@@ -2,7 +2,7 @@
   "name": "hearth-control",
   "productName": "Hearth Control",
   "private": true,
-  "version": "0.4.15",
+  "version": "0.4.16",
   "type": "module",
   "description": "A local macOS control center for a desktop MCP workflow.",
   "author": "Hearth Control",

@@ -53,7 +53,7 @@ export default function AIConnectorPanel({ connectors, onToggle }: AIConnectorPa
                 type="button"
                 className={`agent-toggle ${connector.enabled ? 'on' : 'off'}`}
                 aria-pressed={connector.enabled}
-                aria-label={connector.canToggle ? `${connector.enabled ? 'Disable' : 'Enable'} ${connector.name}` : `${connector.name} connector unavailable`}
+                aria-label={connector.canToggle ? `${connector.enabled ? 'Disable' : 'Enable'} ${connector.name}` : `${connector.name} status: ${connector.state}`}
                 disabled={!connector.canToggle || connector.busy}
                 title={connector.canToggle ? `${connector.enabled ? 'Disable' : 'Enable'} ${connector.name} for new work` : connector.hint || 'Connector not available'}
                 onClick={() => onToggle(connector.id, !connector.enabled)}

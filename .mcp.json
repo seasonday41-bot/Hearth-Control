@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "hearth": {
+      "command": "node",
+      "args": ["${CLAUDE_PROJECT_DIR:-.}/mcp/stdio.mjs"],
+      "env": {
+        "HEARTH_WORKSPACE": "${CLAUDE_PROJECT_DIR:-.}"
+      }
+    }
+  }
+}

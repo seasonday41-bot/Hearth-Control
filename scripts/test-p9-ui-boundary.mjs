@@ -41,13 +41,19 @@ test('P9.3 Codex connector status is read from the real CLI resolver and Blocked
   assert.match(main, /codex_permission_blocked/);
 });
 
-test('P9.4 Claude is explicitly unavailable and cannot be toggled until a backend exists', () => {
+test('P9.4 Claude shows CLI availability without claiming a connected session or adding a toggle', () => {
   const start = app.indexOf("id: 'claude'");
   const end = app.indexOf('];', start);
   const block = app.slice(start, end);
-  assert.match(block, /state: 'Not connected'/);
+  assert.match(preload, /claudeStatus: \(\) => ipcRenderer\.invoke\('specialists:claude-status'\)/);
+  assert.match(main, /ipcMain\.handle\('specialists:claude-status'/);
+  assert.match(app, /window\.controlApp\.claudeStatus\(\)/);
+  assert.match(block, /state: claudeAvailable \? 'Available' : 'Unavailable'/);
+  assert.match(block, /Claude CLI detected; Hearth session not verified/);
+  assert.doesNotMatch(block, /state:.*'Connected'/);
   assert.match(block, /canToggle: false/);
   assert.match(block, /enabled: false/);
+  assert.match(connectors, /status: \$\{connector\.state\}/);
 });
 
 test('P9.5 Goal clear-history IPC exists and no generic destructive clear-all IPC is exposed', () => {
