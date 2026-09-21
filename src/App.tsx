@@ -2735,7 +2735,12 @@ export default function App() {
               {activeNav === 'Updates' && <section className="soft-panel update-panel" aria-labelledby="updates-title">
                 <div className="panel-title">
                   <div><p className="section-kicker">UPDATE</p><h2 id="updates-title">Hearth updates</h2></div>
-                  <span className={`update-status ${updateCheck?.state ?? 'idle'}`}><i />{updateStatusText[updateCheck?.state ?? 'idle']}</span>
+                  <span className={`update-status ${updateCheck?.state ?? 'idle'}`}>
+                    {updateCheck?.state === 'downloading'
+                      ? <span className="update-status-flow" aria-hidden="true" />
+                      : <i aria-hidden="true" />}
+                    <span>{updateStatusText[updateCheck?.state ?? 'idle']}</span>
+                  </span>
                 </div>
                 <dl className="update-facts">
                   <div><dt>Current version</dt><dd>v{updaterInfo?.currentVersion ?? '—'}</dd></div>
