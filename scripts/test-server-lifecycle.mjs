@@ -35,7 +35,14 @@ const probeHearthServer = (port = 3001) => new Promise((resolve) => {
   req.on('timeout', () => { req.destroy(); resolve({ running: false, code: 'ETIMEDOUT' }); });
 });
 
-test('SLC-1 /health returns healthy on active server (port 3001)', async () => {
+// SLC-1 and SLC-4 assert against a LIVE local server. That server is deliberately
+// user-controlled -- Hearth never auto-starts it -- so on a machine where the
+// operator has not pressed Start there is nothing to assert against. Skip with a
+// visible reason rather than reporting a failure the code did not cause.
+const liveServer = await probeHearthServer(3001);
+const needsLiveServer = { skip: liveServer.running ? false : 'no local server on 127.0.0.1:3001 (start it from the app; the server is user-controlled by design)' };
+
+test('SLC-1 /health returns healthy on active server (port 3001)', needsLiveServer, async () => {
   const probe = await probeHearthServer(3001);
   assert.equal(probe.running, true, 'Port 3001 must report running');
   assert.equal(typeof probe.pid, 'number', 'Port 3001 must return a valid numeric PID');
@@ -78,7 +85,7 @@ test('SLC-3 probeHearthServer detects foreign HTTP service as foreign_service er
   }
 });
 
-test('SLC-4 startServer on already-running port returns running cleanly without spawning duplicate', async () => {
+test('SLC-4 startServer on already-running port returns running cleanly without spawning duplicate', needsLiveServer, async () => {
   // Simulate the main process startServer logic against the live 3001 server
   const probe = await probeHearthServer(3001);
   assert.equal(probe.running, true);

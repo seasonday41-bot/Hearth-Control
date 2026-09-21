@@ -6,7 +6,12 @@ import GitHubConnectionCard from './components/GitHubConnectionCard';
 import { getV2CoordinatorDisplay } from './invest-coordinator-status';
 
 type Permission = 'Allow' | 'Ask' | 'Blocked';
-type NavItem = 'Overview' | 'Console' | 'Local Chat' | 'Invest' | 'Storage Audit' | 'Task Console' | 'Goals' | 'Workspace' | 'Permissions' | 'Logs' | 'AI Connectors' | 'Updates';
+// Six destinations, each one thing the operator actually does. Anything that is
+// a mechanism rather than a destination -- X runs, the queue, pending tasks,
+// runIds -- is detail inside Goals or evidence inside System, never navigation.
+type NavItem = 'Overview' | 'Goals' | 'Chat' | 'Invest' | 'Connections' | 'System';
+type GoalsTab = 'Goals' | 'Activity';
+type SystemTab = 'Workspace' | 'Permissions' | 'Activity' | 'Storage' | 'Updates';
 type IconName = 'grid' | 'folder' | 'lock' | 'terminal' | 'moon' | 'sun' | 'chevron' | 'activity' | 'copy' | 'server' | 'console' | 'radio' | 'flag' | 'check' | 'plus';
 
 const Icon = ({ name }: { name: IconName }) => {
@@ -102,33 +107,34 @@ const initialPermissions: Array<{ name: string; detail: string; value: Permissio
 
 const navGroups: Array<{ label: string; items: Array<{ name: NavItem; icon: IconName; label?: string }> }> = [
   {
-    label: 'OPERATE',
+    label: 'WORK',
     items: [
       { name: 'Overview', icon: 'grid' },
-      { name: 'Console', icon: 'activity' },
-      { name: 'Task Console', icon: 'console', label: 'Control Center' },
-    ],
-  },
-  {
-    label: 'AI',
-    items: [
-      { name: 'Local Chat', icon: 'radio' },
+      { name: 'Goals', icon: 'flag' },
+      { name: 'Chat', icon: 'radio' },
       { name: 'Invest', icon: 'activity' },
     ],
   },
   {
-    label: 'SYSTEM',
+    label: 'SETUP',
     items: [
-      { name: 'Workspace', icon: 'folder' },
-      { name: 'Permissions', icon: 'lock' },
-      { name: 'Logs', icon: 'terminal' },
-      { name: 'Storage Audit', icon: 'folder' },
-      { name: 'Updates', icon: 'server' },
+      { name: 'Connections', icon: 'console' },
+      { name: 'System', icon: 'lock' },
     ],
   },
 ];
 
-const CONTROL_CENTER_PAGES: NavItem[] = ['Task Console', 'Goals', 'AI Connectors'];
+const GOALS_TABS: GoalsTab[] = ['Goals', 'Activity'];
+const SYSTEM_TABS: SystemTab[] = ['Workspace', 'Permissions', 'Activity', 'Storage', 'Updates'];
+
+const PAGE_INTRO: Record<NavItem, string> = {
+  Overview: 'Monitor your workspace and choose where to work next.',
+  Goals: 'Everything you have asked Hearth to do, and how far it has got.',
+  Chat: 'Talk to a local model. Nothing here creates a task or a durable job.',
+  Invest: 'The XAUUSD demo trading subsystem.',
+  Connections: 'Agents and services this workspace can reach.',
+  System: 'Workspace, permissions, activity, storage, and updates.',
+};
 
 const LocalChatResponse = ({ text, onExpand }: { text: string; onExpand: (code: string, language: string) => void }) => {
   const parts: ReactNode[] = [];
@@ -157,6 +163,8 @@ export default function App() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [permissions, setPermissions] = useState(initialPermissions);
   const [activeNav, setActiveNav] = useState<NavItem>('Overview');
+  const [goalsTab, setGoalsTab] = useState<GoalsTab>('Goals');
+  const [systemTab, setSystemTab] = useState<SystemTab>('Workspace');
   const [dark, setDark] = useState(() => localStorage.getItem('control-theme') === 'dark');
   const [notice, setNotice] = useState('');
   const [approvalQueue, setApprovalQueue] = useState<ApprovalRequest[]>([]);
@@ -216,7 +224,7 @@ export default function App() {
   const [publicXPassword, setPublicXPassword] = useState('');
   const [publicXAuthMode, setPublicXAuthMode] = useState<'sign-in' | 'sign-up'>('sign-in');
 
-  // Task Console states
+  // Goals / Activity states
   const [taskCenterTab, setTaskCenterTab] = useState<'x' | 'antigravity' | 'remote'>('x');
   const [activeXRequestId, setActiveXRequestId] = useState<string | null>(null);
   const [activeXStatus, setActiveXStatus] = useState<XQueueStatus | null>(null);
@@ -236,7 +244,7 @@ export default function App() {
   const [pollTrigger, setPollTrigger] = useState(0);
   const [, setNowTick] = useState(Date.now());
 
-  // Experimental Local Chat states; isolated from Task Console lifecycle.
+  // Experimental Chat states; isolated from the Goals / Activity lifecycle.
   const [chatProvider, setChatProvider] = useState<'local' | 'external'>('local');
   const [chatModel, setChatModel] = useState('qwen3.5:9b-hermes');
   const [chatProfile, setChatProfile] = useState<'fast' | 'normal' | 'deep'>('normal');
@@ -436,7 +444,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (activeNav !== 'Local Chat' || chatProvider !== 'local') return;
+    if (activeNav !== 'Chat' || chatProvider !== 'local') return;
     let active = true;
     void window.controlApp.localChatStatus().then((status) => {
       if (!active) return;
@@ -480,7 +488,7 @@ export default function App() {
   }, [investStatus?.risk_config.config, demoRiskDirty]);
 
   useEffect(() => {
-    if (activeNav !== 'Local Chat') return;
+    if (activeNav !== 'Chat') return;
     void window.controlApp.localChatContext({ model: chatModel, profile: chatProfile, longResponse: chatLongResponse, ollamaAvailable: chatHealth?.ok }).then(setChatContext).catch(() => setChatContext(null));
   }, [activeNav, chatModel, chatProfile, chatLongResponse, chatHealth?.ok]);
 
@@ -1617,32 +1625,33 @@ export default function App() {
 
   const v2CoordinatorDisplay = getV2CoordinatorDisplay(investStatus?.v2);
 
-  const isControlCenterPage = CONTROL_CENTER_PAGES.includes(activeNav);
-  const controlCenterTabLabel = activeNav === 'Goals' ? 'Goals' : activeNav === 'AI Connectors' ? 'Connections' : 'Tasks';
-  const renderControlCenterHeader = (status?: ReactNode) => (
+  // Goals is one destination with two faces: the Goals themselves, and the
+  // machinery that carried them out. The machinery is a tab, never a nav item.
+  const renderGoalsHeader = (status?: ReactNode) => (
     <header className="control-center-header">
       <div className="control-center-title-row">
         <div>
           <p className="kicker">HEARTH WORK CONTROL</p>
-          <h1>Control Center.</h1>
-          <p className="intro">Tasks, multi-step Goals, remote work, and agent connections in one place.</p>
+          <h1>Goals.</h1>
+          <p className="intro">{PAGE_INTRO.Goals}</p>
         </div>
         {status}
       </div>
-      <div className="control-center-tabs" role="tablist" aria-label="Control Center sections">
-        <button type="button" role="tab" aria-selected={activeNav === 'Task Console'} className={activeNav === 'Task Console' ? 'active' : ''} onClick={() => navigate('Task Console')}>
-          <Icon name="console" />
-          <span>Tasks</span>
-        </button>
-        <button type="button" role="tab" aria-selected={activeNav === 'Goals'} className={activeNav === 'Goals' ? 'active' : ''} onClick={() => navigate('Goals')}>
-          <Icon name="flag" />
-          <span>Goals</span>
-          {!!bridgeState?.pendingGoalRequests?.length && <em>{bridgeState.pendingGoalRequests.length}</em>}
-        </button>
-        <button type="button" role="tab" aria-selected={activeNav === 'AI Connectors'} className={activeNav === 'AI Connectors' ? 'active' : ''} onClick={() => navigate('AI Connectors')}>
-          <Icon name="activity" />
-          <span>Connections</span>
-        </button>
+      <div className="control-center-tabs" role="tablist" aria-label="Goals sections">
+        {GOALS_TABS.map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            role="tab"
+            aria-selected={goalsTab === tab}
+            className={goalsTab === tab ? 'active' : ''}
+            onClick={() => setGoalsTab(tab)}
+          >
+            <Icon name={tab === 'Goals' ? 'flag' : 'console'} />
+            <span>{tab === 'Goals' ? 'Goals' : 'Activity'}</span>
+            {tab === 'Goals' && !!bridgeState?.pendingGoalRequests?.length && <em>{bridgeState.pendingGoalRequests.length}</em>}
+          </button>
+        ))}
       </div>
     </header>
   );
@@ -1660,7 +1669,7 @@ export default function App() {
               <p className="nav-label">{group.label}</p>
               <div className="nav-group-items">
                 {group.items.map((item) => {
-                  const itemActive = item.name === 'Task Console' ? isControlCenterPage : activeNav === item.name;
+                  const itemActive = activeNav === item.name;
                   const itemLabel = item.label ?? item.name;
                   return (
                     <button key={item.name} aria-label={itemLabel} aria-current={itemActive ? 'page' : undefined} title={itemLabel} className={itemActive ? 'active' : ''} onClick={() => navigate(item.name)}>
@@ -1682,8 +1691,8 @@ export default function App() {
       </aside>
 
       <main className="main-content">
-        <div className="calm-topbar"><span>Hearth Control <span aria-hidden="true">/</span> <strong>{isControlCenterPage ? `Control Center / ${controlCenterTabLabel}` : activeNav}</strong></span><span className="calm-server-state"><i className={running ? 'online' : ''} />{running ? 'Local server online' : 'Local server offline'}</span></div>
-        {activeNav === 'Storage Audit' ? <StorageAudit /> : activeNav === 'Local Chat' ? (
+        <div className="calm-topbar"><span>Hearth Control <span aria-hidden="true">/</span> <strong>{activeNav === 'Goals' ? `Goals / ${goalsTab}` : activeNav === 'System' ? `System / ${systemTab}` : activeNav}</strong></span><span className="calm-server-state"><i className={running ? 'online' : ''} />{running ? 'Local server online' : 'Local server offline'}</span></div>
+        {activeNav === 'Chat' ? (
           <div className="local-chat-view">
             <header className="page-header">
               <div>
@@ -1840,237 +1849,9 @@ export default function App() {
               </article>)}</div> : <div className="invest-journal-empty"><strong>No demo executions yet</strong><p>Execution evidence appears here only after the internal V2 coordinator submits a READY, Risk-approved signal to the demo-only executor.</p></div>}
             </section>
           </div>
-        ) : activeNav === 'Console' ? (
-          <div className="operations-console-view">
-            <header className="page-header" id="console">
-              <div>
-                <p className="kicker">OPERATIONAL CONSOLE</p>
-                <h1>Console.</h1>
-                <p className="intro">Read-only operational state for connections, approvals, and evidence.</p>
-              </div>
-              <div className={`connection-pill ${attentionConnections === 0 && healthyConnections > 0 ? 'online' : ''}`}>
-                <span /> {healthyConnections}/{connections.length} connections healthy
-              </div>
-            </header>
-
-            <section className="metrics console-metrics" aria-label="Operational overview">
-              <article><div className="metric-icon sage"><Icon name="activity" /></div><div><span>Connections</span><strong>{healthyConnections} healthy</strong><small>{attentionConnections > 0 ? `${attentionConnections} require attention` : 'No provider errors reported'}</small></div></article>
-              <article><div className="metric-icon sand"><Icon name="lock" /></div><div><span>Approvals</span><strong>{approvalQueue.length} pending</strong><small>Decisions remain in the existing approval dialog</small></div></article>
-              <article><div className="metric-icon blue"><Icon name="terminal" /></div><div><span>X runtime</span><strong>{liveXRuns.length} active</strong><small>{recentXRuns.length ? `${recentXRuns.length} recent run(s)` : 'No X run history yet'}</small></div></article>
-              <article><div className="metric-icon purple"><Icon name="flag" /></div><div><span>Durable evidence</span><strong>{durableGoalEvidence.length} checkpoints</strong><small>Latest persisted Goal checkpoints</small></div></article>
-            </section>
-
-            <div className="console-grid">
-              <section className="soft-panel console-x-panel" aria-labelledby="console-x-title">
-                <div className="panel-title">
-                  <div><p className="section-kicker">X RUNTIME</p><h2 id="console-x-title">Live & recent runs</h2></div>
-                  <span className="panel-meta">{liveXRuns.length ? `${liveXRuns.length} active` : 'Idle'}</span>
-                </div>
-                {recentXRuns.length === 0 ? (
-                  <div className="console-empty"><Icon name="terminal" /><p>No X runs recorded</p><small>Direct and queued X work will appear here automatically.</small></div>
-                ) : (
-                  <div className="console-x-run-list">
-                    {recentXRuns.slice(0, 8).map((run) => {
-                      const detail = run.error || run.result?.blockers?.[0]?.detail || run.result?.reason_code || run.hearthOutcome || 'No additional detail';
-                      return (
-                        <article key={run.runId} className="console-x-run-row">
-                          <div className="console-x-run-main">
-                            <div>
-                              <strong>{run.taskId}</strong>
-                              <code>{run.runId}</code>
-                            </div>
-                            <span className={'task-status-pill ' + run.status}>{run.status}</span>
-                          </div>
-                          <p>{detail}</p>
-                          <small>{new Date(run.updatedAt).toLocaleString()} · {run.gateStatus || 'No gate result yet'}</small>
-                        </article>
-                      );
-                    })}
-                  </div>
-                )}
-                <p className="console-boundary-note">Read-only projection from XRunStore. Console never starts, retries, approves, or cancels X work.</p>
-              </section>
-
-              <section className="soft-panel console-connections-panel" aria-labelledby="console-connections-title">
-                <div className="panel-title">
-                  <div><p className="section-kicker">CONNECTIONS</p><h2 id="console-connections-title">Health</h2></div>
-                  <button type="button" className="subtle-action" disabled={connectionsBusy} onClick={() => void refreshConnections()}>
-                    {connectionsBusy ? 'Refreshing…' : 'Refresh all'}
-                  </button>
-                </div>
-                {connectionsError && <p className="console-error" role="alert">{connectionsError}</p>}
-                <div className="console-connection-list">
-                  {connections.length === 0 ? (
-                    <div className="console-empty"><Icon name="activity" /><p>No connection metadata available</p><small>Connection credentials are never shown here.</small></div>
-                  ) : connections.map((connection) => (
-                    <article className="console-connection-row" key={connection.alias}>
-                      <div className="console-connection-main">
-                        <div>
-                          <strong>{connection.label}</strong>
-                          <code>{connection.alias}</code>
-                        </div>
-                        <span className={`console-status status-${connection.status.toLowerCase()}`}>{connection.status}</span>
-                      </div>
-                      {connection.provider === 'github' ? (
-                        <GitHubConnectionCard
-                          connection={connection}
-                          repositories={githubRepositories[connection.alias] || []}
-                          repositoryBusy={githubRepoBusy === connection.alias}
-                          repositoryError={githubRepoErrors[connection.alias] || ''}
-                          setupOpen={githubSetupOpen[connection.alias] === true}
-                          actionBusy={connectionActionBusy === connection.alias}
-                          connectionsBusy={connectionsBusy}
-                          tokenValue={connectionTokenInputs[connection.alias] || ''}
-                          allowPullRequestCreate={githubPrCreateInputs[connection.alias] === true}
-                          onOpenSetup={() => setGithubSetupOpen((current) => ({ ...current, [connection.alias]: true }))}
-                          onCloseSetup={() => setGithubSetupOpen((current) => ({ ...current, [connection.alias]: false }))}
-                          onTokenChange={(value) => setConnectionTokenInputs((current) => ({ ...current, [connection.alias]: value }))}
-                          onAllowPullRequestCreateChange={(value) => setGithubPrCreateInputs((current) => ({ ...current, [connection.alias]: value }))}
-                          onConnect={() => void connectManagedConnection(connection)}
-                          onDisconnect={() => void disconnectManagedConnection(connection)}
-                          onRefreshHealth={() => void refreshConnections(connection.alias)}
-                          onRefreshRepositories={() => void loadGitHubRepositories(connection.alias as 'github:personal' | 'github:work', true)}
-                          onSelectRepository={(fullName) => void selectGitHubRepository(connection, fullName)}
-                        />
-                      ) : (
-                        <>
-                      <dl className="console-facts">
-                        <div><dt>Provider</dt><dd>{connection.provider}</dd></div>
-                        <div><dt>Account</dt><dd>{connection.account || '—'}</dd></div>
-                        <div><dt>Last checked</dt><dd>{connection.lastCheckedAt ? new Date(connection.lastCheckedAt).toLocaleString() : 'Not checked'}</dd></div>
-                        <div><dt>Capabilities</dt><dd>{connection.capabilities.length ? connection.capabilities.join(', ') : 'None granted'}</dd></div>
-                      </dl>
-                      {connection.lastError && <p className="console-inline-error">Last error: {connection.lastError}</p>}
-                      {connection.provider === 'vercel' && (
-                        <div className="console-connection-management">
-                          {connection.status !== 'CONNECTED' && (
-                            <div className="console-connect-form">
-                              <label>
-                                <span>Personal access token</span>
-                                <input
-                                  type="password"
-                                  autoComplete="new-password"
-                                  spellCheck={false}
-                                  value={connectionTokenInputs[connection.alias] || ''}
-                                  onChange={(event) => setConnectionTokenInputs((current) => ({ ...current, [connection.alias]: event.target.value }))}
-                                  placeholder="Enter token locally"
-                                />
-                              </label>
-                              {connection.provider === 'vercel' && (
-                                <label>
-                                  <span>Team ID (optional)</span>
-                                  <input
-                                    type="text"
-                                    autoComplete="off"
-                                    spellCheck={false}
-                                    value={vercelTeamIdInput}
-                                    onChange={(event) => setVercelTeamIdInput(event.target.value)}
-                                    placeholder="team_..."
-                                  />
-                                </label>
-                              )}
-                              <button
-                                type="button"
-                                className="subtle-action"
-                                disabled={connectionActionBusy === connection.alias || !(connectionTokenInputs[connection.alias] || '').trim()}
-                                onClick={() => void connectManagedConnection(connection)}
-                              >
-                                {connectionActionBusy === connection.alias ? 'Connecting…' : connection.status === 'DISCONNECTED' ? 'Connect' : 'Reconnect'}
-                              </button>
-                            </div>
-                          )}
-                          {connection.status !== 'DISCONNECTED' && (
-                            <button
-                              type="button"
-                              className="text-action console-disconnect"
-                              disabled={connectionActionBusy === connection.alias}
-                              onClick={() => void disconnectManagedConnection(connection)}
-                            >
-                              Disconnect
-                            </button>
-                          )}
-                        </div>
-                      )}
-                      {connection.provider === 'supabase' && <p className="console-boundary-note">Authentication remains in the existing Remote Bridge / Project X surfaces; P7 does not create a second Supabase login path.</p>}
-                      <button type="button" className="text-action" disabled={connectionsBusy || connectionActionBusy === connection.alias} onClick={() => void refreshConnections(connection.alias)}>Refresh health</button>
-                        </>
-                      )}
-                    </article>
-                  ))}
-                </div>
-                <p className="console-boundary-note">Renderer-safe summaries only. Stored provider targets, credentials, tokens, and ciphertext are never read back or rendered.</p>
-              </section>
-
-              <section className="soft-panel console-approvals-panel" aria-labelledby="console-approvals-title">
-                <div className="panel-title">
-                  <div><p className="section-kicker">APPROVALS</p><h2 id="console-approvals-title">Pending requests</h2></div>
-                  <span className="panel-meta">Status only</span>
-                </div>
-                {approvalQueue.length === 0 ? (
-                  <div className="console-empty"><Icon name="lock" /><p>No pending approvals</p><small>New requests still open the existing one-time approval dialog.</small></div>
-                ) : (
-                  <div className="console-approval-list">
-                    {approvalQueue.map((item, index) => (
-                      <article className="console-approval-row" key={item.requestId}>
-                        <span>{index === 0 ? 'Waiting now' : `Queued ${index + 1}`}</span>
-                        <strong>{item.permission}</strong>
-                        <p>{item.action}</p>
-                      </article>
-                    ))}
-                  </div>
-                )}
-                <p className="console-boundary-note">The Console cannot allow or deny requests. Decisions remain owned by the existing approval lifecycle.</p>
-              </section>
-
-              <section className="soft-panel console-evidence-panel" aria-labelledby="console-evidence-title">
-                <div className="panel-title">
-                  <div><p className="section-kicker">EVIDENCE</p><h2 id="console-evidence-title">Operational evidence</h2></div>
-                  <span className="panel-meta">Read only</span>
-                </div>
-                <div className="console-evidence-grid">
-                  <div>
-                    <h3>Current session</h3>
-                    <p className="console-evidence-caption">System logs and approval lifecycle events are retained only for this open app session.</p>
-                    <div className="console-evidence-list">
-                      {[...approvalEvidence].reverse().slice(0, 6).map((item) => (
-                        <article key={item.requestId}>
-                          <time>{item.time}</time>
-                          <strong>{item.permission} · {item.state}</strong>
-                          <p>{item.action}</p>
-                        </article>
-                      ))}
-                      {[...logs].reverse().slice(0, 6).map((log, index) => (
-                        <article key={`${log.time}-${log.source}-${index}`}>
-                          <time>{log.time}</time>
-                          <strong>{log.source}</strong>
-                          <p>{log.message}</p>
-                        </article>
-                      ))}
-                      {approvalEvidence.length === 0 && logs.length === 0 && <div className="console-empty compact"><p>No session evidence yet</p></div>}
-                    </div>
-                  </div>
-                  <div>
-                    <h3>Durable Goal checkpoints</h3>
-                    <p className="console-evidence-caption">These summaries come from Goal Runner checkpoint evidence already persisted by Hearth.</p>
-                    <div className="console-evidence-list">
-                      {durableGoalEvidence.map((item) => (
-                        <article key={item.checkpointId}>
-                          <time>{new Date(item.timestamp).toLocaleString()}</time>
-                          <strong>{item.goalTitle}</strong>
-                          <p>{item.summary || 'Checkpoint recorded'}</p>
-                          <small>{item.filesChanged.length ? `${item.filesChanged.length} file(s) changed` : 'No changed files recorded'} · {Object.keys(item.checks || {}).length} check(s)</small>
-                        </article>
-                      ))}
-                      {durableGoalEvidence.length === 0 && <div className="console-empty compact"><p>No durable Goal checkpoints yet</p></div>}
-                    </div>
-                  </div>
-                </div>
-              </section>
-            </div>
-          </div>
-        ) : activeNav === 'Task Console' ? (
+        ) : activeNav === 'Goals' && goalsTab === 'Activity' ? (
           <div className="task-console-view">
-            {renderControlCenterHeader(
+            {renderGoalsHeader(
               taskCenterTab === 'x' ? (
                 <div className={'connection-pill ' + (xReady ? 'online' : '')}>
                   <span /> X · {xPerm === 'Blocked' ? 'Blocked' : xReady ? 'Ready' : 'Unavailable'}
@@ -2101,6 +1882,36 @@ export default function App() {
                 Change folder
               </button>
             </div>
+
+            <section className="soft-panel console-x-panel" aria-labelledby="console-x-title">
+                            <div className="panel-title">
+                              <div><p className="section-kicker">X RUNTIME</p><h2 id="console-x-title">Live & recent runs</h2></div>
+                              <span className="panel-meta">{liveXRuns.length ? `${liveXRuns.length} active` : 'Idle'}</span>
+                            </div>
+                            {recentXRuns.length === 0 ? (
+                              <div className="console-empty"><Icon name="terminal" /><p>No X runs recorded</p><small>Direct and queued X work appears here automatically.</small></div>
+                            ) : (
+                              <div className="console-x-run-list">
+                                {recentXRuns.slice(0, 8).map((run) => {
+                                  const detail = run.error || run.result?.blockers?.[0]?.detail || run.result?.reason_code || run.hearthOutcome || 'No additional detail';
+                                  return (
+                                    <article key={run.runId} className="console-x-run-row">
+                                      <div className="console-x-run-main">
+                                        <div>
+                                          <strong>{run.taskId}</strong>
+                                          <code>{run.runId}</code>
+                                        </div>
+                                        <span className={'task-status-pill ' + run.status}>{run.status}</span>
+                                      </div>
+                                      <p>{detail}</p>
+                                      <small>{new Date(run.updatedAt).toLocaleString()} · {run.gateStatus || 'No gate result yet'}</small>
+                                    </article>
+                                  );
+                                })}
+                              </div>
+                            )}
+                            <p className="console-boundary-note">Read-only projection from XRunStore. Hearth never starts, retries, approves, or cancels X work from this list.</p>
+                          </section>
 
             <div className="task-center-tabs" role="tablist" aria-label="Task execution surfaces">
               <button type="button" role="tab" aria-selected={taskCenterTab === 'x'} className={taskCenterTab === 'x' ? 'active' : ''} onClick={() => setTaskCenterTab('x')}>
@@ -2613,7 +2424,7 @@ export default function App() {
                   <strong>Project X routing</strong>
                   <span>{publicXState?.signedIn ? 'Connected · X-routed requests are shown in the X tab.' : 'Project X is not connected. Configure it from Connections.'}</span>
                 </div>
-                <button className="task-workspace-change" type="button" onClick={() => navigate('AI Connectors')}>
+                <button className="task-workspace-change" type="button" onClick={() => navigate('Connections')}>
                   Open Connections
                 </button>
               </div>
@@ -2622,11 +2433,32 @@ export default function App() {
           </div>
         ) : activeNav === 'Goals' ? (
           <div className="goals-view">
-            {renderControlCenterHeader(
+            {renderGoalsHeader(
               <div className={`connection-pill ${isGoalActive ? 'online' : ''}`}>
                 <span /> Goal Runner · {isGoalActive ? 'Active' : 'Standing by'}
               </div>
             )}
+
+            <section className="soft-panel console-approvals-panel" aria-labelledby="console-approvals-title">
+                            <div className="panel-title">
+                              <div><p className="section-kicker">APPROVALS</p><h2 id="console-approvals-title">Pending requests</h2></div>
+                              <span className="panel-meta">Status only</span>
+                            </div>
+                            {approvalQueue.length === 0 ? (
+                              <div className="console-empty"><Icon name="lock" /><p>No pending approvals</p><small>A new request opens the approval dialog straight away.</small></div>
+                            ) : (
+                              <div className="console-approval-list">
+                                {approvalQueue.map((item, index) => (
+                                  <article className="console-approval-row" key={item.requestId}>
+                                    <span>{index === 0 ? 'Waiting now' : `Queued ${index + 1}`}</span>
+                                    <strong>{item.permission}</strong>
+                                    <p>{item.action}</p>
+                                  </article>
+                                ))}
+                              </div>
+                            )}
+                            <p className="console-boundary-note">This list cannot allow or deny requests. Each decision is made in the approval dialog when it appears.</p>
+                          </section>
 
             <div className="goals-workspace-bar">
               <div className="goals-workspace-info">
@@ -2916,13 +2748,128 @@ export default function App() {
               )}
             </div>
           </div>
-        ) : activeNav === 'AI Connectors' ? (
+        ) : activeNav === 'Connections' ? (
           <div className="control-center-connections-view">
-            {renderControlCenterHeader(
+            <header className="page-header">
+              <div>
+                <p className="kicker">CONNECTIONS</p>
+                <h1>Connections.</h1>
+                <p className="intro">{PAGE_INTRO.Connections}</p>
+              </div>
               <div className={`connection-pill ${(bridgeState?.connected || publicXState?.signedIn) ? 'online' : ''}`}>
                 <span /> Remote · {bridgeState?.connected ? 'Bridge connected' : publicXState?.signedIn ? 'Project X connected' : 'Standing by'}
               </div>
-            )}
+            </header>
+
+            <section className="soft-panel console-connections-panel" aria-labelledby="console-connections-title">
+            <div className="panel-title">
+              <div><p className="section-kicker">CONNECTIONS</p><h2 id="console-connections-title">Health</h2></div>
+              <button type="button" className="subtle-action" disabled={connectionsBusy} onClick={() => void refreshConnections()}>
+                {connectionsBusy ? 'Refreshing…' : 'Refresh all'}
+              </button>
+            </div>
+            {connectionsError && <p className="console-error" role="alert">{connectionsError}</p>}
+            <div className="console-connection-list">
+              {connections.length === 0 ? (
+                <div className="console-empty"><Icon name="activity" /><p>No connection metadata available</p><small>Connection credentials are never shown here.</small></div>
+              ) : connections.map((connection) => (
+                <article className="console-connection-row" key={connection.alias}>
+                  <div className="console-connection-main">
+                    <div>
+                      <strong>{connection.label}</strong>
+                      <code>{connection.alias}</code>
+                    </div>
+                    <span className={`console-status status-${connection.status.toLowerCase()}`}>{connection.status}</span>
+                  </div>
+                  {connection.provider === 'github' ? (
+                    <GitHubConnectionCard
+                      connection={connection}
+                      repositories={githubRepositories[connection.alias] || []}
+                      repositoryBusy={githubRepoBusy === connection.alias}
+                      repositoryError={githubRepoErrors[connection.alias] || ''}
+                      setupOpen={githubSetupOpen[connection.alias] === true}
+                      actionBusy={connectionActionBusy === connection.alias}
+                      connectionsBusy={connectionsBusy}
+                      tokenValue={connectionTokenInputs[connection.alias] || ''}
+                      allowPullRequestCreate={githubPrCreateInputs[connection.alias] === true}
+                      onOpenSetup={() => setGithubSetupOpen((current) => ({ ...current, [connection.alias]: true }))}
+                      onCloseSetup={() => setGithubSetupOpen((current) => ({ ...current, [connection.alias]: false }))}
+                      onTokenChange={(value) => setConnectionTokenInputs((current) => ({ ...current, [connection.alias]: value }))}
+                      onAllowPullRequestCreateChange={(value) => setGithubPrCreateInputs((current) => ({ ...current, [connection.alias]: value }))}
+                      onConnect={() => void connectManagedConnection(connection)}
+                      onDisconnect={() => void disconnectManagedConnection(connection)}
+                      onRefreshHealth={() => void refreshConnections(connection.alias)}
+                      onRefreshRepositories={() => void loadGitHubRepositories(connection.alias as 'github:personal' | 'github:work', true)}
+                      onSelectRepository={(fullName) => void selectGitHubRepository(connection, fullName)}
+                    />
+                  ) : (
+                    <>
+                  <dl className="console-facts">
+                    <div><dt>Provider</dt><dd>{connection.provider}</dd></div>
+                    <div><dt>Account</dt><dd>{connection.account || '—'}</dd></div>
+                    <div><dt>Last checked</dt><dd>{connection.lastCheckedAt ? new Date(connection.lastCheckedAt).toLocaleString() : 'Not checked'}</dd></div>
+                    <div><dt>Capabilities</dt><dd>{connection.capabilities.length ? connection.capabilities.join(', ') : 'None granted'}</dd></div>
+                  </dl>
+                  {connection.lastError && <p className="console-inline-error">Last error: {connection.lastError}</p>}
+                  {connection.provider === 'vercel' && (
+                    <div className="console-connection-management">
+                      {connection.status !== 'CONNECTED' && (
+                        <div className="console-connect-form">
+                          <label>
+                            <span>Personal access token</span>
+                            <input
+                              type="password"
+                              autoComplete="new-password"
+                              spellCheck={false}
+                              value={connectionTokenInputs[connection.alias] || ''}
+                              onChange={(event) => setConnectionTokenInputs((current) => ({ ...current, [connection.alias]: event.target.value }))}
+                              placeholder="Enter token locally"
+                            />
+                          </label>
+                          {connection.provider === 'vercel' && (
+                            <label>
+                              <span>Team ID (optional)</span>
+                              <input
+                                type="text"
+                                autoComplete="off"
+                                spellCheck={false}
+                                value={vercelTeamIdInput}
+                                onChange={(event) => setVercelTeamIdInput(event.target.value)}
+                                placeholder="team_..."
+                              />
+                            </label>
+                          )}
+                          <button
+                            type="button"
+                            className="subtle-action"
+                            disabled={connectionActionBusy === connection.alias || !(connectionTokenInputs[connection.alias] || '').trim()}
+                            onClick={() => void connectManagedConnection(connection)}
+                          >
+                            {connectionActionBusy === connection.alias ? 'Connecting…' : connection.status === 'DISCONNECTED' ? 'Connect' : 'Reconnect'}
+                          </button>
+                        </div>
+                      )}
+                      {connection.status !== 'DISCONNECTED' && (
+                        <button
+                          type="button"
+                          className="text-action console-disconnect"
+                          disabled={connectionActionBusy === connection.alias}
+                          onClick={() => void disconnectManagedConnection(connection)}
+                        >
+                          Disconnect
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {connection.provider === 'supabase' && <p className="console-boundary-note">Authentication remains in the existing Remote Bridge / Project X surfaces; P7 does not create a second Supabase login path.</p>}
+                  <button type="button" className="text-action" disabled={connectionsBusy || connectionActionBusy === connection.alias} onClick={() => void refreshConnections(connection.alias)}>Refresh health</button>
+                    </>
+                  )}
+                </article>
+              ))}
+            </div>
+            <p className="console-boundary-note">Renderer-safe summaries only. Stored provider targets, credentials, tokens, and ciphertext are never read back or rendered.</p>
+          </section>
 
             <section className="remote-inbox-section control-center-connection-panel" aria-label="Project X connection">
               <div className="remote-inbox-header">
@@ -3012,9 +2959,27 @@ export default function App() {
         ) : (
           <>
             <header className="page-header" id="overview">
-              <div><p className="kicker">YOUR LOCAL CONTROL CENTER</p><h1>{activeNav === 'Overview' ? 'A clear view of your work.' : activeNav}</h1><p className="intro">{({ Overview: 'Monitor your workspace and choose where to work next.', Workspace: 'Choose the folder where Hearth can work.', Permissions: 'Decide which tools can act and which need your approval.', Logs: 'Follow activity from this app session.', 'AI Connectors': 'Manage the agents and services available to your workspace.', Updates: 'Check and prepare verified Hearth releases.' } as Partial<Record<NavItem, string>>)[activeNav]}</p></div>
+              <div><p className="kicker">{activeNav === 'Overview' ? 'YOUR LOCAL CONTROL CENTER' : 'SYSTEM'}</p><h1>{activeNav === 'Overview' ? 'A clear view of your work.' : 'System.'}</h1><p className="intro">{PAGE_INTRO[activeNav]}</p></div>
               <div className={`connection-pill ${running ? 'online' : ''}`}><span /> MCP Server · {running ? 'Running' : 'Offline'}</div>
             </header>
+
+            {activeNav === 'System' && (
+              <div className="control-center-tabs" role="tablist" aria-label="System sections">
+                {SYSTEM_TABS.map((tab) => (
+                  <button
+                    key={tab}
+                    type="button"
+                    role="tab"
+                    aria-selected={systemTab === tab}
+                    className={systemTab === tab ? 'active' : ''}
+                    onClick={() => setSystemTab(tab)}
+                  >
+                    <Icon name={tab === 'Workspace' ? 'folder' : tab === 'Permissions' ? 'lock' : tab === 'Activity' ? 'terminal' : tab === 'Storage' ? 'folder' : 'server'} />
+                    <span>{tab}</span>
+                  </button>
+                ))}
+              </div>
+            )}
 
             {activeNav === 'Overview' && <><section className={`power-console ${running ? 'is-running' : ''}`} aria-labelledby="server-title">
               <div className="console-copy"><div className="console-icon"><Icon name="server" /><span className="pulse-ring" /></div><div><p className="section-kicker">SERVER STATUS</p><h2 id="server-title">{running ? 'MCP server is active' : 'MCP server is standing by'}</h2><p>{running ? `Streamable HTTP listening on 127.0.0.1:${port}.` : 'Start the server to expose Hearth MCP tools locally.'}</p></div></div>
@@ -3029,24 +2994,24 @@ export default function App() {
             </section>
 
             <section className="calm-shortcuts" aria-label="Workspace shortcuts">
-              {([{ page: 'Task Console', title: 'Control Center', detail: 'Tasks, Goals, remote work, and agents', icon: 'console' }, { page: 'Console', title: 'Connections & approvals', detail: 'Review system health and evidence', icon: 'lock' }] as Array<{page: NavItem; title: string; detail: string; icon: IconName}>).map(item => <button type="button" key={item.page} onClick={() => navigate(item.page)}><Icon name={item.icon}/><strong>{item.title}</strong><span>{item.detail}</span><Icon name="chevron"/></button>)}
+              {([{ page: 'Goals', title: 'Goals', detail: 'What you asked for, and how far it has got', icon: 'flag' }, { page: 'Connections', title: 'Connections', detail: 'Agents and services this workspace can reach', icon: 'console' }, { page: 'System', title: 'System', detail: 'Workspace, permissions, activity, and updates', icon: 'lock' }] as Array<{page: NavItem; title: string; detail: string; icon: IconName}>).map(item => <button type="button" key={item.page} onClick={() => navigate(item.page)}><Icon name={item.icon}/><strong>{item.title}</strong><span>{item.detail}</span><Icon name="chevron"/></button>)}
             </section></>}
 
             <div className="dashboard-grid calm-system-page">
-              {activeNav === 'Workspace' && <section className="soft-panel workspace-panel" id="workspace">
+              {activeNav === 'System' && systemTab === 'Workspace' && <section className="soft-panel workspace-panel" id="workspace">
                 <div className="panel-title"><div><p className="section-kicker">WORKSPACE</p><h2>Working directory</h2></div><button className="round-button" aria-label="Copy workspace path" onClick={async () => { await navigator.clipboard.writeText(workspace); flash('Workspace path copied'); }}><Icon name="copy" /></button></div>
                 <div className="folder-well"><div className="folder-tab" /><div className="folder-icon"><Icon name="folder" /></div><label htmlFor="workspace-path">Current folder</label><input id="workspace-path" value={workspace} onChange={(event) => setWorkspace(event.target.value)} onBlur={() => void window.controlApp.saveSettings({ workspace })} disabled={isTaskRunning || isGoalActive} /><button onClick={chooseWorkspace} disabled={isTaskRunning || isGoalActive}>Choose folder <Icon name="chevron" /></button></div>
                 <p className="panel-note">{isGoalActive ? <span style={{ color: '#8a724f' }}>🔒 Workspace is locked while a goal is active.</span> : <><span /> Changes are restricted to this directory.</>}</p>
               </section>
 
               }
-              {activeNav === 'Permissions' && <section className="soft-panel permission-panel" id="permissions">
+              {activeNav === 'System' && systemTab === 'Permissions' && <section className="soft-panel permission-panel" id="permissions">
                 <div className="panel-title"><div><p className="section-kicker">PERMISSIONS</p><h2>Tool access</h2></div><span className="panel-meta">Click to change</span></div>
                 <div className="permission-list">{permissions.map((permission, index) => <button className={`permission-row${permission.disabled ? ' disabled' : ''}`} onClick={() => rotatePermission(index)} key={permission.name} disabled={permission.disabled} aria-disabled={permission.disabled}><span className="permission-copy"><strong>{permission.name}</strong><small>{permission.detail}</small></span><em className={`permission-value value-${permission.value.toLowerCase()}`}><i />{permission.value}{!permission.disabled && <Icon name="chevron" />}</em></button>)}</div>
               </section>
 
               }
-              {activeNav === 'Updates' && <section className="soft-panel update-panel" aria-labelledby="updates-title">
+              {activeNav === 'System' && systemTab === 'Updates' && <section className="soft-panel update-panel" aria-labelledby="updates-title">
                 <div className="panel-title">
                   <div><p className="section-kicker">UPDATE</p><h2 id="updates-title">Hearth updates</h2></div>
                   <span className={`update-status ${updateCheck?.state ?? 'idle'}`}>
@@ -3078,11 +3043,57 @@ export default function App() {
               </section>
 
               }
-              {activeNav === 'Logs' && <section className="soft-panel logs-panel" id="logs">
+              {activeNav === 'System' && systemTab === 'Activity' && <section className="soft-panel logs-panel" id="logs">
                 <div className="panel-title"><div><p className="section-kicker">ACTIVITY</p><h2>System log</h2></div><div className="log-actions"><span className="live-indicator"><i /> LIVE</span><button onClick={() => setLogs([])}>Clear log</button></div></div>
                 <div className="log-well" aria-live="polite">{logs.length === 0 ? <div className="empty-state"><Icon name="terminal" /><p>No activity recorded</p><small>New system events will appear here.</small></div> : logs.map((log, index) => <div className={`log-line ${log.tone}`} key={`${log.time}-${index}`}><time>{log.time}</time><span className="log-source">{log.source}</span><p>{log.message}</p></div>)}</div>
               </section>
               }
+              {activeNav === 'System' && systemTab === 'Activity' && <section className="soft-panel console-evidence-panel" aria-labelledby="console-evidence-title">
+              <div className="panel-title">
+                <div><p className="section-kicker">EVIDENCE</p><h2 id="console-evidence-title">Operational evidence</h2></div>
+                <span className="panel-meta">Read only</span>
+              </div>
+              <div className="console-evidence-grid">
+                <div>
+                  <h3>Current session</h3>
+                  <p className="console-evidence-caption">System logs and approval lifecycle events are retained only for this open app session.</p>
+                  <div className="console-evidence-list">
+                    {[...approvalEvidence].reverse().slice(0, 6).map((item) => (
+                      <article key={item.requestId}>
+                        <time>{item.time}</time>
+                        <strong>{item.permission} · {item.state}</strong>
+                        <p>{item.action}</p>
+                      </article>
+                    ))}
+                    {[...logs].reverse().slice(0, 6).map((log, index) => (
+                      <article key={`${log.time}-${log.source}-${index}`}>
+                        <time>{log.time}</time>
+                        <strong>{log.source}</strong>
+                        <p>{log.message}</p>
+                      </article>
+                    ))}
+                    {approvalEvidence.length === 0 && logs.length === 0 && <div className="console-empty compact"><p>No session evidence yet</p></div>}
+                  </div>
+                </div>
+                <div>
+                  <h3>Durable Goal checkpoints</h3>
+                  <p className="console-evidence-caption">These summaries come from Goal Runner checkpoint evidence already persisted by Hearth.</p>
+                  <div className="console-evidence-list">
+                    {durableGoalEvidence.map((item) => (
+                      <article key={item.checkpointId}>
+                        <time>{new Date(item.timestamp).toLocaleString()}</time>
+                        <strong>{item.goalTitle}</strong>
+                        <p>{item.summary || 'Checkpoint recorded'}</p>
+                        <small>{item.filesChanged.length ? `${item.filesChanged.length} file(s) changed` : 'No changed files recorded'} · {Object.keys(item.checks || {}).length} check(s)</small>
+                      </article>
+                    ))}
+                    {durableGoalEvidence.length === 0 && <div className="console-empty compact"><p>No durable Goal checkpoints yet</p></div>}
+                  </div>
+                </div>
+              </div>
+            </section>
+              }
+              {activeNav === 'System' && systemTab === 'Storage' && <StorageAudit />}
             </div>
           </>
         )}
