@@ -377,7 +377,7 @@ footer { color: var(--faint); display: flex; font-size: 8px; justify-content: sp
 .control-center-header { display: flex; flex-direction: column; gap: 16px; margin-bottom: 4px; }
 .control-center-title-row { align-items: flex-start; display: flex; justify-content: space-between; gap: 18px; }
 .control-center-title-row h1 { color: var(--text); font-size: clamp(29px,3vw,38px); font-weight: 720; letter-spacing: -.045em; line-height: 1; margin: 0 0 8px; }
-.control-center-tabs { align-items: center; background: var(--panel-soft); border: 1px solid var(--highlight); border-radius: 14px; box-shadow: 4px 6px 14px var(--shadow-soft), -3px -3px 8px var(--highlight); display: grid; gap: 6px; grid-template-columns: repeat(3,minmax(0,1fr)); padding: 5px; }
+.control-center-tabs { align-items: center; background: var(--panel-soft); border: 1px solid var(--highlight); border-radius: 14px; box-shadow: 4px 6px 14px var(--shadow-soft), -3px -3px 8px var(--highlight); display: grid; gap: 6px; grid-auto-flow: column; grid-auto-columns: minmax(0,1fr); padding: 5px; }
 .control-center-tabs button { align-items: center; background: transparent; border: 1px solid transparent; border-radius: 10px; color: var(--muted); display: flex; font-size: 11px; font-weight: 700; gap: 7px; justify-content: center; min-height: 38px; padding: 8px 14px; transition: .15s ease; }
 .control-center-tabs button:hover { color: var(--text); }
 .control-center-tabs button.active { background: var(--panel); border-color: var(--highlight); box-shadow: 3px 4px 9px var(--shadow-soft), -2px -2px 6px var(--highlight); color: var(--text); }
@@ -785,7 +785,7 @@ footer { color: var(--faint); display: flex; font-size: 8px; justify-content: sp
 
 @media (max-width: 700px) {
   .control-center-title-row { align-items: stretch; flex-direction: column; }
-  .control-center-tabs { grid-template-columns: 1fr; }
+  .control-center-tabs { grid-auto-flow: row; grid-auto-columns: auto; }
   .control-center-tabs button { justify-content: flex-start; }
   .task-center-tabs { grid-template-columns: 1fr; }
   .task-center-tabs button { justify-content: flex-start; padding-left: 14px; }

@@ -93,6 +93,18 @@ interface LiveV2CoordinatorState {
     evaluated_at: string | null;
   };
   circuit_breaker_active: boolean;
+  /** READY setups whose price was outside the entry zone, still on their original levels. */
+  waiting_for_entry: Array<{
+    signal_id: string;
+    strategy: 'SMC_IDM' | 'HARMONIC_PRZ';
+    direction: 'BUY' | 'SELL';
+    entry_zone: [number, number];
+    invalidation: number;
+    targets: number[];
+    first_ready_at: string;
+    expires_at: string;
+    registered_at: string | null;
+  }>;
 }
 interface DemoExecutionState {
   state: 'idle' | 'executing' | 'unavailable';

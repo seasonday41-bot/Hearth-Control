@@ -1,5 +1,7 @@
+import { useEffect, useState } from 'react';
 import type { Dispatch, ReactNode, SetStateAction } from 'react';
 import Icon from '../Icon';
+import { freshness, setupSteps, setupSummary, timeLeft } from '../invest-setup-progress';
 import type { V2CoordinatorDisplay } from '../invest-coordinator-status';
 
 type Permission = PermissionValue;
@@ -48,6 +50,20 @@ export default function InvestPage({
   useInvestKillSwitch,
   v2CoordinatorDisplay,
 }: Props): ReactNode {
+  // A display-only tick so a waiting setup's countdown moves between status
+  // pushes. It reads nothing and decides nothing.
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const bridge = investStatus?.mt5_bridge;
+  const barFeed = freshness(bridge?.snapshots.length ? Math.max(...bridge.snapshots.map((item) => item.age_ms)) : null);
+  const riskFeed = freshness(bridge?.risk_snapshot?.age_ms);
+  const executorLive = Boolean(bridge?.executor_ready) && bridge?.executor_account_type === 'demo';
+  const waiting = investStatus?.v2.waiting_for_entry ?? [];
+
   return (
     <div className="invest-view">
       <header className="page-header">
@@ -60,10 +76,10 @@ export default function InvestPage({
       </header>
 
       <section className="invest-status-grid" aria-label="Invest services">
-        <article><span className={`invest-status-dot ${investStatus?.mt5_bridge.snapshots.length ? 'ready' : ''}`} /><div><small>MT5 BRIDGE</small><strong>{investStatus?.mt5_bridge.snapshots.length ? 'Connected' : investStatus?.mt5_bridge.running ? 'Waiting for price' : 'Offline'}</strong><p>{investStatus?.mt5_bridge.snapshots.length ? `${investStatus.mt5_bridge.snapshots[0].broker_symbol} · ${investStatus.mt5_bridge.snapshots.map((item) => item.timeframe).join(', ')}` : 'Open the MT5 EA to stream XAUUSD data.'}</p></div></article>
+        <article><span className={`invest-status-dot ${barFeed.tone === 'live' ? 'ready' : barFeed.tone === 'absent' ? '' : 'warn'}`} /><div><small>MT5 PRICE FEED</small><strong>{barFeed.tone === 'live' ? 'Live' : barFeed.tone === 'absent' ? (bridge?.running ? 'Waiting for the EA' : 'Offline') : barFeed.label}</strong><p>{barFeed.tone === 'live' ? `${bridge?.snapshots[0]?.broker_symbol} · ${bridge?.snapshots.map((item) => item.timeframe).join(', ')}` : barFeed.tone === 'absent' ? 'Attach the MT5 EA to a XAUUSD chart to stream prices.' : 'Too old for the Risk Gate. Nothing will trade until it is live again.'}</p></div></article>
         <article><span className={`invest-status-dot ${investStatus?.search_ai.ready ? 'ready' : ''}`} /><div><small>SEARCH AI</small><strong>{investStatus?.search_ai.ready ? investStatus.search_ai.approval_required ? 'Ask before research' : 'Ready' : 'Blocked'}</strong><p>Uses fixed-origin market sources. It does not require Browser automation.</p></div></article>
         <article><span className={`invest-status-dot ${investStatus?.invest_ai.ready ? 'ready' : ''}`} /><div><small>INVEST AI</small><strong>{investStatus?.monitor.state === 'analyzing' ? 'Analyzing' : investStatus?.invest_ai.ready ? 'Ready' : 'Unavailable'}</strong><p>AI narrative cannot change direction, confidence, entry, stop loss, or take profit.</p></div></article>
-        <article><span className={`invest-status-dot ${investStatus?.execution.transport_ready && investStatus?.execution.enabled && investStatus?.execution.executor_account_type === 'demo' ? 'ready' : ''}`} /><div><small>DEMO EXECUTOR</small><strong>{investStatus?.execution.enabled ? investStatus.execution.transport_ready ? investStatus.execution.executor_account_type === 'demo' ? 'Armed' : 'Blocked: live account' : 'Waiting for V3 EA' : 'Inactive'}</strong><p>Only internal READY + Risk-approved V2 signals may use the demo command channel. No renderer order button exists.</p></div></article>
+        <article><span className={`invest-status-dot ${investStatus?.execution.transport_ready && investStatus?.execution.enabled && investStatus?.execution.executor_account_type === 'demo' ? 'ready' : ''}`} /><div><small>DEMO EXECUTOR</small><strong>{investStatus?.execution.enabled ? investStatus.execution.transport_ready ? investStatus.execution.executor_account_type === 'demo' ? 'Armed' : 'Blocked: live account' : 'Waiting for V3 EA' : 'Inactive'}</strong><p>{executorLive ? `Account telemetry ${riskFeed.label.toLowerCase()}. Only a READY setup that Risk approves may use this channel.` : 'Only internal READY + Risk-approved V2 signals may use the demo command channel. No renderer order button exists.'}</p></div></article>
       </section>
 
       <section className="soft-panel invest-controller" aria-labelledby="invest-mode-title">
@@ -95,13 +111,31 @@ export default function InvestPage({
         <div className="invest-v2-grid">
           {(['SMC_IDM', 'HARMONIC_PRZ'] as const).map((key) => {
             const setup = investStatus?.v2.strategies[key];
+            const steps = setupSteps(key, setup?.state, setup?.reason_codes ?? []);
+            const hasLevels = Boolean(setup?.entry_zone);
             return <article key={key} className="invest-v2-card">
               <div className="invest-signal-heading"><span className={`invest-v2-state state-${(setup?.state || 'NO_SETUP').toLowerCase()}`}>{setup?.state || 'NO SETUP'}</span><strong>{key === 'SMC_IDM' ? 'SMC + IDM' : 'Harmonic PRZ'}</strong><span className={`invest-direction direction-${setup?.direction === 'BUY' ? 'up' : setup?.direction === 'SELL' ? 'down' : 'neutral'}`}>{setup?.direction || '—'}</span></div>
-              <div className="invest-signal-levels"><span>Entry <strong>{setup?.entry_zone ? setup.entry_zone.join('–') : '—'}</strong></span><span>SL <strong>{setup?.invalidation ?? '—'}</strong></span><span>TP1 <strong>{setup?.targets[0] ?? '—'}</strong></span><span>Signal <strong>{setup?.signal_id ? setup.signal_id.slice(-8) : '—'}</strong></span></div>
-              <small>{setup?.reason_codes.length ? setup.reason_codes.join(' · ') : setup?.state === 'READY' ? 'Technical setup confirmed.' : 'Waiting for a valid setup.'}</small>
+              {hasLevels && <div className="invest-signal-levels"><span>Entry zone <strong>{setup?.entry_zone?.join('–')}</strong><em>{setup?.direction === 'BUY' ? 'ask must be inside' : 'bid must be inside'}</em></span><span>Stop <strong>{setup?.invalidation ?? '—'}</strong><em>cancels the setup</em></span><span>Target <strong>{setup?.targets[0] ?? '—'}</strong><em>first take profit</em></span><span>Signal <strong>{setup?.signal_id ? setup.signal_id.slice(-8) : '—'}</strong></span></div>}
+              <ol className="invest-setup-steps">
+                {steps.map((step) => <li key={step.label} className={`step-${step.state}`}><span aria-hidden="true">{step.state === 'done' ? '✓' : step.state === 'failed' ? '✕' : step.state === 'waiting' ? '•' : '·'}</span>{step.label}</li>)}
+              </ol>
+              <small>{setupSummary(setup?.state, setup?.reason_codes ?? [])}</small>
             </article>;
           })}
         </div>
+        {waiting.length > 0 && <div className="invest-waiting-entry">
+          <p className="section-kicker">WAITING FOR ENTRY</p>
+          {waiting.map((item) => {
+            const left = timeLeft(item.expires_at, nowMs);
+            return <div key={item.signal_id} className="invest-waiting-row">
+              <strong>{item.strategy === 'SMC_IDM' ? 'SMC + IDM' : 'Harmonic PRZ'} {item.direction}</strong>
+              <span>Zone {item.entry_zone.join('–')}</span>
+              <span>{left ? `Expires in ${left}` : 'Expired'}</span>
+            </div>;
+          })}
+          <small>These keep their original zone and stop. They enter only if the price comes back inside the zone before the time runs out, and Risk approves again.</small>
+        </div>}
+
         <div className="invest-v2-risk-summary">
           <div><small>V2 COORDINATOR</small><strong className={`invest-v2-coordinator-status status-${v2CoordinatorDisplay.tone}`}>{v2CoordinatorDisplay.label}</strong><p>{investStatus?.v2.execution_blocked_reason ? `Execution: ${investStatus.v2.execution_blocked_reason.replaceAll('_', ' ')}` : 'Execution path has no active blocker.'}</p></div>
           <div><small>RISK DECISION</small><strong>{investStatus?.v2.risk.decision || (investStatus?.risk_config.configured ? 'Waiting for READY' : 'Not configured')}</strong><p>{investStatus?.v2.risk.approved_volume != null ? `Approved volume: ${investStatus.v2.risk.approved_volume}` : 'No lot size is selected unless Risk approves a READY setup.'}</p></div>
