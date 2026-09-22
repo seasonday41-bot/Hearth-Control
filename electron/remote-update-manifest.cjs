@@ -183,15 +183,22 @@ function validateRemoteManifestSchema(manifest, options = {}) {
   }
 
   // Optional source-build metadata used only by the owner's LOCAL_UPDATE
-  // mode. Public DMG updates remain unchanged; when present this signed
-  // record pins the source repository, full commit, archive path and hash.
+  // mode. Public DMG updates remain unchanged. transport: 'git' is the
+  // private-repository owner-Mac path; runtime derives the remote URL from the
+  // fixed trusted repository and fetches the exact signed commit with host Git
+  // credentials. The legacy archive shape remains accepted.
   if (manifest.source !== undefined) {
     const source = manifest.source;
-    if (!source || typeof source !== 'object' || Array.isArray(source)
-      || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(source.repository || '')
-      || !/^[0-9a-f]{40}$/.test(source.commit || '')
-      || source.archivePath !== `${source.repository}/archive/${source.commit}.tar.gz`
-      || !/^[a-f0-9]{64}$/i.test(source.sha256 || '')) {
+    const baseValid = source && typeof source === 'object' && !Array.isArray(source)
+      && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(source.repository || '')
+      && /^[0-9a-f]{40}$/.test(source.commit || '');
+    const gitValid = baseValid && source.transport === 'git'
+      && source.archivePath === undefined && source.sha256 === undefined;
+    const archiveValid = baseValid
+      && source.transport === undefined
+      && source.archivePath === source.repository + '/archive/' + source.commit + '.tar.gz'
+      && /^[a-f0-9]{64}$/i.test(source.sha256 || '');
+    if (!gitValid && !archiveValid) {
       throw new Error('Manifest source metadata is invalid.');
     }
   }

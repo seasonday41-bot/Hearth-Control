@@ -6,7 +6,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { buildAndStageLocalUpdate, validateSourceManifest } from '../electron/local-update.cjs';
+import { buildAndStageLocalUpdate, buildAndStageGitUpdate, validateSourceManifest } from '../electron/local-update.cjs';
 import { validateRemoteManifestSchema } from '../electron/remote-update-manifest.cjs';
 
 const exec = promisify(execFile);
@@ -22,6 +22,7 @@ await exec('/usr/bin/tar', ['-czf', archive, '-C', root, path.basename(fixture)]
 const archiveBytes = await fs.readFile(archive);
 const sourceSha = crypto.createHash('sha256').update(archiveBytes).digest('hex');
 const manifest = { version: '0.4.24', buildId: '0.4.24-aaaaaaa', builtAt: '2026-09-22T00:00:00.000Z', source: { repository: 'seasonday41-bot/Hearth-Control', commit: 'a'.repeat(40), archivePath: 'seasonday41-bot/Hearth-Control/archive/' + 'a'.repeat(40) + '.tar.gz', sha256: sourceSha } };
+const gitManifest = { version: '0.4.24', buildId: '0.4.24-aaaaaaa', builtAt: '2026-09-22T00:00:00.000Z', source: { repository: 'seasonday41-bot/Hearth-Control', commit: 'a'.repeat(40), transport: 'git' } };
 
 after(() => fs.rm(root, { recursive: true, force: true }));
 
@@ -29,12 +30,17 @@ test('LOCAL_UPDATE validates the fixed repository, full commit, archive path and
   assert.equal(validateSourceManifest(manifest, { expectedRepository: 'seasonday41-bot/Hearth-Control' }).commit, 'a'.repeat(40));
   assert.throws(() => validateSourceManifest({ ...manifest, source: { ...manifest.source, repository: 'evil/repo' } }, { expectedRepository: 'seasonday41-bot/Hearth-Control' }), /not trusted/);
   assert.throws(() => validateSourceManifest({ ...manifest, source: { ...manifest.source, commit: 'bad' } }), /commit/);
+  assert.equal(validateSourceManifest(gitManifest, { expectedRepository: 'seasonday41-bot/Hearth-Control' }).transport, 'git');
+  assert.throws(() => validateSourceManifest({ ...gitManifest, source: { ...gitManifest.source, archivePath: 'evil' } }), /must not carry archive metadata/);
 });
 
 test('signed remote manifest schema accepts source metadata and rejects tampered source identity', () => {
   const remote = { schema: 'hearth-update-v2', version: manifest.version, buildId: manifest.buildId, builtAt: manifest.builtAt, channel: 'stable', platform: 'darwin', arch: 'arm64', appPath: 'Hearth Control.app', sha256: 'b'.repeat(64), artifact: { kind: 'dmg', path: 'Hearth-Control.dmg', size: 1, sha256: 'c'.repeat(64) }, releaseNotes: '', source: manifest.source };
   assert.equal(validateRemoteManifestSchema(remote, { requireSignature: false }), true);
   assert.throws(() => validateRemoteManifestSchema({ ...remote, source: { ...remote.source, archivePath: 'https://evil.example/source.tar.gz' } }, { requireSignature: false }), /source metadata/);
+  const gitRemote = { ...remote, source: gitManifest.source };
+  assert.equal(validateRemoteManifestSchema(gitRemote, { requireSignature: false }), true);
+  assert.throws(() => validateRemoteManifestSchema({ ...gitRemote, source: { ...gitRemote.source, archivePath: 'https://evil.example/source.tar.gz' } }, { requireSignature: false }), /source metadata/);
 });
 
 test('LOCAL_UPDATE fails closed on source hash mismatch and removes staging', async () => {
@@ -64,4 +70,51 @@ test('LOCAL_UPDATE successful fixture stages a hashed app and invokes ad-hoc sig
   assert.ok(calls.some(([file, args]) => file === '/usr/bin/codesign' && args.includes('--verify')));
   const distCall = calls.find(([file, args]) => file === 'npm' && args[0] === 'run' && args[1] === 'dist:mac');
   assert.equal(distCall?.[2]?.env?.HEARTH_BUILD_SOURCE_COMMIT, manifest.source.commit, 'archive build must receive the signed source commit identity');
+});
+
+
+test('LOCAL_UPDATE private Git mode fetches only the signed exact commit from the fixed repository', async () => {
+  const calls = [];
+  const stageRoot = path.join(root, 'updates-git-ok');
+  const result = await buildAndStageGitUpdate({
+    manifest: gitManifest,
+    stagingRoot: stageRoot,
+    expectedRepository: 'seasonday41-bot/Hearth-Control',
+    execFileFn: async (file, args, options = {}) => {
+      calls.push([file, args, options]);
+      if (file === 'git' && args[0] === 'init') {
+        await fs.mkdir(path.join(args[1], 'electron'), { recursive: true });
+        await fs.mkdir(path.join(args[1], 'release', 'mac-arm64', 'Hearth Control.app', 'Contents'), { recursive: true });
+        await fs.writeFile(path.join(args[1], 'package.json'), JSON.stringify({ version: '0.4.24' }));
+        await fs.writeFile(path.join(args[1], 'electron', 'build-meta.json'), JSON.stringify({ version: '0.4.24', buildId: '0.4.24-aaaaaaa', commit: 'a'.repeat(40), dirty: false }));
+        await fs.writeFile(path.join(args[1], 'release', 'mac-arm64', 'Hearth Control.app', 'Contents', 'app.asar'), 'fixture');
+        return { stdout: '' };
+      }
+      if (file === 'git' && args.includes('rev-parse')) return { stdout: 'a'.repeat(40) + '\n' };
+      if (file === 'git' && args.includes('get-url')) return { stdout: 'https://github.com/seasonday41-bot/Hearth-Control.git\n' };
+      if (file === 'git' || file === 'npm' || file === '/usr/bin/codesign') return { stdout: '' };
+      throw new Error('unexpected command ' + file);
+    },
+  });
+  assert.equal(result.localManifest.buildId, gitManifest.buildId);
+  assert.ok(calls.some(([file, args]) => file === 'git' && args.join(' ') === '-C ' + path.join(stageRoot, gitManifest.buildId, 'source') + ' fetch --depth=1 --no-tags origin ' + 'a'.repeat(40)));
+  assert.ok(calls.some(([file, args]) => file === 'git' && args.includes('https://github.com/seasonday41-bot/Hearth-Control.git')));
+  assert.equal(calls.some(([, args]) => args.some((arg) => String(arg).includes('evil'))), false);
+});
+
+test('LOCAL_UPDATE private Git mode rejects a fetched commit that differs from the signed commit', async () => {
+  const stageRoot = path.join(root, 'updates-git-mismatch');
+  await assert.rejects(() => buildAndStageGitUpdate({
+    manifest: gitManifest,
+    stagingRoot: stageRoot,
+    expectedRepository: 'seasonday41-bot/Hearth-Control',
+    sign: false,
+    execFileFn: async (file, args) => {
+      if (file === 'git' && args[0] === 'init') return { stdout: '' };
+      if (file === 'git' && args.includes('rev-parse')) return { stdout: 'b'.repeat(40) + '\n' };
+      if (file === 'git') return { stdout: '' };
+      throw new Error('unexpected command');
+    },
+  }), /does not match the signed source identity/);
+  assert.equal(await fs.stat(path.join(stageRoot, gitManifest.buildId)).catch(() => null), null);
 });

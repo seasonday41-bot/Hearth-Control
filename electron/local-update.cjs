@@ -21,11 +21,18 @@ const validateSourceManifest = (manifest, { expectedRepository } = {}) => {
   if (!REPOSITORY.test(source.repository)) throw new Error('LOCAL_UPDATE source repository is invalid.');
   if (expectedRepository && source.repository !== expectedRepository) throw new Error('LOCAL_UPDATE source repository is not trusted.');
   if (!SOURCE_COMMIT.test(source.commit)) throw new Error('LOCAL_UPDATE source commit is invalid.');
-  if (typeof source.archivePath !== 'string' || source.archivePath !== `${source.repository}/archive/${source.commit}.tar.gz`) {
-    throw new Error('LOCAL_UPDATE source archive path is invalid.');
+  if (source.transport === 'git') {
+    if (source.archivePath !== undefined || source.sha256 !== undefined) {
+      throw new Error('LOCAL_UPDATE git source must not carry archive metadata.');
+    }
+  } else {
+    if (source.transport !== undefined) throw new Error('LOCAL_UPDATE source transport is unsupported.');
+    if (typeof source.archivePath !== 'string' || source.archivePath !== source.repository + '/archive/' + source.commit + '.tar.gz') {
+      throw new Error('LOCAL_UPDATE source archive path is invalid.');
+    }
+    if (!/^[a-f0-9]{64}$/i.test(source.sha256 || '')) throw new Error('LOCAL_UPDATE source SHA-256 is invalid.');
   }
-  if (!/^[a-f0-9]{64}$/i.test(source.sha256 || '')) throw new Error('LOCAL_UPDATE source SHA-256 is invalid.');
-  if (manifest?.buildId !== `${manifest.version}-${source.commit.slice(0, 7)}`) throw new Error('LOCAL_UPDATE build ID is not derived from the source commit.');
+  if (manifest?.buildId !== manifest.version + '-' + source.commit.slice(0, 7)) throw new Error('LOCAL_UPDATE build ID is not derived from the source commit.');
   return source;
 };
 
@@ -70,6 +77,60 @@ async function downloadSourceArchive({ manifest, sourceRoot, updatesDir, trusted
   }
 }
 
+async function buildPreparedSource({ manifest, source, repoRoot, buildRoot, execFileFn, sign }) {
+  const packageJson = JSON.parse(await fs.promises.readFile(path.join(repoRoot, 'package.json'), 'utf8'));
+  if (packageJson.version !== manifest.version) throw new Error('LOCAL_UPDATE source version does not match manifest.');
+  await execFileFn('npm', ['ci'], { cwd: repoRoot, shell: false, timeout: 15 * 60 * 1000 });
+  await execFileFn('npm', ['run', 'dist:mac'], {
+    cwd: repoRoot,
+    shell: false,
+    timeout: 30 * 60 * 1000,
+    env: { ...process.env, HEARTH_BUILD_SOURCE_COMMIT: source.commit },
+  });
+  const meta = JSON.parse(await fs.promises.readFile(path.join(repoRoot, 'electron', 'build-meta.json'), 'utf8').catch(() => '{}'));
+  if (meta.version !== manifest.version || meta.buildId !== manifest.buildId || meta.commit !== source.commit || meta.dirty === true) {
+    throw new Error('LOCAL_UPDATE generated build metadata does not match the signed source identity.');
+  }
+  const appPath = path.join(repoRoot, 'release', 'mac-arm64', PRODUCT_NAME);
+  const appStat = await fs.promises.stat(appPath).catch(() => null);
+  if (!appStat?.isDirectory()) throw new Error('LOCAL_UPDATE packaging did not produce Hearth Control.app.');
+  if (sign) await execFileFn('/usr/bin/codesign', ['--force', '--deep', '--sign', '-', appPath], { shell: false, timeout: 5 * 60 * 1000 });
+  if (sign) await execFileFn('/usr/bin/codesign', ['--verify', '--deep', '--strict', appPath], { shell: false, timeout: 5 * 60 * 1000 });
+  const staged = path.join(buildRoot, 'staged');
+  await safeMkdir(staged);
+  await fs.promises.cp(appPath, path.join(staged, PRODUCT_NAME), { recursive: true, force: false, errorOnExist: true, verbatimSymlinks: true });
+  const treeSha256 = await sha256Directory(path.join(staged, PRODUCT_NAME));
+  const localManifest = { version: manifest.version, buildId: manifest.buildId, builtAt: manifest.builtAt, platform: 'darwin', arch: 'arm64', appPath: PRODUCT_NAME, sha256: treeSha256 };
+  await fs.promises.writeFile(path.join(staged, MANIFEST_NAME), JSON.stringify(localManifest, null, 2) + '\n');
+  return { buildRoot, stagedDir: staged, stagedAppPath: path.join(staged, PRODUCT_NAME), localManifest };
+}
+
+async function buildAndStageGitUpdate({ manifest, stagingRoot, expectedRepository, execFileFn = execFileAsync, sign = true }) {
+  const source = validateSourceManifest(manifest, { expectedRepository });
+  if (source.transport !== 'git') throw new Error('LOCAL_UPDATE git transport is required.');
+  const root = path.resolve(stagingRoot);
+  const buildRoot = path.join(root, manifest.buildId);
+  const repoRoot = path.join(buildRoot, 'source');
+  if (!isInside(root, buildRoot)) throw new Error('LOCAL_UPDATE staging path escaped its trusted root.');
+  const remoteUrl = 'https://github.com/' + source.repository + '.git';
+  await fs.promises.rm(buildRoot, { recursive: true, force: true });
+  await safeMkdir(buildRoot);
+  try {
+    await execFileFn('git', ['init', repoRoot], { shell: false, timeout: 60_000 });
+    await execFileFn('git', ['-C', repoRoot, 'remote', 'add', 'origin', remoteUrl], { shell: false, timeout: 60_000 });
+    await execFileFn('git', ['-C', repoRoot, 'fetch', '--depth=1', '--no-tags', 'origin', source.commit], { shell: false, timeout: 5 * 60 * 1000 });
+    await execFileFn('git', ['-C', repoRoot, 'checkout', '--detach', 'FETCH_HEAD'], { shell: false, timeout: 60_000 });
+    const head = String((await execFileFn('git', ['-C', repoRoot, 'rev-parse', 'HEAD'], { shell: false, timeout: 30_000 })).stdout || '').trim();
+    if (head !== source.commit) throw new Error('LOCAL_UPDATE fetched Git commit does not match the signed source identity.');
+    const actualRemote = String((await execFileFn('git', ['-C', repoRoot, 'remote', 'get-url', 'origin'], { shell: false, timeout: 30_000 })).stdout || '').trim();
+    if (actualRemote !== remoteUrl) throw new Error('LOCAL_UPDATE Git remote does not match the trusted repository.');
+    return await buildPreparedSource({ manifest, source, repoRoot, buildRoot, execFileFn, sign });
+  } catch (error) {
+    await fs.promises.rm(buildRoot, { recursive: true, force: true }).catch(() => {});
+    throw error;
+  }
+}
+
 async function buildAndStageLocalUpdate({ manifest, archivePath, stagingRoot, expectedRepository, execFileFn = execFileAsync, sign = true }) {
   const source = validateSourceManifest(manifest, { expectedRepository });
   const archiveHash = crypto.createHash('sha256').update(await fs.promises.readFile(archivePath)).digest('hex');
@@ -86,35 +147,11 @@ async function buildAndStageLocalUpdate({ manifest, archivePath, stagingRoot, ex
     const top = entries.filter((entry) => entry.isDirectory());
     if (top.length !== 1 || !top[0].name.endsWith(`-${source.commit}`)) throw new Error('LOCAL_UPDATE source archive root does not match the signed commit.');
     const repoRoot = path.join(checkout, top[0].name);
-    const packageJson = JSON.parse(await fs.promises.readFile(path.join(repoRoot, 'package.json'), 'utf8'));
-    if (packageJson.version !== manifest.version) throw new Error('LOCAL_UPDATE source version does not match manifest.');
-    await execFileFn('npm', ['ci'], { cwd: repoRoot, shell: false, timeout: 15 * 60 * 1000 });
-    await execFileFn('npm', ['run', 'dist:mac'], {
-      cwd: repoRoot,
-      shell: false,
-      timeout: 30 * 60 * 1000,
-      env: { ...process.env, HEARTH_BUILD_SOURCE_COMMIT: source.commit },
-    });
-    const meta = JSON.parse(await fs.promises.readFile(path.join(repoRoot, 'electron', 'build-meta.json'), 'utf8').catch(() => '{}'));
-    if (meta.version !== manifest.version || meta.buildId !== manifest.buildId || meta.commit !== source.commit || meta.dirty === true) {
-      throw new Error('LOCAL_UPDATE generated build metadata does not match the signed source identity.');
-    }
-    const appPath = path.join(repoRoot, 'release', 'mac-arm64', PRODUCT_NAME);
-    const appStat = await fs.promises.stat(appPath).catch(() => null);
-    if (!appStat?.isDirectory()) throw new Error('LOCAL_UPDATE packaging did not produce Hearth Control.app.');
-    if (sign) await execFileFn('/usr/bin/codesign', ['--force', '--deep', '--sign', '-', appPath], { shell: false, timeout: 5 * 60 * 1000 });
-    if (sign) await execFileFn('/usr/bin/codesign', ['--verify', '--deep', '--strict', appPath], { shell: false, timeout: 5 * 60 * 1000 });
-    const staged = path.join(buildRoot, 'staged');
-    await safeMkdir(staged);
-    await fs.promises.cp(appPath, path.join(staged, PRODUCT_NAME), { recursive: true, force: false, errorOnExist: true, verbatimSymlinks: true });
-    const treeSha256 = await sha256Directory(path.join(staged, PRODUCT_NAME));
-    const localManifest = { version: manifest.version, buildId: manifest.buildId, builtAt: manifest.builtAt, platform: 'darwin', arch: 'arm64', appPath: PRODUCT_NAME, sha256: treeSha256 };
-    await fs.promises.writeFile(path.join(staged, MANIFEST_NAME), `${JSON.stringify(localManifest, null, 2)}\n`);
-    return { buildRoot, stagedDir: staged, stagedAppPath: path.join(staged, PRODUCT_NAME), localManifest };
+    return await buildPreparedSource({ manifest, source, repoRoot, buildRoot, execFileFn, sign });
   } catch (error) {
     await fs.promises.rm(buildRoot, { recursive: true, force: true }).catch(() => {});
     throw error;
   }
 }
 
-module.exports = { MAX_SOURCE_BYTES, validateSourceManifest, downloadSourceArchive, buildAndStageLocalUpdate };
+module.exports = { MAX_SOURCE_BYTES, validateSourceManifest, downloadSourceArchive, buildAndStageLocalUpdate, buildAndStageGitUpdate };

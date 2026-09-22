@@ -2931,6 +2931,14 @@ app.whenReady().then(async () => {
       phase = 'stage';
       const staged = fetched.manifest.source
         ? await (async () => {
+          sendEvent({ type: 'updater:state', state: 'building' });
+          if (fetched.manifest.source.transport === 'git') {
+            return localUpdate.buildAndStageGitUpdate({
+              manifest: fetched.manifest,
+              stagingRoot: info.updateDirectory,
+              expectedRepository: updateTrust.SOURCE_REPOSITORY,
+            });
+          }
           const sourceArchive = await localUpdate.downloadSourceArchive({
             manifest: fetched.manifest,
             sourceRoot: remoteUpdateOptions().sourceArchiveBaseUrl,
@@ -2938,7 +2946,6 @@ app.whenReady().then(async () => {
             trustedOrigin: remoteUpdateOptions().sourceArchiveBaseUrl.replace(/\/$/, ''),
             trustedOrigins: [remoteUpdateOptions().sourceArchiveBaseUrl.replace(/\/$/, '')],
           });
-          sendEvent({ type: 'updater:state', state: 'building' });
           return localUpdate.buildAndStageLocalUpdate({
             manifest: fetched.manifest,
             archivePath: sourceArchive.archivePath,
