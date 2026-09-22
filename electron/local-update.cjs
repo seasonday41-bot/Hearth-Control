@@ -84,7 +84,7 @@ async function buildAndStageLocalUpdate({ manifest, archivePath, stagingRoot, ex
     await execFileFn('/usr/bin/tar', ['-xzf', archivePath, '-C', checkout], { shell: false });
     const entries = await fs.promises.readdir(checkout, { withFileTypes: true });
     const top = entries.filter((entry) => entry.isDirectory());
-    if (top.length !== 1) throw new Error('LOCAL_UPDATE source archive must contain one repository root.');
+    if (top.length !== 1 || !top[0].name.endsWith(`-${source.commit}`)) throw new Error('LOCAL_UPDATE source archive root does not match the signed commit.');
     const repoRoot = path.join(checkout, top[0].name);
     const packageJson = JSON.parse(await fs.promises.readFile(path.join(repoRoot, 'package.json'), 'utf8'));
     if (packageJson.version !== manifest.version) throw new Error('LOCAL_UPDATE source version does not match manifest.');

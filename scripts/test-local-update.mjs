@@ -11,14 +11,14 @@ import { validateRemoteManifestSchema } from '../electron/remote-update-manifest
 
 const exec = promisify(execFile);
 const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hearth-local-update-'));
-const fixture = path.join(root, 'repo');
+const fixture = path.join(root, 'Hearth-Control-' + 'a'.repeat(40));
 await fs.mkdir(path.join(fixture, 'electron'), { recursive: true });
 await fs.writeFile(path.join(fixture, 'package.json'), JSON.stringify({ version: '0.4.24' }));
 await fs.writeFile(path.join(fixture, 'electron', 'build-meta.json'), JSON.stringify({ version: '0.4.24', buildId: '0.4.24-aaaaaaa', commit: 'a'.repeat(40), dirty: false }));
 await fs.mkdir(path.join(fixture, 'release', 'mac-arm64', 'Hearth Control.app', 'Contents'), { recursive: true });
 await fs.writeFile(path.join(fixture, 'release', 'mac-arm64', 'Hearth Control.app', 'Contents', 'app.asar'), 'fixture');
 const archive = path.join(root, 'source.tar.gz');
-await exec('/usr/bin/tar', ['-czf', archive, '-C', root, 'repo']);
+await exec('/usr/bin/tar', ['-czf', archive, '-C', root, path.basename(fixture)]);
 const archiveBytes = await fs.readFile(archive);
 const sourceSha = crypto.createHash('sha256').update(archiveBytes).digest('hex');
 const manifest = { version: '0.4.24', buildId: '0.4.24-aaaaaaa', builtAt: '2026-09-22T00:00:00.000Z', source: { repository: 'seasonday41-bot/Hearth-Control', commit: 'a'.repeat(40), archivePath: 'seasonday41-bot/Hearth-Control/archive/' + 'a'.repeat(40) + '.tar.gz', sha256: sourceSha } };
