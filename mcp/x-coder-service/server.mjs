@@ -15,9 +15,11 @@ import { XCoderIdempotencyStore } from './idempotency-store.mjs';
 import { XCoderRunRegistry } from './run-registry.mjs';
 import { RealXCoderExecutor } from './real-executor.mjs';
 import { StubExecutor } from './stub-executor.mjs';
+import { X_CODER_AUTH_HEADER, constantTimeEquals, defaultXCoderAuthSecretPath, ensureXCoderAuthSecret } from '../x/x-coder-auth.mjs';
 
 const DEFAULT_PORT = 3217;
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
+const PROTECTED_ROUTES = new Set(['/submit', '/status', '/cancel', '/lease-valid']);
 
 export const defaultXCoderStoragePath = () =>
   path.join(os.homedir(), '.hearth-control', 'x-coder-service', 'idempotency.sqlite');
@@ -138,8 +140,11 @@ export async function startXCoderHttpServer({
   executor,
   host = '127.0.0.1',
   port = DEFAULT_PORT,
+  authSecret,
+  authSecretPath = defaultXCoderAuthSecretPath(),
 } = {}) {
   const ownedService = service ?? createXCoderService({ storagePath, executor });
+  const secret = authSecret ?? ensureXCoderAuthSecret({ secretPath: authSecretPath });
   const server = http.createServer(async (request, response) => {
     try {
       if (request.method === 'GET' && request.url === '/health') {
@@ -152,8 +157,14 @@ export async function startXCoderHttpServer({
         return;
       }
 
-      if (request.method !== 'POST' || !['/submit', '/status', '/cancel', '/lease-valid'].includes(request.url)) {
+      if (request.method !== 'POST' || !PROTECTED_ROUTES.has(request.url)) {
         sendJson(response, 404, { error: 'not_found' });
+        return;
+      }
+
+      const presented = request.headers[X_CODER_AUTH_HEADER];
+      if (!constantTimeEquals(typeof presented === 'string' ? presented : '', secret)) {
+        sendJson(response, 401, { error: 'unauthorized' });
         return;
       }
 
@@ -203,6 +214,7 @@ export async function startXCoderHttpServer({
     service: ownedService,
     server,
     host,
+    authSecret: secret,
     port: typeof address === 'object' && address ? address.port : port,
     async stop({ closeService = true } = {}) {
       await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
@@ -214,6 +226,7 @@ export async function startXCoderHttpServer({
 const isMain = Boolean(process.argv[1]) && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
 if (isMain) {
   const storagePath = process.env.X_CODER_STORAGE_PATH || defaultXCoderStoragePath();
+  const authSecretPath = process.env.X_CODER_AUTH_SECRET_PATH || defaultXCoderAuthSecretPath();
   const port = process.env.X_CODER_PORT ? Number(process.env.X_CODER_PORT) : DEFAULT_PORT;
   const delayMs = process.env.X_CODER_STUB_DELAY_MS ? Number(process.env.X_CODER_STUB_DELAY_MS) : 25;
   const counterPath = process.env.X_CODER_STUB_COUNTER_PATH || null;
@@ -224,6 +237,7 @@ if (isMain) {
 
   const runtime = await startXCoderHttpServer({
     storagePath,
+    authSecretPath,
     port,
     executor,
   });

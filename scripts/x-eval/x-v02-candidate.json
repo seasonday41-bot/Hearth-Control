@@ -1,8 +1,8 @@
 {
   "name": "x-v0.2-candidate",
   "schema": 1,
-  "frozen_at": "2026-09-22T16:35:22.191Z",
-  "base_head": "aa037adcbad7eaf93583349c3be89dd15dab939b",
+  "frozen_at": "2026-09-22T21:50:53.907Z",
+  "base_head": "5d85b8fdbfadce4ae0906b4a5ea649f6f5c6c265",
   "committed": false,
   "gold_fingerprint": "f6ac8bfae42af5c5417e2da485f1b61f94c3e3ed6bb72cf5f3f8b142a9bdc03f",
   "x_files": {
@@ -42,15 +42,17 @@
     "mcp/x/skill-integration.mjs": "ae5e02f43a741f583baee8a9455929fc82428ffec0f783b0d863f7690c103502",
     "mcp/x/task-contract.mjs": "fc77927d03b5c3a6b67723858920afe6b43718e37cb6b7d320856cc6b90c5f6f",
     "mcp/x/validation-runner.mjs": "a0b157ede4dab995912feeed7b15a741655d7f172191d5ee3c0b986af6465986",
-    "mcp/x/x-coder-client.mjs": "a95990dc844970726f3e4400ec786f55b3f0f683ed5ecfa72ed10b67246e067f"
+    "mcp/x/x-coder-auth.mjs": "6c3022a35d8b602a164829be2350deb5325cb329b7e7def5a2a3f54976a71934",
+    "mcp/x/x-coder-auth.test.mjs": "6b3407482d9c38e9ca7144076c22f8f606549662ea2ca3c27bd5a958c780794a",
+    "mcp/x/x-coder-client.mjs": "59effbebe6a7b6e1fe61a1609ac3ed8241fa4dcf21cea2a26858229197281912"
   },
-  "x_sha256": "1102908e9acec64201312a833d42ad9b1bbf8df4544eb386cdf970bb23cc07b8",
-  "x_file_count": 37,
+  "x_sha256": "e65bdabcf899b26e76c3bbe9c8278827f56bc35edd478ee483503f4f77e3fcea",
+  "x_file_count": 39,
   "test_files": {
     "scripts/test-x-cancel-task.mjs": "be29acbf9ec790f55acb657081a7083a6edc3a597653e912ab74e09678d317e5",
     "scripts/test-x-candidate-freeze.mjs": "d09b9c9e2377f7d0d8ef76e17252916c2b145a3f62b4f6daa154aca9b9003769",
     "scripts/test-x-claim-store.mjs": "29488f4b3513566d1b97145b2c5221a15c9f9c793c12d51bb4f48eb27a05de34",
-    "scripts/test-x-coder-client.mjs": "ec440df10d28b756d22d0db42110576c92be1052634d325dea295871e52f0d84",
+    "scripts/test-x-coder-client.mjs": "0d9ca5073e5858ae10ed64bfd220ae28b3fa2b14ba061b4decac4b7c9cfe4c44",
     "scripts/test-x-coder-cutover.mjs": "ec5645f302f7fd16b6b90d1815c75a5e7bbfc64bb31378703a5f84a739ed8bb9",
     "scripts/test-x-console-visibility.mjs": "2f66ff28ef4291002b38b0498d3b04e635beb67b97f2d5d08c8ddd47897084f7",
     "scripts/test-x-context-loader.mjs": "22ded24712121592a92d73432b79df5d930b055733516a7cb47380c00c77261d",
@@ -84,7 +86,7 @@
     "scripts/test-x-validation-cancellation.mjs": "70037035c028d1343210d145e7c6555e39eddbb58fee48808b425ce849384022",
     "scripts/test-x-validation-runner.mjs": "60fd90d3294068b2d45dfa375802ef7da53cb86c4f4eb627be29910eca98ef71"
   },
-  "tests_sha256": "fc3cc72ef14e6c8b57d1c09129b4c1326f22bc2b31d95e78bf1775a85c26b4aa",
+  "tests_sha256": "1b7f37b1891dc53f6dadfa9f009ee1ea6839be4544001f26f2ee7d4ea23c66dd",
   "test_file_count": 36,
   "verification": {
     "verified_at": "2026-09-22T15:56:01.545285+00:00",

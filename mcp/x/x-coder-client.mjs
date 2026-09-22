@@ -1,4 +1,9 @@
 import { EXECUTOR_API_VERSION } from './executor-contract/index.mjs';
+import {
+  X_CODER_AUTH_HEADER,
+  defaultXCoderAuthSecretPath,
+  ensureXCoderAuthSecret,
+} from './x-coder-auth.mjs';
 
 const DEFAULT_BASE_URL = 'http://127.0.0.1:3217';
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]', '::1']);
@@ -38,12 +43,15 @@ export class XCoderClient {
     baseUrl = DEFAULT_BASE_URL,
     fetchFn = globalThis.fetch,
     timeoutMs = 10_000,
+    authSecret,
+    authSecretPath = defaultXCoderAuthSecretPath(),
   } = {}) {
     if (typeof fetchFn !== 'function') throw new TypeError('XCoderClient requires fetch.');
     if (!Number.isInteger(timeoutMs) || timeoutMs <= 0) throw new TypeError('timeoutMs must be a positive integer.');
     this.baseUrl = validateBaseUrl(baseUrl);
     this.fetchFn = fetchFn;
     this.timeoutMs = timeoutMs;
+    this.authSecret = authSecret ?? ensureXCoderAuthSecret({ secretPath: authSecretPath });
   }
 
   async _post(pathname, body, { signal } = {}) {
@@ -61,6 +69,7 @@ export class XCoderClient {
         headers: {
           accept: 'application/json',
           'content-type': 'application/json',
+          [X_CODER_AUTH_HEADER]: this.authSecret,
         },
         redirect: 'error',
         body: JSON.stringify(body),

@@ -7,6 +7,7 @@ import path from 'node:path';
 import { makeValidTask } from '../x/executor-contract/fixtures.mjs';
 import { createXCoderService, startXCoderHttpServer } from './server.mjs';
 import { StubExecutor } from './stub-executor.mjs';
+import { X_CODER_AUTH_HEADER } from '../x/x-coder-auth.mjs';
 
 const fixtures = [];
 const fixture = () => {
@@ -14,6 +15,7 @@ const fixture = () => {
   const item = {
     dir,
     storagePath: path.join(dir, 'x-coder-idempotency.sqlite'),
+    authSecretPath: path.join(dir, 'auth.secret'),
     services: [],
     servers: [],
   };
@@ -151,15 +153,17 @@ test('S4-5 HTTP boundary exposes submit/status/cancel over localhost JSON only',
   const item = fixture();
   const runtime = await startXCoderHttpServer({
     storagePath: item.storagePath,
+    authSecretPath: item.authSecretPath,
     port: 0,
     executor: new StubExecutor({ delayMs: 5 }),
   });
   item.servers.push(runtime);
   const base = 'http://127.0.0.1:' + runtime.port;
+  const authHeaders = { 'content-type': 'application/json', [X_CODER_AUTH_HEADER]: runtime.authSecret };
 
   const submitResponse = await fetch(base + '/submit', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: authHeaders,
     body: JSON.stringify({
       version: 'x-executor-api-v1',
       idempotency_key: 'idem-http',
@@ -174,7 +178,7 @@ test('S4-5 HTTP boundary exposes submit/status/cancel over localhost JSON only',
   await runtime.service.registry.waitForAttachedRun(submitted.run_id);
   const statusResponse = await fetch(base + '/status', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: authHeaders,
     body: JSON.stringify({ version: 'x-executor-api-v1', run_id: submitted.run_id }),
   });
   assert.equal(statusResponse.status, 200);
@@ -182,10 +186,143 @@ test('S4-5 HTTP boundary exposes submit/status/cancel over localhost JSON only',
 
   const invalidResponse = await fetch(base + '/submit', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: authHeaders,
     body: JSON.stringify({ version: 'x-executor-api-v1', idempotency_key: '', lease_expires_at: Date.now() + 60_000, task: makeValidTask() }),
   });
   assert.equal(invalidResponse.status, 400);
+});
+
+test('S10-1 protected routes reject a missing auth header before touching the executor', async () => {
+  const item = fixture();
+  const executor = new StubExecutor({ delayMs: 5 });
+  const runtime = await startXCoderHttpServer({
+    storagePath: item.storagePath,
+    authSecretPath: item.authSecretPath,
+    port: 0,
+    executor,
+  });
+  item.servers.push(runtime);
+  const base = 'http://127.0.0.1:' + runtime.port;
+
+  const response = await fetch(base + '/submit', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      version: 'x-executor-api-v1',
+      idempotency_key: 'idem-noauth',
+      lease_expires_at: Date.now() + 60_000,
+      task: makeValidTask(),
+    }),
+  });
+  assert.equal(response.status, 401);
+  assert.equal((await response.json()).error, 'unauthorized');
+  assert.equal(executor.calls, 0);
+});
+
+test('S10-2 protected routes reject an incorrect auth header before touching the executor', async () => {
+  const item = fixture();
+  const executor = new StubExecutor({ delayMs: 5 });
+  const runtime = await startXCoderHttpServer({
+    storagePath: item.storagePath,
+    authSecretPath: item.authSecretPath,
+    port: 0,
+    executor,
+  });
+  item.servers.push(runtime);
+  const base = 'http://127.0.0.1:' + runtime.port;
+
+  const response = await fetch(base + '/submit', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', [X_CODER_AUTH_HEADER]: 'wrong-secret' },
+    body: JSON.stringify({
+      version: 'x-executor-api-v1',
+      idempotency_key: 'idem-badauth',
+      lease_expires_at: Date.now() + 60_000,
+      task: makeValidTask(),
+    }),
+  });
+  assert.equal(response.status, 401);
+  assert.equal((await response.json()).error, 'unauthorized');
+  assert.equal(executor.calls, 0);
+});
+
+test('S10-3 status, cancel, and lease-valid all require the auth header', async () => {
+  const item = fixture();
+  const runtime = await startXCoderHttpServer({
+    storagePath: item.storagePath,
+    authSecretPath: item.authSecretPath,
+    port: 0,
+    executor: new StubExecutor({ delayMs: 5 }),
+  });
+  item.servers.push(runtime);
+  const base = 'http://127.0.0.1:' + runtime.port;
+
+  for (const route of ['/status', '/cancel', '/lease-valid']) {
+    const response = await fetch(base + route, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ version: 'x-executor-api-v1', run_id: 'does-not-matter' }),
+    });
+    assert.equal(response.status, 401, `${route} should require auth`);
+    assert.equal((await response.json()).error, 'unauthorized');
+  }
+});
+
+test('S10-4 /health stays open and unauthenticated', async () => {
+  const item = fixture();
+  const runtime = await startXCoderHttpServer({
+    storagePath: item.storagePath,
+    authSecretPath: item.authSecretPath,
+    port: 0,
+    executor: new StubExecutor({ delayMs: 5 }),
+  });
+  item.servers.push(runtime);
+
+  const response = await fetch('http://127.0.0.1:' + runtime.port + '/health');
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.status, 'ok');
+});
+
+test('S10-5 a valid auth header is accepted on submit, status, cancel, and lease-valid', async () => {
+  const item = fixture();
+  const runtime = await startXCoderHttpServer({
+    storagePath: item.storagePath,
+    authSecretPath: item.authSecretPath,
+    port: 0,
+    executor: new StubExecutor({ delayMs: 10_000 }),
+  });
+  item.servers.push(runtime);
+  const base = 'http://127.0.0.1:' + runtime.port;
+  const headers = { 'content-type': 'application/json', [X_CODER_AUTH_HEADER]: runtime.authSecret };
+
+  const submitResponse = await fetch(base + '/submit', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      version: 'x-executor-api-v1',
+      idempotency_key: 'idem-valid-auth',
+      lease_expires_at: Date.now() + 60_000,
+      task: makeValidTask(),
+    }),
+  });
+  assert.equal(submitResponse.status, 200);
+  const submitted = await submitResponse.json();
+
+  const leaseResponse = await fetch(base + '/lease-valid', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ version: 'x-executor-api-v1', run_id: submitted.run_id, lease_expires_at: Date.now() + 90_000 }),
+  });
+  assert.equal(leaseResponse.status, 200);
+
+  const cancelResponse = await fetch(base + '/cancel', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ version: 'x-executor-api-v1', run_id: submitted.run_id }),
+  });
+  assert.equal(cancelResponse.status, 200);
+  assert.equal((await cancelResponse.json()).acknowledged, true);
 });
 
 

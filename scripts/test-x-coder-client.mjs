@@ -8,22 +8,28 @@ import { makeValidTask } from '../mcp/x/executor-contract/fixtures.mjs';
 import { XCoderClient } from '../mcp/x/x-coder-client.mjs';
 import { startXCoderHttpServer } from '../mcp/x-coder-service/server.mjs';
 import { StubExecutor } from '../mcp/x-coder-service/stub-executor.mjs';
+import { X_CODER_AUTH_HEADER } from '../mcp/x/x-coder-auth.mjs';
 
 const runtimes = [];
 const dirs = [];
 
-const startStub = async ({ delayMs = 10 } = {}) => {
+const startStub = async ({ delayMs = 10, executor } = {}) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hearth-x-coder-client-'));
   dirs.push(dir);
+  const authSecretPath = path.join(dir, 'auth.secret');
+  const stubExecutor = executor ?? new StubExecutor({ delayMs });
   const runtime = await startXCoderHttpServer({
     storagePath: path.join(dir, 'idempotency.sqlite'),
+    authSecretPath,
     port: 0,
-    executor: new StubExecutor({ delayMs }),
+    executor: stubExecutor,
   });
   runtimes.push(runtime);
   return {
     runtime,
-    client: new XCoderClient({ baseUrl: 'http://127.0.0.1:' + runtime.port }),
+    executor: stubExecutor,
+    authSecretPath,
+    client: new XCoderClient({ baseUrl: 'http://127.0.0.1:' + runtime.port, authSecretPath }),
   };
 };
 
@@ -115,4 +121,41 @@ test('C6-2 submit requires the initial lease deadline and leaseValid validates a
   );
   await assert.rejects(() => client.leaseValid('', Date.now() + 1000), TypeError);
   await assert.rejects(() => client.leaseValid('run-1', 0), TypeError);
+});
+
+test('R1-C1 a client constructed with the matching secret authenticates successfully', async () => {
+  const { runtime, client } = await startStub();
+  const submitted = await client.submit({ idempotencyKey: 'auth-ok', task: makeValidTask(), leaseExpiresAt: Date.now() + 60_000 });
+  assert.equal(submitted.duplicate, false);
+  await runtime.service.registry.waitForAttachedRun(submitted.runId);
+});
+
+test('R1-C2 a request with no auth header is rejected and never reaches the executor', async () => {
+  const { runtime, executor } = await startStub({ delayMs: 5 });
+  const response = await fetch('http://127.0.0.1:' + runtime.port + '/submit', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      version: 'x-executor-api-v1',
+      idempotency_key: 'no-header',
+      lease_expires_at: Date.now() + 60_000,
+      task: makeValidTask(),
+    }),
+  });
+  assert.equal(response.status, 401);
+  assert.equal(executor.calls, 0);
+});
+
+test('R1-C3 a client constructed with the wrong secret is rejected and never reaches the executor', async () => {
+  const { runtime, executor, authSecretPath } = await startStub({ delayMs: 5 });
+  const badClient = new XCoderClient({
+    baseUrl: 'http://127.0.0.1:' + runtime.port,
+    authSecretPath,
+    authSecret: 'not-the-real-secret',
+  });
+  await assert.rejects(
+    () => badClient.submit({ idempotencyKey: 'wrong-secret', task: makeValidTask(), leaseExpiresAt: Date.now() + 60_000 }),
+    /x_coder_unauthorized/,
+  );
+  assert.equal(executor.calls, 0);
 });

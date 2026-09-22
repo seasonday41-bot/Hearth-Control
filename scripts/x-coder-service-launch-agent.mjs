@@ -6,7 +6,13 @@ import {
   X_CODER_LAUNCH_AGENT_LABEL,
   buildXCoderLaunchAgentPlist,
   resolveXCoderLaunchAgentPaths,
+  stageXCoderServiceRuntime,
 } from '../mcp/x-coder-service/launch-agent.mjs';
+import { ensureXCoderAuthSecret } from '../mcp/x/x-coder-auth.mjs';
+import {
+  installXCoderLaunchAgent,
+  uninstallXCoderLaunchAgent,
+} from '../mcp/x-coder-service/launch-agent-installer.mjs';
 
 const action = process.argv[2] || 'status';
 const supported = new Set(['install', 'status', 'uninstall', 'print']);
@@ -19,7 +25,20 @@ if (!supported.has(action)) {
   process.exit(2);
 }
 
-const paths = resolveXCoderLaunchAgentPaths();
+// A production/DMG install stages the running app's mcp/ tree into a stable,
+// per-version directory under Application Support and points the LaunchAgent
+// there instead of at the source repo or an asar archive. Dev/test mode
+// (the default) is unchanged: it points directly at this checkout.
+const packaged = process.env.X_CODER_PACKAGED_INSTALL === '1';
+const pathOptions = packaged
+  ? {
+    packaged: true,
+    appResourcesDir: process.env.X_CODER_APP_RESOURCES_DIR || undefined,
+    appVersion: process.env.X_CODER_APP_VERSION || undefined,
+  }
+  : {};
+
+const paths = resolveXCoderLaunchAgentPaths(pathOptions);
 const domain = `gui/${process.getuid?.() ?? os.userInfo().uid}`;
 const serviceTarget = `${domain}/${X_CODER_LAUNCH_AGENT_LABEL}`;
 
@@ -132,13 +151,16 @@ const waitForHealth = async () => {
 
 try {
   if (action === 'print') {
-    process.stdout.write(buildXCoderLaunchAgentPlist());
+    process.stdout.write(buildXCoderLaunchAgentPlist(pathOptions));
     process.exit(0);
   }
 
   failIfNotMac();
 
   if (action === 'install') {
+    if (packaged) {
+      stageXCoderServiceRuntime({ sourceMcpDir: paths.sourceMcpDir, destMcpDir: paths.stagedMcpDir });
+    }
     if (!fs.existsSync(paths.nodePath)) {
       throw new Error(`node executable not found: ${paths.nodePath}`);
     }
@@ -148,52 +170,55 @@ try {
 
     fs.mkdirSync(paths.launchAgentsDir, { recursive: true });
     fs.mkdirSync(paths.runtimeDir, { recursive: true, mode: 0o700 });
+    ensureXCoderAuthSecret({ secretPath: paths.authSecretPath });
 
-    const tempPath = paths.plistPath + '.tmp-' + process.pid;
-    fs.writeFileSync(tempPath, buildXCoderLaunchAgentPlist(), { encoding: 'utf8', mode: 0o600 });
-    fs.renameSync(tempPath, paths.plistPath);
-    fs.chmodSync(paths.plistPath, 0o600);
-
-    runLaunchctl(['bootout', serviceTarget], { allowFailure: true });
-    let bootstrapped = false;
-    let bootstrapResult = null;
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 120));
-      bootstrapResult = runLaunchctl(['bootstrap', domain, paths.plistPath], { allowFailure: true });
-      if (bootstrapResult.status === 0) { bootstrapped = true; break; }
-    }
-    if (!bootstrapped) {
-      const error = new Error((bootstrapResult?.stderr || bootstrapResult?.stdout || 'launchctl_bootstrap_failed').trim());
-      error.code = 'launchctl_bootstrap_failed';
-      throw error;
-    }
-    const serviceHealth = await waitForHealth();
+    const result = await installXCoderLaunchAgent({
+      plistPath: paths.plistPath,
+      plistContent: buildXCoderLaunchAgentPlist(pathOptions),
+      domain,
+      serviceTarget,
+      runLaunchctl,
+      waitForHealth,
+    });
 
     console.log(JSON.stringify({
-      ok: serviceHealth.ok,
+      ok: result.ok,
       action,
       label: paths.label,
+      packaged,
       plist_path: paths.plistPath,
       service_path: paths.servicePath,
+      staged_runtime_root: paths.stagedRuntimeRoot,
       storage_path: paths.storagePath,
+      auth_secret_path: paths.authSecretPath,
       stdout_path: paths.stdoutPath,
       stderr_path: paths.stderrPath,
-      health: serviceHealth,
+      stage: result.stage,
+      had_previous_service: result.hadPrevious,
+      rollback: result.rollback,
+      health: result.health,
     }, null, 2));
-    process.exit(serviceHealth.ok ? 0 : 4);
+    process.exit(result.ok ? 0 : 4);
   }
 
   if (action === 'uninstall') {
-    const stopped = runLaunchctl(['bootout', serviceTarget], { allowFailure: true });
-    fs.rmSync(paths.plistPath, { force: true });
+    const result = uninstallXCoderLaunchAgent({
+      plistPath: paths.plistPath,
+      serviceTarget,
+      runLaunchctl,
+    });
+
     console.log(JSON.stringify({
-      ok: true,
+      ok: result.ok,
       action,
       label: paths.label,
       plist_path: paths.plistPath,
-      launchctl_status: stopped.status,
+      had_plist: result.hadPlist,
+      reason: result.reason,
+      launchctl_status: result.launchctl.status,
+      launchctl_stderr: result.launchctl.stderr || null,
     }, null, 2));
-    process.exit(0);
+    process.exit(result.ok ? 0 : 6);
   }
 
   const printed = launchdSnapshot();
@@ -202,6 +227,7 @@ try {
     ok: printed.loaded && serviceHealth.ok,
     action,
     label: paths.label,
+    packaged,
     loaded: printed.loaded,
     pid: printed.pid,
     health: serviceHealth,

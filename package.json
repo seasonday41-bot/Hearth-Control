@@ -54,7 +54,9 @@
     "x-coder:status": "node scripts/x-coder-service-launch-agent.mjs status",
     "x-coder:uninstall": "node scripts/x-coder-service-launch-agent.mjs uninstall",
     "x-coder:print-launch-agent": "node scripts/x-coder-service-launch-agent.mjs print",
-    "test:x-coder-lifecycle": "node --test mcp/x-coder-service/launch-agent.test.mjs mcp/x-coder-service/post-cutover.test.mjs"
+    "test:x-coder-lifecycle": "node --test mcp/x-coder-service/launch-agent.test.mjs mcp/x-coder-service/launch-agent-installer.test.mjs mcp/x-coder-service/post-cutover.test.mjs",
+    "test:x-coder-service": "node --test mcp/x/x-coder-auth.test.mjs mcp/x-coder-service/service.test.mjs mcp/x-coder-service/restart.test.mjs mcp/x-coder-service/lease-watchdog.test.mjs mcp/x-coder-service/real-executor.test.mjs",
+    "test:x-coder-client": "node --test scripts/test-x-coder-client.mjs scripts/test-x-coder-cutover.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
