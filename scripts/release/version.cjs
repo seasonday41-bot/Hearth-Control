@@ -60,7 +60,16 @@ const gitState = () => {
     shortCommit: commit.slice(0, 7),
     // Only tracked, modified files make a build unreproducible; untracked files
     // are not part of what electron-builder packages.
-    dirty: git(['status', '--porcelain', '--untracked-files=no']).length > 0,
+    //
+    // electron/build-meta.json is excluded because every build rewrites it --
+    // it is generated FROM the commit, so its state cannot make a build
+    // untraceable, and counting it would mean no tree is ever clean after a
+    // build. Its correctness is checked directly by versionProblems().
+    dirty: git(['status', '--porcelain', '--untracked-files=no'])
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .some((line) => !line.endsWith('electron/build-meta.json')),
     committedAt: git(['show', '-s', '--format=%cI', 'HEAD']) || null,
     branch: git(['rev-parse', '--abbrev-ref', 'HEAD']) || null,
   };
