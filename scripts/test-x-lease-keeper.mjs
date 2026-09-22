@@ -72,6 +72,108 @@ test('K3 every renewal preserves exact owner, lease ID, and attempt', async () =
   assert.equal(keeper.claim.leaseId, item.claim.leaseId);
 });
 
+test('K3a onRenewed fires once for a successful renewal with the renewed authoritative claim', async () => {
+  const item = fixture(300);
+  const renewCalls = [];
+  const observed = [];
+  let resolveRenewed;
+  const renewedOnce = new Promise((resolve) => { resolveRenewed = resolve; });
+  const store = {
+    isOwner: (...args) => item.first.isOwner(...args),
+    getActiveClaim: (...args) => item.first.getActiveClaim(...args),
+    renew: (args) => {
+      renewCalls.push(args);
+      return item.first.renew(args);
+    },
+  };
+  const keeper = new XLeaseKeeper({
+    claimStore: store,
+    claim: item.claim,
+    onRenewed: (renewed) => {
+      observed.push(renewed);
+      resolveRenewed();
+    },
+  }).start();
+  item.keepers.push(keeper);
+
+  await renewedOnce;
+  await keeper.stop();
+
+  assert.equal(renewCalls.length, 1);
+  assert.deepEqual(renewCalls[0], {
+    taskId: item.claim.taskId,
+    ownerId: item.claim.ownerId,
+    leaseId: item.claim.leaseId,
+    leaseDurationMs: item.claim.leaseExpiresAt - item.claim.renewedAt,
+  });
+  assert.equal(observed.length, 1);
+  assert.equal(observed[0], keeper.claim);
+  assert.equal(observed[0].taskId, item.claim.taskId);
+  assert.equal(observed[0].ownerId, item.claim.ownerId);
+  assert.equal(observed[0].leaseId, item.claim.leaseId);
+  assert.equal(observed[0].attempt, item.claim.attempt);
+  assert.ok(observed[0].leaseExpiresAt > item.claim.leaseExpiresAt);
+});
+
+test('K3b onRenewed never fires on ownership loss or renewal error', async () => {
+  {
+    const item = fixture(120);
+    let calls = 0;
+    const keeper = new XLeaseKeeper({
+      claimStore: item.first,
+      claim: item.claim,
+      onRenewed: () => { calls += 1; },
+    }).start();
+    item.keepers.push(keeper);
+    item.second.release({ taskId: 'task-a', ownerId: 'owner-a', leaseId: item.claim.leaseId });
+    assert.equal((await keeper.done).status, 'ownership_lost');
+    assert.equal(calls, 0);
+  }
+
+  {
+    const item = fixture(120);
+    let calls = 0;
+    const failure = new Error('SQLite renewal failed');
+    const store = {
+      isOwner: (...args) => item.first.isOwner(...args),
+      getActiveClaim: (...args) => item.first.getActiveClaim(...args),
+      renew: () => { throw failure; },
+    };
+    const keeper = new XLeaseKeeper({
+      claimStore: store,
+      claim: item.claim,
+      onRenewed: () => { calls += 1; },
+    }).start();
+    item.keepers.push(keeper);
+    const outcome = await keeper.done;
+    assert.equal(outcome.status, 'error');
+    assert.equal(outcome.error, failure);
+    assert.equal(calls, 0);
+  }
+});
+
+test('K3c a throwing onRenewed observer cannot break the renewal loop or corrupt the claim', async () => {
+  const item = fixture(150);
+  let hookCalls = 0;
+  const keeper = new XLeaseKeeper({
+    claimStore: item.first,
+    claim: item.claim,
+    onRenewed: () => {
+      hookCalls += 1;
+      throw new Error('observer failure');
+    },
+  }).start();
+  item.keepers.push(keeper);
+
+  await sleep(260);
+  assert.equal(keeper.state, 'active');
+  assert.ok(hookCalls > 0);
+  assert.equal(keeper.claim.ownerId, item.claim.ownerId);
+  assert.equal(keeper.claim.leaseId, item.claim.leaseId);
+  assert.equal(keeper.claim.attempt, item.claim.attempt);
+  assert.ok(keeper.claim.leaseExpiresAt > item.claim.leaseExpiresAt);
+});
+
 test('K4 stop clears the timer and starts no further renewal', async () => {
   const item = fixture(120);
   let renewCount = 0;
