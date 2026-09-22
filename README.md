@@ -12,17 +12,19 @@ Anti/Antigravity was removed from the active UI, Electron runtime, MCP tools, an
 PLAN = Revised Slices 1-9 with Slice 7.5 real-executor proving stage
 ACTIVE_BRANCH = chore/system-ui-consolidation
 BASE_ORIGIN_MAIN = d60c883703918d86cdada77cedac4765cfcd6541
-CURRENT_SLICE = Slice 4 COMPLETE
+CURRENT_SLICE = Slice 5 COMPLETE
 SLICE_1 = XLeaseKeeper optional onRenewed hook; invoked only after a successful validated renewal; no production wiring yet
 SLICE_2 = XRunStore cancelled terminal status + cancelRunFenced(); live-lease fenced; retention-aware; no orchestration caller yet
 SLICE_3 = standalone executor-contract package + shared fixture corpus + differential compatibility gate against real task-contract.mjs; no production imports
 SLICE_4 = standalone localhost X Coder Service skeleton + own SQLite idempotency store; submitted/running rows reconcile to unknown_incomplete -> interrupted; duplicate keys never re-execute
+SLICE_5 = Hearth-side loopback XCoderClient for submit/status/cancel, tested only against Slice 4 stub; no production caller
 VALIDATION_SLICE_1 = node --test scripts/test-x-lease-keeper.mjs -> 14/14 PASS
 VALIDATION_SLICE_2 = run-store + fencing 65/65 PASS; run-x-task + startup + queue regressions 126/126 PASS
 VALIDATION_SLICE_3 = executor-contract node --test 9/9 PASS; TypeScript --strict --noEmit PASS; task-contract.mjs and run-x-task.mjs untouched
 VALIDATION_SLICE_4 = x-coder-service 6/6 PASS including real SIGKILL restart + side-effect counter; node --check PASS; no production imports; no hearth-runtime.sqlite reference
+VALIDATION_SLICE_5 = client + Slice 4 service/restart suites 11/11 PASS; loopback-only boundary; run-x-task.mjs and production-runtime.mjs untouched
 UNRELATED_LOCAL_FILES = scripts/HearthHistoryExport.mq5; scripts/replay-30d.mjs (left untracked and untouched)
-NEXT_EXACT_ACTION = Slice 5 only: add Hearth-side x-coder-client.mjs tested against Slice 4 localhost stub; do not wire into run-x-task.mjs
+NEXT_EXACT_ACTION = Slice 6 only: add required lease_expires_at to submit protocol and service watchdog/leaseValid extension; keep run-x-task.mjs and live keeper construction untouched
 CUTOVER_RULE = no production X Coder Service traffic before Slice 8; run-x-task.mjs stays in-process until cutover
 RECONCILIATION_RULE = reconcileStartupState() remains SQLite-local and synchronous; never add socket I/O inside it
 ```
