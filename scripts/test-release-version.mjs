@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
@@ -168,6 +169,12 @@ test('VER12 git state distinguishes "no repository" from "dirty repository"', ()
     assert.equal(state.commit, null);
     assert.equal(version.buildIdFor({ version: '1.0.0', shortCommit: null, dirty: false }), '1.0.0-nogit');
   }
+});
+
+test('VER12b generated build metadata is outside tracked source and remains available', () => {
+  assert.ok(fs.existsSync(version.BUILD_META));
+  assert.throws(() => execFileSync('git', ['ls-files', '--error-unmatch', 'electron/build-meta.json'], { cwd: version.ROOT, stdio: 'ignore' }));
+  assert.equal(execFileSync('git', ['check-ignore', 'electron/build-meta.json'], { cwd: version.ROOT, encoding: 'utf8' }).trim(), 'electron/build-meta.json');
 });
 
 test('VER13 the artifact filename the pipeline expects carries the canonical version', () => {

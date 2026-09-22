@@ -2,6 +2,7 @@
 node_modules/
 /dist/
 /release/
+/electron/build-meta.json
 /outputs/
 /index-x2L1zvPw.js
 /work/lnwjud-slides/

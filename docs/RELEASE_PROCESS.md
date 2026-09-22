@@ -35,6 +35,10 @@ its source, and gave no way to tell which source an artifact came from:
 | update manifest | built from `build-meta.json` |
 
 Never edit these by hand. `npm run set-version` writes all of them together.
+`electron/build-meta.json` is an untracked generated artifact because its
+commit-derived identity changes after the source commit is made. The release
+gate checks all tracked changes; it does not exempt metadata from dirty-tree
+checks. Keep the generated file available for packaging and provenance checks.
 
 ## Build identity
 
