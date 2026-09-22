@@ -4,19 +4,20 @@
  */
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import originalFs from 'original-fs';
-const fs = originalFs?.promises || (await import('node:fs/promises')).default;
+import fs from 'node:fs/promises';
 import os from 'node:os';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { createRequire } from 'node:module';
+const fsApi = process.versions.electron ? createRequire(import.meta.url)('original-fs').promises : fs;
 
 console.log('\n=== Hearth Control Packaged Smoke Test ===\n');
 
-const repoRoot = process.cwd();
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const asarPath = path.join(repoRoot, 'release/mac-arm64/Hearth Control.app/Contents/Resources/app.asar');
 
 // 1. Verify app.asar and dist/index.html
 console.log('1. Checking app.asar and frontend bundle assets...');
-const stat = await fs.stat(asarPath);
+const stat = await fsApi.stat(asarPath);
 assert.ok(stat.isFile() && stat.size > 1000000, 'app.asar must exist and be > 1MB');
 
 // Dynamically import packaged modules from app.asar
@@ -35,9 +36,9 @@ const { generatePairingSecret, hashPairingSecret } = await import(bridgeIdentity
 console.log('  PASS: Packaged modules loaded cleanly from app.asar');
 
 // 2. Setup isolated smoke fixture
-const fixtureDir = await fs.mkdtemp(path.join(os.tmpdir(), 'hearth-smoke-'));
+const fixtureDir = await fsApi.mkdtemp(path.join(os.tmpdir(), 'hearth-smoke-'));
 const testWorkspace = path.join(fixtureDir, 'workspace');
-await fs.mkdir(testWorkspace, { recursive: true });
+await fsApi.mkdir(testWorkspace, { recursive: true });
 const storageFile = path.join(fixtureDir, 'goals.json');
 
 const storage = new GoalStorage({ storagePath: storageFile });
@@ -137,5 +138,5 @@ assert.equal(redacted.includes('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9'), false);
 console.log('  PASS: Remote Bridge pairing and secret redaction intact');
 
 // Cleanup
-await fs.rm(fixtureDir, { recursive: true, force: true }).catch(() => {});
+await fsApi.rm(fixtureDir, { recursive: true, force: true }).catch(() => {});
 console.log('\n=== ALL PACKAGED SMOKE TESTS PASSED (8/8) ===\n');
