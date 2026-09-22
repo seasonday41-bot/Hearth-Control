@@ -159,6 +159,7 @@ export default function OverviewSystemPage({
           <dl className="update-facts">
             <div><dt>Current version</dt><dd>v{updaterInfo?.currentVersion ?? '—'}</dd></div>
             <div><dt>Current build</dt><dd title={updaterInfo?.currentBuildId}>{updaterInfo?.currentBuildId ?? '—'}</dd></div>
+            <div><dt>Commit</dt><dd title={updaterInfo?.currentCommit ?? undefined}>{updaterInfo?.currentCommit ? `${updaterInfo.currentCommit.slice(0, 7)}${updaterInfo.builtFromDirtyTree ? ' (dirty tree)' : ''}` : '—'}</dd></div>
             <div><dt>Build time</dt><dd>{updaterInfo?.builtAt ? new Date(updaterInfo.builtAt).toLocaleString() : 'Development build'}</dd></div>
             {updateCheck?.state === 'up_to_date' && updateCheck.latestRelease && <div><dt>Latest release</dt><dd title={updateCheck.latestRelease.buildId}>v{updateCheck.latestRelease.version} · {updateCheck.latestRelease.buildId}</dd></div>}
             {updateCheck?.available && <div><dt>New build</dt><dd>v{updateCheck.available.version} · {updateCheck.available.buildId}</dd></div>}

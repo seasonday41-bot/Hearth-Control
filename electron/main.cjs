@@ -1400,6 +1400,10 @@ const armXQueueCapacityWakeup = () => {
 const getUpdaterInfo = () => ({
   currentVersion: buildMetadata.version,
   currentBuildId: buildMetadata.buildId,
+  // The commit this binary was built from, so an installed app can be matched
+  // to its source rather than only to a version number.
+  currentCommit: buildMetadata.commit ?? null,
+  builtFromDirtyTree: buildMetadata.dirty === true,
   builtAt: buildMetadata.builtAt,
   updateDirectory: readSettings().updateDirectory,
   isPackaged: app.isPackaged,

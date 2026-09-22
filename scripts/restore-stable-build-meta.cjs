@@ -1,13 +1,26 @@
+// Restores the stable checkpoint before `npm run dev` / `npm start`, so a
+// developer run does not churn build-meta.json.
+//
+// The checkpoint is validated against the canonical version rather than a
+// hand-edited regex pinning one release series. That regex had to be updated by
+// hand in two files on every release, and forgetting either left a green tree
+// whose app reported the wrong version.
 const fs = require('node:fs');
-const path = require('node:path');
+const { currentVersion, versionProblems, readJson, writeJson, BUILD_META, STABLE_META } = require('./release/version.cjs');
 
-const root = path.join(__dirname, '..');
-const stablePath = path.join(root, 'electron/stable-build-meta.json');
-const targetPath = path.join(root, 'electron/build-meta.json');
-const stable = JSON.parse(fs.readFileSync(stablePath, 'utf8'));
-const packageJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+if (!fs.existsSync(STABLE_META)) {
+  process.stderr.write('No stable build metadata. Run: npm run set-version -- <version>\n');
+  process.exit(1);
+}
 
-if (stable.version !== packageJson.version) throw new Error(`Stable metadata version ${stable.version} does not match package version ${packageJson.version}`);
-if (!/^0\.4\.22-\d{14}-[0-9a-f]{6}$/.test(stable.buildId)) throw new Error('Stable metadata build ID is invalid');
-fs.writeFileSync(targetPath, `${JSON.stringify(stable, null, 2)}\n`);
+const problems = versionProblems({ version: currentVersion() });
+if (problems.length) {
+  process.stderr.write('Stable build metadata is inconsistent:\n');
+  for (const problem of problems) process.stderr.write(`  - ${problem}\n`);
+  process.stderr.write('Run: npm run set-version -- <version>\n');
+  process.exit(1);
+}
+
+const stable = readJson(STABLE_META);
+writeJson(BUILD_META, stable);
 process.stdout.write(`Restored stable build metadata: ${stable.buildId}\n`);

@@ -46,7 +46,12 @@
     "test:test-runner": "node --test-isolation=none --test scripts/test-test-runner.mjs",
     "smoke:local-provider": "node scripts/smoke-local-provider.mjs",
     "dist:mac": "npm run build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dmg --arm64",
-    "package:update": "npm run build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --arm64 && node scripts/generate-update-manifest.cjs"
+    "package:update": "npm run build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --arm64 && node scripts/generate-update-manifest.cjs",
+    "set-version": "node scripts/release/set-version.cjs",
+    "release:status": "node scripts/release/status.cjs",
+    "release:prepare": "node scripts/release/prepare.cjs",
+    "release:provenance": "node scripts/release/provenance.cjs",
+    "test:version": "node --test scripts/test-release-version.mjs scripts/test-build-metadata.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",

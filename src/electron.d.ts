@@ -295,7 +295,7 @@ interface PublicTasksState {
 
 type UpdateStatus = 'idle' | 'checking' | 'up_to_date' | 'update_available' | 'downloading' | 'verifying' | 'update_ready' | 'installing' | 'restarting' | 'rollback' | 'error';
 type UpdateInstallBlocker = 'X_ACTIVE' | 'GOAL_ACTIVE' | 'DURABLE_JOB_ACTIVE' | 'UPDATER_BUSY' | 'RUNTIME_STATE_UNAVAILABLE';
-interface UpdaterInfo { currentVersion: string; currentBuildId: string; builtAt: string | null; updateDirectory: string; }
+interface UpdaterInfo { currentVersion: string; currentBuildId: string; currentCommit: string | null; builtFromDirtyTree?: boolean; builtAt: string | null; updateDirectory: string; }
 interface UpdateCheck extends Pick<UpdaterInfo, 'currentVersion' | 'currentBuildId'> {
   state: UpdateStatus;
   available: { version: string; buildId: string; builtAt: string; platform: string; arch: string; dmgPath: string | null } | null;
