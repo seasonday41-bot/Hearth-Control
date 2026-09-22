@@ -112,14 +112,24 @@ test('VER9 a build ID without a commit is rejected as untraceable', () => {
 });
 
 test('VER10 setting the same version twice changes nothing the second time', () => {
-  const current = version.currentVersion();
-  const before = fs.readFileSync(version.PACKAGE_JSON, 'utf8');
-  const first = version.setVersion(current);
-  const second = version.setVersion(current);
-  assert.deepEqual(second.changed, [], 'a repeat run must be a no-op');
-  assert.equal(second.version, current);
-  assert.equal(fs.readFileSync(version.PACKAGE_JSON, 'utf8'), before, 'package.json must be untouched');
-  assert.ok(Array.isArray(first.changed));
+  // setVersion writes the real repository files, so snapshot every file it can
+  // touch and put them back. Without this the suite leaves the tree modified
+  // and races any sibling test file that reads the same metadata.
+  const touched = [version.PACKAGE_JSON, version.PACKAGE_LOCK, version.BUILD_META, version.STABLE_META];
+  const snapshot = touched.map((file) => [file, fs.readFileSync(file, 'utf8')]);
+  try {
+    const current = version.currentVersion();
+    const first = version.setVersion(current);
+    const second = version.setVersion(current);
+    assert.ok(Array.isArray(first.changed));
+    assert.deepEqual(second.changed, [], 'a repeat run must be a no-op');
+    assert.equal(second.version, current);
+  } finally {
+    for (const [file, content] of snapshot) fs.writeFileSync(file, content);
+  }
+  for (const [file, content] of snapshot) {
+    assert.equal(fs.readFileSync(file, 'utf8'), content, `${path.basename(file)} must be left as it was found`);
+  }
 });
 
 test('VER11 an invalid version is refused before anything is written', () => {

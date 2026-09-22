@@ -2,7 +2,7 @@
   "name": "hearth-control",
   "productName": "Hearth Control",
   "private": true,
-  "version": "0.4.22",
+  "version": "0.4.23",
   "type": "module",
   "description": "A local macOS control center for a desktop MCP workflow.",
   "author": "Hearth Control",
@@ -51,7 +51,7 @@
     "release:status": "node scripts/release/status.cjs",
     "release:prepare": "node scripts/release/prepare.cjs",
     "release:provenance": "node scripts/release/provenance.cjs",
-    "test:version": "node --test scripts/test-release-version.mjs scripts/test-build-metadata.mjs"
+    "test:version": "node --test --test-concurrency=1 scripts/test-release-version.mjs scripts/test-build-metadata.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
