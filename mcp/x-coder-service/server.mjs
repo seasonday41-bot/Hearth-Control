@@ -13,6 +13,7 @@ import {
 } from '../x/executor-contract/index.mjs';
 import { XCoderIdempotencyStore } from './idempotency-store.mjs';
 import { XCoderRunRegistry } from './run-registry.mjs';
+import { RealXCoderExecutor } from './real-executor.mjs';
 import { StubExecutor } from './stub-executor.mjs';
 
 const DEFAULT_PORT = 3217;
@@ -34,7 +35,7 @@ export function createXCoderService({ storagePath = defaultXCoderStoragePath(), 
   const interruptedOnStartup = store.reconcileStartupState();
   const registry = new XCoderRunRegistry({
     store,
-    executor: executor ?? new StubExecutor(),
+    executor: executor ?? new RealXCoderExecutor(),
   });
 
   return {
@@ -217,10 +218,14 @@ if (isMain) {
   const delayMs = process.env.X_CODER_STUB_DELAY_MS ? Number(process.env.X_CODER_STUB_DELAY_MS) : 25;
   const counterPath = process.env.X_CODER_STUB_COUNTER_PATH || null;
 
+  const executor = process.env.X_CODER_EXECUTOR === 'stub'
+    ? new StubExecutor({ delayMs, counterPath })
+    : new RealXCoderExecutor();
+
   const runtime = await startXCoderHttpServer({
     storagePath,
     port,
-    executor: new StubExecutor({ delayMs, counterPath }),
+    executor,
   });
 
   process.stdout.write(JSON.stringify({

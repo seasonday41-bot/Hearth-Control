@@ -16,6 +16,7 @@ const startChild = ({ storagePath, counterPath, delayMs }) => {
     env: {
       ...process.env,
       X_CODER_STORAGE_PATH: storagePath,
+      X_CODER_EXECUTOR: 'stub',
       X_CODER_PORT: '0',
       X_CODER_STUB_DELAY_MS: String(delayMs),
       X_CODER_STUB_COUNTER_PATH: counterPath,

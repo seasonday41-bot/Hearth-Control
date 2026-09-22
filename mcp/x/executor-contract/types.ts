@@ -112,7 +112,49 @@ export interface SubmitResponse {
   duplicate: boolean;
 }
 
-export interface ExecutorStatusResponse<TResult = unknown> {
+export type RepairStatus = 'validated' | 'escalation_required';
+export type RepairClassification = 'repairable' | 'escalate' | null;
+
+export interface RepairBlocker {
+  reason?: string;
+  code?: string;
+  path?: string;
+  detail?: string | null;
+  [key: string]: unknown;
+}
+
+export interface RepairValidationResult {
+  command: string;
+  status: string;
+  exitCode?: number | null;
+  signal?: string | null;
+  timedOut?: boolean;
+  stdout?: string;
+  stderr?: string;
+  summary?: string;
+  [key: string]: unknown;
+}
+
+export interface RepairRound {
+  round: number;
+  kind: 'execution' | 'validation';
+  executor: Record<string, unknown>;
+  validation: {
+    required: RepairValidationResult[];
+    optional: RepairValidationResult[];
+  } | null;
+  classification: RepairClassification;
+}
+
+export interface RepairOutcome {
+  task_id: string | null;
+  status: RepairStatus;
+  rounds: RepairRound[];
+  total_rounds: number;
+  blockers: RepairBlocker[];
+}
+
+export interface ExecutorStatusResponse<TResult = RepairOutcome> {
   version: typeof EXECUTOR_API_VERSION;
   run_id: string;
   status: ExecutorRunStatus;
