@@ -1,8 +1,8 @@
 {
   "name": "x-v0.2-candidate",
   "schema": 1,
-  "frozen_at": "2026-09-22T02:09:10.382Z",
-  "base_head": "b71b96b11d8f17c435b1d360d77bf455210debed",
+  "frozen_at": "2026-09-22T15:54:00.940Z",
+  "base_head": "39f5a09de75450d20cf9e4f646515ada9c503add",
   "committed": false,
   "gold_fingerprint": "f6ac8bfae42af5c5417e2da485f1b61f94c3e3ed6bb72cf5f3f8b142a9bdc03f",
   "x_files": {
@@ -11,6 +11,7 @@
     "mcp/skills/gateway.mjs": "4b222f23e0689fa1b88619f6693d0ebab24361260e1122950ca54c073eacb12f",
     "mcp/skills/registry.mjs": "4b650edce7b940561c53390b32428d225be305968fe24d2dabeaedc64b2d802c",
     "mcp/specialist/workspace-lock.mjs": "3932ae9892aed3c231f9e5b377c94f517a371e6dbad754bfaf99367526e19027",
+    "mcp/x/cancel-x-task.mjs": "453243f2843cfaf8e1660e1be57eefe01e102d83bf827ee0b927529ff71a220c",
     "mcp/x/cancellation.mjs": "8c3b5808db7ce01dc5c9f8f57d49ee9a337b113b78f8e5372a552624c858024f",
     "mcp/x/claim-store.mjs": "de7b38ad78596dcac7213a09c9964f7c2a80f2342a9f9f8b5a4a5f6f54a69334",
     "mcp/x/context-loader.mjs": "73b296aff19ed99c94ffa32e802a28ae157a05b6d0ca128440f4f41fdd5e829d",
@@ -18,10 +19,13 @@
     "mcp/x/dispatcher.mjs": "3746c31dc5dc56c462044f48de9fdf7f4c1ae7cbbc40bfb9059c44aff79d93aa",
     "mcp/x/edit-writer.mjs": "ccaf96a7dbd8dd2aa13a6cb30277fec5a2a4788d20e02173b9865f701f356012",
     "mcp/x/execute-x-task.mjs": "60fcd19b9278897c84e0cd4cd9767fded48e45cafee59c031b3cdaba9e1d9e6f",
+    "mcp/x/executor-contract/executor-api.schema.mjs": "eea15cfd7096ca52f44e371cc5d53009f11a1197ccf008280364c79a1b63cc2b",
+    "mcp/x/executor-contract/index.mjs": "9cb8f554a6c848190daf7228ab3579c28e5341d080240b1f0379d4401fc5af1e",
+    "mcp/x/executor-contract/x-task.schema.mjs": "4b98f2291aec42da3a9c1ed15661021f068a0534cb10e4785373bcf0229ed4fe",
     "mcp/x/executor.mjs": "2a4eca892a987c3b6dcd67072fdf2cabaae704dff37d4ded610ecfa1de6ad3b9",
     "mcp/x/failure-kinds.mjs": "c2c872629ad5b4f22cf56b3ff7804acec402fbd24146faa9e79236a189884888",
     "mcp/x/fingerprint.mjs": "9ddd03f3c4786b6e2a2a3ea0f47253fbf831c6007e30b052fa5a7fa335ccac45",
-    "mcp/x/lease-keeper.mjs": "040e37e0d6acce6e4f1fd84888350856e74a238271a952018d7fa13c28a98b2a",
+    "mcp/x/lease-keeper.mjs": "25588aaa5c9e96a07dfc01487ab60c234874f4a30c529be5d8d854b76b726f10",
     "mcp/x/local-executor.mjs": "a25e9a03aede524f8d6b4ab95a686be2a5374ff5e7292a45c6e95cb883e83332",
     "mcp/x/model-adapter.mjs": "0cbb2257d0266e4e8d5fc67bb03405ed880680dcf4a7839bc5ffeeadc2c06550",
     "mcp/x/production-runtime.mjs": "23a7fdd6d5382b2821d74c9da59f53b1d350a694cb2b99fe2ea7bc9478e5a5e4",
@@ -31,19 +35,22 @@
     "mcp/x/repair-loop.mjs": "356f619e0a3db56c3a87f7e2e041ff494c73b2303dffda82717055c2b294865d",
     "mcp/x/result-builder.mjs": "0cfebb121644cc2a3e3d4248fd488ed4963babb5ed4d6308fcf354cc9b2b6a97",
     "mcp/x/result-gate.mjs": "5c9330dd3f2f6c84530614be0c01124db1ffcf1ae325f7729a0e125fdbb3c8c3",
-    "mcp/x/run-store.mjs": "6c0cdbb7d125a51aaf81ccee6523bcb548d2ce810ba2ac693f371d0f4e3f3ace",
+    "mcp/x/run-store.mjs": "01c938c13491012dd72609c43869960d83de50cb7987444f0786ae9a38b29b9f",
     "mcp/x/run-x-task.mjs": "a68c707d52e9b6dac64f006d6a432e09786140a3135a4999bdc593b04d9c9bc1",
     "mcp/x/runtime-paths.mjs": "51ab5bb614163f4386df5c5a866686425e411041e3b97058a70ff30cdd06676f",
     "mcp/x/secret-guard.mjs": "2123eb3592d7e4d6abf222e6eadc0421b186cfa4c677aa4c7892db9b7fce0ba2",
     "mcp/x/skill-integration.mjs": "ae5e02f43a741f583baee8a9455929fc82428ffec0f783b0d863f7690c103502",
     "mcp/x/task-contract.mjs": "fc77927d03b5c3a6b67723858920afe6b43718e37cb6b7d320856cc6b90c5f6f",
-    "mcp/x/validation-runner.mjs": "a0b157ede4dab995912feeed7b15a741655d7f172191d5ee3c0b986af6465986"
+    "mcp/x/validation-runner.mjs": "a0b157ede4dab995912feeed7b15a741655d7f172191d5ee3c0b986af6465986",
+    "mcp/x/x-coder-client.mjs": "a95990dc844970726f3e4400ec786f55b3f0f683ed5ecfa72ed10b67246e067f"
   },
-  "x_sha256": "3ecf8437b8979fd3005d5445f39e152fb2d5d3749909f2e7ea9c2cc413008563",
-  "x_file_count": 32,
+  "x_sha256": "6b042cda7249fa59e274bd24f83b3a0133efdfb43a4f39ec8093dc636b04efe0",
+  "x_file_count": 37,
   "test_files": {
+    "scripts/test-x-cancel-task.mjs": "198464f4ffd32de7aaa0862c2fa820c0cc61658f0081e7b4356f42eef6920f97",
     "scripts/test-x-candidate-freeze.mjs": "d09b9c9e2377f7d0d8ef76e17252916c2b145a3f62b4f6daa154aca9b9003769",
     "scripts/test-x-claim-store.mjs": "29488f4b3513566d1b97145b2c5221a15c9f9c793c12d51bb4f48eb27a05de34",
+    "scripts/test-x-coder-client.mjs": "ec440df10d28b756d22d0db42110576c92be1052634d325dea295871e52f0d84",
     "scripts/test-x-console-visibility.mjs": "2f66ff28ef4291002b38b0498d3b04e635beb67b97f2d5d08c8ddd47897084f7",
     "scripts/test-x-context-loader.mjs": "22ded24712121592a92d73432b79df5d930b055733516a7cb47380c00c77261d",
     "scripts/test-x-context-retrieval.mjs": "ef6b876991e2cb054092aa802c3a308b81a74527a2a191ba11b0b06ff4cb9b0f",
@@ -53,7 +60,7 @@
     "scripts/test-x-excerpt-patch.mjs": "45ccc7db228c6f15d8b62186e3a759febf601c0aceef22c2f5dfd9ad52cf15fb",
     "scripts/test-x-execute-x-task.mjs": "24aad2f147d20b3e635226f5d3379fa69818283da3aee1b89bc729b04a1dde15",
     "scripts/test-x-failure-classification.mjs": "1bd286370012a90d464edb8af1bbc796d531c8e6ecfa48dad39aaab2a0ab54aa",
-    "scripts/test-x-lease-keeper.mjs": "897e80605deaea12d8f73543e8b99988b91d4a57d6aab53d29e0a5fe85bfe611",
+    "scripts/test-x-lease-keeper.mjs": "7573de6b57e8e4b97e007002956746c8febcb90444fdfba822462bd47b9c15e8",
     "scripts/test-x-local-executor.mjs": "f585f6e4a820a212fbd51f8e9ce7a0d5651bb6b388df5972316b5dacc4ca3435",
     "scripts/test-x-mcp-tools.mjs": "7624d5ddebfd866e1d7384f0b7d3403264b32cd8ce79437e164ebcd94a15c4ea",
     "scripts/test-x-model-adapter.mjs": "145ba27108c9229e4932a0288a68b07379726a59019d4fba4b1f81e15c201049",
@@ -65,8 +72,8 @@
     "scripts/test-x-result-builder.mjs": "4ea81dfca4d139459420ac24ecc44597adff66c057201ed82e9c5e3f3651c624",
     "scripts/test-x-result-gate.mjs": "3905a91d0b52809195d184a4bd30942bb17ee70b2dddf33d3b0ddb03383ebb2f",
     "scripts/test-x-run-cancellation.mjs": "92187ad692d930b7e747e4a9c0cc6ccc3bd41adeededea29cb22604813d08e82",
-    "scripts/test-x-run-fencing.mjs": "03f286bc4b540eb88281273104a94df6f5ffc69924ba0a08e65f3b602b81f4c6",
-    "scripts/test-x-run-store.mjs": "a5334b5b22ae0036fd169a893b55670b2a25de3ea7cb6e1158a34ea62ab704db",
+    "scripts/test-x-run-fencing.mjs": "e45890640065cff5a051ef5c7c20aace61bd9c5aad6c6aa791ead264d07596f2",
+    "scripts/test-x-run-store.mjs": "dcbbabdb43ee5f33955cc5bb7364d9d1126a4451d8933fe6109d1ce96a3d19e6",
     "scripts/test-x-run-x-task.mjs": "ba44078c5519ee2fac32616c81409215d4dbf859bb68d3206d491b0d25db9f07",
     "scripts/test-x-runtime-paths.mjs": "814ac52a745fcd3f219b840235c9a02cdd2f410f9d32ead197292712cc679328",
     "scripts/test-x-skill-integration.mjs": "10d90b23488bac61b17a1d2b53c657f6e5d9c4f0717f02aa2fd2e4158951d4db",
@@ -76,31 +83,31 @@
     "scripts/test-x-validation-cancellation.mjs": "7ccc5028ccc449212843e57a84beb67adf882d4f1f1ecff513c90d9f91f1946b",
     "scripts/test-x-validation-runner.mjs": "60fd90d3294068b2d45dfa375802ef7da53cb86c4f4eb627be29910eca98ef71"
   },
-  "tests_sha256": "1f2003cc153335336e5b0427b772dc6d6ef0b3bf4e6f751fe4fbc8baf5e17535",
-  "test_file_count": 33,
+  "tests_sha256": "f084bc626cf7555fdbb97886d431a7342a1b01507319d53823696b12e9b0f899",
+  "test_file_count": 35,
   "verification": {
-    "verified_at": "2026-09-21T06:08:15.018Z",
+    "verified_at": "2026-09-22T15:56:01.545285+00:00",
     "x_test_suite": {
       "command": "node --test scripts/test-x-*.mjs",
-      "tests": 715,
-      "pass": 714,
-      "fail": 1,
-      "known_failure": "none (EVT12 was a stale source-text regex that did not accept the async serverProcess message handler; the assertion now matches behaviour and passes)"
-    },
-    "related_suites": {
-      "tests": 77,
-      "pass": 77,
+      "tests": 730,
+      "pass": 730,
       "fail": 0,
-      "note": "goal/queue/router/specialist tests that import the changed modules"
+      "known_failure": null
     },
-    "runner_smoke": {
-      "checks": 49,
-      "passed": 49,
-      "results": "scripts/x-eval/runner-smoke-results-x-v02.json"
+    "slice_7_5": {
+      "x_coder_contract_non_live": "36/36 PASS",
+      "core_x_original_suites": "111/111 PASS",
+      "live_default_ollama": "1/1 PASS",
+      "live_mid_writer_cancel": "PASS; target SHA-256 and mtime unchanged; no temp residue"
     },
-    "oracle_probes": "scripts/x-eval/oracle-probes-v02-slice2-results.json (stub oracle only)",
-    "baseline_dry_run": "baseline.mjs --adapter stub:oracle: 3/3 SUCCESS; freeze guard verified_at_start=true",
-    "no_real_model_run": true
+    "pre_cutover_current_tree": {
+      "durable_job_runtime": "10/10 PASS",
+      "update_ready_recovery": "6/6 PASS",
+      "connections": "18/18 PASS",
+      "build_typecheck_vite": "PASS"
+    },
+    "gold_fingerprint_unchanged": true,
+    "real_model_run": true
   },
   "exceptions": [
     {
@@ -130,6 +137,29 @@
       "rationale": "src/App.tsx is being split into src/pages/*. The X visibility assertions are claims about the renderer, not about which file holds the JSX, so they now hold wherever the X run list lives.",
       "assertions_changed": "none - every assertion is unchanged, only the source it reads is broader",
       "no_x_source_change": true
+    },
+    {
+      "approved_at": "2026-09-22",
+      "approved_by": "repository owner",
+      "scope": "X Coder extraction Slices 1-7.5",
+      "change": "approved additive extraction: lease renewal hook, cancelled run state, executor contract, loopback X Coder service/client, inert lease heartbeat, explicit cancellation ordering, and standalone real RepairOutcome execution",
+      "introduced_by": [
+        "01ef866",
+        "0e91099",
+        "7f51d9b",
+        "b8e860c",
+        "b560cfe",
+        "50ee895",
+        "2466956",
+        "3a327a6"
+      ],
+      "rationale": "Canonical revised implementation plan explicitly authorizes these X changes before Slice 8 cutover.",
+      "does_not_touch": [
+        "Gold fingerprint",
+        "production run-x-task cutover",
+        "production-runtime client wiring",
+        "synchronous SQLite startup reconciliation"
+      ]
     }
   ]
 }
