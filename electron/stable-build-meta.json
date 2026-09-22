@@ -1,8 +1,8 @@
 {
-  "version": "0.4.24",
-  "buildId": "0.4.24-61c3ff8",
-  "builtAt": "2026-09-22T09:12:35+07:00",
-  "commit": "61c3ff8884341ad34d8bce58f7ac06f14ee21680",
+  "version": "0.4.25",
+  "buildId": "0.4.25-462b896",
+  "builtAt": "2026-09-23T05:23:35+07:00",
+  "commit": "462b896376e2be39cb41d169c805e23149389cf5",
   "dirty": false,
   "platform": "darwin",
   "arch": "arm64"
