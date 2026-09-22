@@ -49,7 +49,12 @@
     "release:status": "node scripts/release/status.cjs",
     "release:prepare": "node scripts/release/prepare.cjs",
     "release:provenance": "node scripts/release/provenance.cjs",
-    "test:version": "node --test --test-concurrency=1 scripts/test-release-version.mjs scripts/test-build-metadata.mjs"
+    "test:version": "node --test --test-concurrency=1 scripts/test-release-version.mjs scripts/test-build-metadata.mjs",
+    "x-coder:install": "node scripts/x-coder-service-launch-agent.mjs install",
+    "x-coder:status": "node scripts/x-coder-service-launch-agent.mjs status",
+    "x-coder:uninstall": "node scripts/x-coder-service-launch-agent.mjs uninstall",
+    "x-coder:print-launch-agent": "node scripts/x-coder-service-launch-agent.mjs print",
+    "test:x-coder-lifecycle": "node --test mcp/x-coder-service/launch-agent.test.mjs mcp/x-coder-service/post-cutover.test.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",

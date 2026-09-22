@@ -12,7 +12,7 @@ Anti/Antigravity was removed from the active UI, Electron runtime, MCP tools, an
 PLAN = Revised Slices 1-9 with Slice 7.5 real-executor proving stage
 ACTIVE_BRANCH = chore/system-ui-consolidation
 BASE_ORIGIN_MAIN = d60c883703918d86cdada77cedac4765cfcd6541
-CURRENT_SLICE = Slice 8 COMPLETE
+CURRENT_SLICE = Slice 9 COMPLETE
 SLICE_1 = XLeaseKeeper optional onRenewed hook; invoked only after a successful validated renewal
 SLICE_2 = XRunStore cancelled terminal status + cancelRunFenced(); live-lease fenced; retention-aware
 SLICE_3 = standalone executor-contract package + shared fixture corpus + differential compatibility gate against real task-contract.mjs
@@ -23,6 +23,8 @@ SLICE_7 = explicit cancel ordering: X terminal ack -> fenced cancelled persisten
 SLICE_7.5 = X Coder Service RealXCoderExecutor -> runTaskWithRepair -> local-executor/edit-writer/model-adapter; real RepairOutcome proven side-by-side before cutover
 SLICE_8 = CUTOVER COMPLETE: run-x-task executes only through X Coder Service, Hearth still owns claim/lease + Result Gate + x-result persistence; onRenewed heartbeat wired at keeper construction; startup reconciliation remains SQLite-local/synchronous
 SLICE_8_SCOPE = production changes are run-x-task.mjs + production-runtime.mjs; cancel-x-task.mjs has a narrow backward-compatible optional xCoderRunId bridge because Hearth run_id and service run_id are distinct; Electron/tools/queue production files remain unchanged
+SLICE_9 = POST-CUTOVER HARDENING COMPLETE: user LaunchAgent lifecycle (install/status/uninstall/print), RunAtLoad+KeepAlive, private umask, bounded bootout/bootstrap retry, exact-PID listener fallback for restricted loopback probes, and post-cutover authority invariants
+SLICE_9_COMPAT = mcp/x/execute-x-task.mjs is retained only for rollback/test/eval compatibility; no production MCP module may import it, enforced by S9-4
 VALIDATION_SLICE_1 = lease keeper 14/14 PASS
 VALIDATION_SLICE_2 = run-store + fencing 65/65 PASS; orchestration/startup/queue 126/126 PASS
 VALIDATION_SLICE_3 = executor-contract 9/9 PASS; TypeScript strict PASS
@@ -33,11 +35,13 @@ VALIDATION_SLICE_7 = canonical cancel tests + real SQLite ordering/fencing PASS;
 VALIDATION_SLICE_7.5 = non-live 31/31 PASS; original Core X 111/111 PASS; live Ollama 1/1 PASS; mid-writer explicit-cancel smoke PASS with target SHA-256+mtime unchanged and no temp residue
 VALIDATION_SLICE_8_PRECONDITION = durable runtime 10/10; update-ready recovery 6/6; connections 18/18; X pre-cutover 730/730; Slice 7.5 live/non-live gates PASS
 VALIDATION_SLICE_8 = cutover E2E 5/5 PASS (COMPLETED, NEEDS_REVIEW, explicit cancel, restart->reconciliation, stale-writer hash+mtime proof); targeted orchestration 113/113 PASS; MCP+terminal 33/33 PASS; final X full suite 736/736 PASS; candidate freeze 4/4 PASS; TypeScript build PASS; Vite production build PASS; git diff --check PASS
+VALIDATION_SLICE_9 = lifecycle/post-cutover invariants 5/5 PASS; focused service/cutover regression 69/69 PASS; final non-live X suite 770/770 PASS including candidate freeze; LaunchAgent install+restart+HTTP health PASS; TypeScript/Vite production build PASS; git diff --check PASS
 CORRECTION_SLICE_4_HISTORY = b8e860c restart fixture referenced lease_expires_at before schema support was committed; Slice 6 restored branch-level consistency without rewriting pushed history
 CORRECTION_SLICE_7_HISTORY = 2466956 test used older helper field names; later correction aligned it with the canonical cancel contract
 UNRELATED_LOCAL_FILES = scripts/HearthHistoryExport.mq5; scripts/replay-30d.mjs (left untracked and untouched)
-NEXT_EXACT_ACTION = Slice 9 only: post-cutover hardening in its own commit; add LaunchAgent/service lifecycle hardening and remove/deprecate the obsolete in-process execute-x-task production path only after preserving tests and rollback evidence
+NEXT_EXACT_ACTION = all extraction slices are complete; review the Slice 9 commit, keep the LaunchAgent healthy, then merge/release only with owner approval; no further execution-path changes before that review
 CUTOVER_ROLLBACK = reverting run-x-task.mjs + production-runtime.mjs restores the old in-process execution path; optional xCoderRunId support in cancel-x-task.mjs is inert/backward-compatible
+SLICE_9_ROLLBACK = npm run x-coder:uninstall removes the user LaunchAgent; reverting the Slice 9 commit removes lifecycle tooling while the compatibility execute-x-task module remains available
 RECONCILIATION_RULE = reconcileStartupState() remains SQLite-local and synchronous; never add socket I/O inside it
 ```
 
