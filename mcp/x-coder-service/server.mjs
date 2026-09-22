@@ -7,6 +7,7 @@ import {
   EXECUTOR_API_VERSION,
   ExecutorApiValidationError,
   parseCancelRequest,
+  parseLeaseValidRequest,
   parseStatusRequest,
   parseSubmitRequest,
 } from '../x/executor-contract/index.mjs';
@@ -47,6 +48,7 @@ export function createXCoderService({ storagePath = defaultXCoderStoragePath(), 
       const submitted = registry.submit({
         idempotencyKey: request.idempotency_key,
         task: request.task,
+        leaseExpiresAt: request.lease_expires_at,
       });
       return {
         version: EXECUTOR_API_VERSION,
@@ -72,6 +74,19 @@ export function createXCoderService({ storagePath = defaultXCoderStoragePath(), 
         result: outcome.result ?? null,
         error: outcome.error ?? null,
         acknowledged: outcome.acknowledged === true,
+      };
+    },
+
+    leaseValid(input) {
+      const request = parseLeaseValidRequest(input);
+      const outcome = registry.leaseValid(request.run_id, request.lease_expires_at);
+      if (!outcome) return null;
+      return {
+        version: EXECUTOR_API_VERSION,
+        run_id: outcome.runId,
+        status: outcome.status,
+        lease_expires_at: outcome.leaseExpiresAt,
+        accepted: outcome.accepted === true,
       };
     },
 
@@ -136,7 +151,7 @@ export async function startXCoderHttpServer({
         return;
       }
 
-      if (request.method !== 'POST' || !['/submit', '/status', '/cancel'].includes(request.url)) {
+      if (request.method !== 'POST' || !['/submit', '/status', '/cancel', '/lease-valid'].includes(request.url)) {
         sendJson(response, 404, { error: 'not_found' });
         return;
       }
@@ -149,6 +164,11 @@ export async function startXCoderHttpServer({
       if (request.url === '/status') {
         const status = ownedService.getStatus(body);
         sendJson(response, status ? 200 : 404, status ?? { error: 'run_not_found' });
+        return;
+      }
+      if (request.url === '/lease-valid') {
+        const lease = ownedService.leaseValid(body);
+        sendJson(response, lease ? 200 : 404, lease ?? { error: 'run_not_found' });
         return;
       }
       const cancelled = await ownedService.cancel(body);

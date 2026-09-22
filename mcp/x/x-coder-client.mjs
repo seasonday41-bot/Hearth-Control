@@ -88,13 +88,15 @@ export class XCoderClient {
     }
   }
 
-  async submit({ idempotencyKey, task, signal } = {}) {
+  async submit({ idempotencyKey, task, leaseExpiresAt, signal } = {}) {
     if (!isNonEmptyString(idempotencyKey)) throw new TypeError('idempotencyKey is required.');
     if (!task || typeof task !== 'object' || Array.isArray(task)) throw new TypeError('task is required.');
+    if (!Number.isInteger(leaseExpiresAt) || leaseExpiresAt <= 0) throw new TypeError('leaseExpiresAt is required.');
 
     const payload = validateCommonResponse(await this._post('/submit', {
       version: EXECUTOR_API_VERSION,
       idempotency_key: idempotencyKey.trim(),
+      lease_expires_at: leaseExpiresAt,
       task,
     }, { signal }));
 
@@ -118,6 +120,26 @@ export class XCoderClient {
       status: payload.status,
       result: payload.result ?? null,
       error: payload.error ?? null,
+    };
+  }
+
+  async leaseValid(runId, leaseExpiresAt, { signal } = {}) {
+    if (!isNonEmptyString(runId)) throw new TypeError('runId is required.');
+    if (!Number.isInteger(leaseExpiresAt) || leaseExpiresAt <= 0) throw new TypeError('leaseExpiresAt is required.');
+    const payload = validateCommonResponse(await this._post('/lease-valid', {
+      version: EXECUTOR_API_VERSION,
+      run_id: runId.trim(),
+      lease_expires_at: leaseExpiresAt,
+    }, { signal }));
+    if (payload.run_id !== runId.trim() || typeof payload.accepted !== 'boolean' ||
+        (payload.lease_expires_at !== null && !Number.isInteger(payload.lease_expires_at))) {
+      throw new Error('x_coder_invalid_response');
+    }
+    return {
+      runId: payload.run_id,
+      status: payload.status,
+      leaseExpiresAt: payload.lease_expires_at,
+      accepted: payload.accepted,
     };
   }
 

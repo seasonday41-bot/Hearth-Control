@@ -102,6 +102,7 @@ test('S4-restart kill mid-execution never silently executes the same idempotency
     const firstSubmit = await post(firstReady.port, '/submit', {
       version: 'x-executor-api-v1',
       idempotency_key: 'restart-key',
+      lease_expires_at: Date.now() + 60_000,
       task,
     });
     assert.equal(firstSubmit.statusCode, 200);
@@ -127,6 +128,7 @@ test('S4-restart kill mid-execution never silently executes the same idempotency
     const duplicate = await post(secondReady.port, '/submit', {
       version: 'x-executor-api-v1',
       idempotency_key: 'restart-key',
+      lease_expires_at: Date.now() + 60_000,
       task,
     });
     assert.equal(duplicate.statusCode, 200);
@@ -142,6 +144,7 @@ test('S4-restart kill mid-execution never silently executes the same idempotency
     const fresh = await post(secondReady.port, '/submit', {
       version: 'x-executor-api-v1',
       idempotency_key: 'fresh-key',
+      lease_expires_at: Date.now() + 60_000,
       task: freshTask,
     });
     assert.equal(fresh.statusCode, 200);

@@ -9,9 +9,10 @@ export const X_CODER_DURABLE_STATES = Object.freeze([
   'failed',
   'cancelled',
   'unknown_incomplete',
+  'lease_expired',
 ]);
 
-const TERMINAL_STATES = new Set(['completed', 'failed', 'cancelled', 'unknown_incomplete']);
+const TERMINAL_STATES = new Set(['completed', 'failed', 'cancelled', 'unknown_incomplete', 'lease_expired']);
 const nowMs = () => Date.now();
 
 const rowToRecord = (row) => row && ({
@@ -25,7 +26,7 @@ const rowToRecord = (row) => row && ({
 });
 
 export const durableStateToExternalStatus = (state) =>
-  state === 'unknown_incomplete' ? 'interrupted' : state;
+  ['unknown_incomplete', 'lease_expired'].includes(state) ? 'interrupted' : state;
 
 export class XCoderIdempotencyStore {
   constructor({ storagePath } = {}) {
@@ -129,6 +130,16 @@ export class XCoderIdempotencyStore {
     const db = this._getDb();
     const result = db.prepare(`UPDATE x_coder_idempotency
       SET state = 'cancelled', result_json = NULL, error = NULL, updated_at = ?
+      WHERE run_id = ? AND state IN ('submitted','running')`)
+      .run(nowMs(), runId);
+    if (result.changes === 0) return null;
+    return this.getByRunId(runId);
+  }
+
+  markLeaseExpired(runId) {
+    const db = this._getDb();
+    const result = db.prepare(`UPDATE x_coder_idempotency
+      SET state = 'lease_expired', result_json = NULL, error = NULL, updated_at = ?
       WHERE run_id = ? AND state IN ('submitted','running')`)
       .run(nowMs(), runId);
     if (result.changes === 0) return null;

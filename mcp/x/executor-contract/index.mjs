@@ -13,7 +13,9 @@ export {
   validateSubmitRequest,
   validateStatusRequest,
   validateCancelRequest,
+  validateLeaseValidRequest,
   parseSubmitRequest,
   parseStatusRequest,
   parseCancelRequest,
+  parseLeaseValidRequest,
 } from './executor-api.schema.mjs';

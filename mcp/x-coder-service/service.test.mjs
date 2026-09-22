@@ -42,6 +42,7 @@ test('S4-1 first submit durably reserves before one stub execution, duplicate ke
   const request = {
     version: 'x-executor-api-v1',
     idempotency_key: 'idem-1',
+    lease_expires_at: Date.now() + 60_000,
     task: makeValidTask(),
   };
   const first = service.submit(request);
@@ -72,6 +73,7 @@ test('S4-2 distinct idempotency keys create distinct runs and execute independen
   const first = service.submit({
     version: 'x-executor-api-v1',
     idempotency_key: 'idem-a',
+    lease_expires_at: Date.now() + 60_000,
     task: makeValidTask(),
   });
   await service.registry.waitForAttachedRun(first.run_id);
@@ -81,6 +83,7 @@ test('S4-2 distinct idempotency keys create distinct runs and execute independen
   const second = service.submit({
     version: 'x-executor-api-v1',
     idempotency_key: 'idem-b',
+    lease_expires_at: Date.now() + 60_000,
     task: secondTask,
   });
   await service.registry.waitForAttachedRun(second.run_id);
@@ -100,6 +103,7 @@ test('S4-3 cancel aborts an attached stub run and produces terminal cancelled st
   const submitted = service.submit({
     version: 'x-executor-api-v1',
     idempotency_key: 'idem-cancel',
+    lease_expires_at: Date.now() + 60_000,
     task: makeValidTask(),
   });
   const cancelled = await service.cancel({
@@ -120,6 +124,7 @@ test('S4-4 normal completion survives a fresh service instance without re-execut
   const submitted = firstService.submit({
     version: 'x-executor-api-v1',
     idempotency_key: 'idem-complete',
+    lease_expires_at: Date.now() + 60_000,
     task: makeValidTask(),
   });
   await firstService.registry.waitForAttachedRun(submitted.run_id);
@@ -133,6 +138,7 @@ test('S4-4 normal completion survives a fresh service instance without re-execut
   const duplicate = secondService.submit({
     version: 'x-executor-api-v1',
     idempotency_key: 'idem-complete',
+    lease_expires_at: Date.now() + 60_000,
     task: makeValidTask(),
   });
   assert.equal(duplicate.run_id, submitted.run_id);
@@ -157,6 +163,7 @@ test('S4-5 HTTP boundary exposes submit/status/cancel over localhost JSON only',
     body: JSON.stringify({
       version: 'x-executor-api-v1',
       idempotency_key: 'idem-http',
+      lease_expires_at: Date.now() + 60_000,
       task: makeValidTask(),
     }),
   });
@@ -176,7 +183,109 @@ test('S4-5 HTTP boundary exposes submit/status/cancel over localhost JSON only',
   const invalidResponse = await fetch(base + '/submit', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ version: 'x-executor-api-v1', idempotency_key: '', task: makeValidTask() }),
+    body: JSON.stringify({ version: 'x-executor-api-v1', idempotency_key: '', lease_expires_at: Date.now() + 60_000, task: makeValidTask() }),
   });
   assert.equal(invalidResponse.status, 400);
+});
+
+
+test('S6-1 submit arms the watchdog from the initial lease deadline before any renewal push', async () => {
+  const item = fixture();
+  const executor = new StubExecutor({ delayMs: 10_000 });
+  const service = createXCoderService({ storagePath: item.storagePath, executor });
+  item.services.push(service);
+
+  const deadline = Date.now() + 120;
+  const submitted = service.submit({
+    version: 'x-executor-api-v1',
+    idempotency_key: 'lease-initial',
+    lease_expires_at: deadline,
+    task: makeValidTask(),
+  });
+
+  assert.equal(service.registry.getAttachedLeaseDeadline(submitted.run_id), deadline);
+  assert.equal(executor.calls, 0, 'executor starts on the next microtask but watchdog is already armed');
+  await new Promise((resolve) => setTimeout(resolve, 180));
+  assert.equal(service.getStatus({ version: 'x-executor-api-v1', run_id: submitted.run_id }).status, 'interrupted');
+});
+
+test('S6-2 withholding every renewal past the initial deadline self-aborts the run', async () => {
+  const item = fixture();
+  const executor = new StubExecutor({ delayMs: 10_000 });
+  const service = createXCoderService({ storagePath: item.storagePath, executor });
+  item.services.push(service);
+
+  const submitted = service.submit({
+    version: 'x-executor-api-v1',
+    idempotency_key: 'lease-withheld',
+    lease_expires_at: Date.now() + 90,
+    task: makeValidTask(),
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  const status = service.getStatus({ version: 'x-executor-api-v1', run_id: submitted.run_id });
+  assert.equal(status.status, 'interrupted');
+  assert.equal(service.registry.attachedCount(), 0);
+  assert.equal(executor.calls, 1);
+});
+
+test('S6-3 leaseValid extends the watchdog and stale pushes never shorten it', async () => {
+  const item = fixture();
+  const executor = new StubExecutor({ delayMs: 10_000 });
+  const service = createXCoderService({ storagePath: item.storagePath, executor });
+  item.services.push(service);
+
+  const initial = Date.now() + 120;
+  const submitted = service.submit({
+    version: 'x-executor-api-v1',
+    idempotency_key: 'lease-extend',
+    lease_expires_at: initial,
+    task: makeValidTask(),
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  const extended = Date.now() + 260;
+  const renewal = service.leaseValid({
+    version: 'x-executor-api-v1',
+    run_id: submitted.run_id,
+    lease_expires_at: extended,
+  });
+  assert.equal(renewal.accepted, true);
+  assert.equal(renewal.lease_expires_at, extended);
+
+  const stale = service.leaseValid({
+    version: 'x-executor-api-v1',
+    run_id: submitted.run_id,
+    lease_expires_at: initial,
+  });
+  assert.equal(stale.accepted, false);
+  assert.equal(stale.lease_expires_at, extended);
+
+  await new Promise((resolve) => setTimeout(resolve, 110));
+  assert.equal(service.getStatus({ version: 'x-executor-api-v1', run_id: submitted.run_id }).status, 'running');
+
+  const cancelled = await service.cancel({
+    version: 'x-executor-api-v1',
+    run_id: submitted.run_id,
+  });
+  assert.equal(cancelled.status, 'cancelled');
+});
+
+test('S6-4 an already-expired initial deadline interrupts without invoking the executor', async () => {
+  const item = fixture();
+  const executor = new StubExecutor({ delayMs: 10_000 });
+  const service = createXCoderService({ storagePath: item.storagePath, executor });
+  item.services.push(service);
+
+  const submitted = service.submit({
+    version: 'x-executor-api-v1',
+    idempotency_key: 'lease-already-expired',
+    lease_expires_at: Date.now() - 1,
+    task: makeValidTask(),
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(service.getStatus({ version: 'x-executor-api-v1', run_id: submitted.run_id }).status, 'interrupted');
+  assert.equal(service.registry.attachedCount(), 0);
+  assert.equal(executor.calls, 0);
 });

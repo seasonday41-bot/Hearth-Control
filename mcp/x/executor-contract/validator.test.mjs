@@ -8,6 +8,7 @@ import {
   parseExecutorXTask,
   validateCancelRequest,
   validateExecutorXTask,
+  validateLeaseValidRequest,
   validateStatusRequest,
   validateSubmitRequest,
 } from './index.mjs';
@@ -42,6 +43,7 @@ test('submit request accepts a valid task and trims idempotency key', () => {
   const request = {
     version: 'x-executor-api-v1',
     idempotency_key: '  request-1  ',
+    lease_expires_at: Date.now() + 60_000,
     task: makeValidTask(),
   };
   const result = validateSubmitRequest(request);
@@ -55,6 +57,7 @@ test('submit request rejects unknown fields, bad idempotency keys, and invalid t
   const request = {
     version: 'x-executor-api-v1',
     idempotency_key: '',
+    lease_expires_at: Date.now() + 60_000,
     task: makeValidTask(),
     worker: 'qwen',
   };
@@ -65,6 +68,27 @@ test('submit request rejects unknown fields, bad idempotency keys, and invalid t
   assert.ok(result.errors.some((item) => item.path === 'idempotency_key'));
   assert.ok(result.errors.some((item) => item.path === 'task.attempt'));
   assert.throws(() => parseSubmitRequest(request), ExecutorApiValidationError);
+});
+
+test('submit requires an initial lease deadline and lease-valid validates renewal pushes', () => {
+  const missingDeadline = {
+    version: 'x-executor-api-v1',
+    idempotency_key: 'request-without-deadline',
+    task: makeValidTask(),
+  };
+  assert.equal(validateSubmitRequest(missingDeadline).ok, false);
+
+  const deadline = Date.now() + 60_000;
+  assert.equal(validateLeaseValidRequest({
+    version: 'x-executor-api-v1',
+    run_id: 'run-1',
+    lease_expires_at: deadline,
+  }).ok, true);
+  assert.equal(validateLeaseValidRequest({
+    version: 'x-executor-api-v1',
+    run_id: '',
+    lease_expires_at: 0,
+  }).ok, false);
 });
 
 test('status and cancel requests are strict run-id envelopes', () => {

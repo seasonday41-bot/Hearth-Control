@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { durableStateToExternalStatus } from './idempotency-store.mjs';
 
 const describeError = (error) => error?.message || String(error);
+const MAX_TIMER_DELAY = 2_147_483_647;
 
 export class XCoderRunRegistry {
   constructor({ store, executor, createRunId = () => crypto.randomUUID() } = {}) {
@@ -21,8 +22,13 @@ export class XCoderRunRegistry {
   /**
    * Reserve durable idempotency identity first, then and only then attach and
    * start in-process execution. A duplicate key never reaches _start().
+   * The initial lease deadline is mandatory and arms the watchdog before
+   * executor work begins, closing the pre-first-renewal gap.
    */
-  submit({ idempotencyKey, task } = {}) {
+  submit({ idempotencyKey, task, leaseExpiresAt } = {}) {
+    if (!Number.isInteger(leaseExpiresAt) || leaseExpiresAt <= 0) {
+      throw new TypeError('leaseExpiresAt must be a positive epoch-millisecond integer.');
+    }
     const proposedRunId = this.createRunId();
     const reservation = this.store.reserve({ idempotencyKey, runId: proposedRunId });
     const record = reservation.record;
@@ -36,7 +42,7 @@ export class XCoderRunRegistry {
       };
     }
 
-    const started = this._start({ runId: record.runId, task });
+    const started = this._start({ runId: record.runId, task, leaseExpiresAt });
     return {
       runId: record.runId,
       status: started ? 'running' : durableStateToExternalStatus(this.store.getByRunId(record.runId)?.state),
@@ -44,7 +50,7 @@ export class XCoderRunRegistry {
     };
   }
 
-  _start({ runId, task }) {
+  _start({ runId, task, leaseExpiresAt }) {
     if (this.live.has(runId)) return false;
 
     const controller = new AbortController();
@@ -55,9 +61,18 @@ export class XCoderRunRegistry {
       runId,
       controller,
       settled: null,
+      leaseExpiresAt,
+      watchdog: null,
     };
     this.live.set(runId, live);
 
+    if (leaseExpiresAt <= Date.now()) {
+      this._expireLease(runId, leaseExpiresAt);
+      this.live.delete(runId);
+      return true;
+    }
+
+    this._armWatchdog(live);
     live.settled = Promise.resolve()
       .then(() => this.executor.execute({ runId, task, signal: controller.signal }))
       .then(
@@ -77,10 +92,78 @@ export class XCoderRunRegistry {
         },
       )
       .finally(() => {
+        this._clearWatchdog(live);
         if (this.live.get(runId) === live) this.live.delete(runId);
       });
 
     return true;
+  }
+
+  _clearWatchdog(live) {
+    if (live?.watchdog) clearTimeout(live.watchdog);
+    if (live) live.watchdog = null;
+  }
+
+  _armWatchdog(live) {
+    this._clearWatchdog(live);
+    const remaining = live.leaseExpiresAt - Date.now();
+    if (remaining <= 0) {
+      queueMicrotask(() => this._expireLease(live.runId, live.leaseExpiresAt));
+      return;
+    }
+    live.watchdog = setTimeout(
+      () => this._expireLease(live.runId, live.leaseExpiresAt),
+      Math.min(MAX_TIMER_DELAY, remaining),
+    );
+  }
+
+  _expireLease(runId, expectedDeadline) {
+    const live = this.live.get(runId);
+    if (!live || live.leaseExpiresAt !== expectedDeadline) return false;
+    if (Date.now() < live.leaseExpiresAt) {
+      this._armWatchdog(live);
+      return false;
+    }
+
+    this._clearWatchdog(live);
+    live.controller.abort(new Error('X Coder execution lease expired.'));
+    this.store.markLeaseExpired(runId);
+    if (!live.settled && this.live.get(runId) === live) this.live.delete(runId);
+    return true;
+  }
+
+  /**
+   * Pushes a newly renewed authoritative deadline. Stale/out-of-order pushes
+   * never shorten a currently longer deadline. A terminal or detached run
+   * cannot be resurrected.
+   */
+  leaseValid(runId, leaseExpiresAt) {
+    if (!Number.isInteger(leaseExpiresAt) || leaseExpiresAt <= 0) {
+      throw new TypeError('leaseExpiresAt must be a positive epoch-millisecond integer.');
+    }
+    const record = this.store.getByRunId(runId);
+    if (!record) return null;
+    const live = this.live.get(runId);
+    if (!live || !['submitted', 'running'].includes(record.state)) {
+      return {
+        runId,
+        status: durableStateToExternalStatus(record.state),
+        leaseExpiresAt: null,
+        accepted: false,
+      };
+    }
+
+    if (leaseExpiresAt > live.leaseExpiresAt) {
+      live.leaseExpiresAt = leaseExpiresAt;
+      this._armWatchdog(live);
+    }
+
+    return {
+      runId,
+      status: durableStateToExternalStatus(this.store.getByRunId(runId)?.state),
+      leaseExpiresAt: live.leaseExpiresAt,
+      accepted: leaseExpiresAt >= live.leaseExpiresAt,
+    };
   }
 
   getStatus(runId) {
@@ -106,8 +189,9 @@ export class XCoderRunRegistry {
       };
     }
 
+    this._clearWatchdog(live);
     live.controller.abort(new Error('X Coder execution cancelled.'));
-    await live.settled;
+    if (live.settled) await live.settled;
 
     const current = this.store.getByRunId(runId);
     let cancelled = current;
@@ -128,8 +212,13 @@ export class XCoderRunRegistry {
   async waitForAttachedRun(runId) {
     const live = this.live.get(runId);
     if (!live) return this.getStatus(runId);
-    await live.settled;
+    if (live.settled) await live.settled;
     return this.getStatus(runId);
+  }
+
+  /** Test/diagnostic helper only: exposes the currently armed deadline, never lease authority. */
+  getAttachedLeaseDeadline(runId) {
+    return this.live.get(runId)?.leaseExpiresAt ?? null;
   }
 
   attachedCount() {

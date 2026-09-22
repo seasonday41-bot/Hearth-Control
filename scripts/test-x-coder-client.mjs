@@ -38,7 +38,7 @@ test('C5-1 submit and getStatus round-trip against Slice 4 stub service', async 
   const { runtime, client } = await startStub();
   const task = makeValidTask();
 
-  const submitted = await client.submit({ idempotencyKey: 'client-1', task });
+  const submitted = await client.submit({ idempotencyKey: 'client-1', task, leaseExpiresAt: Date.now() + 60_000 });
   assert.equal(submitted.duplicate, false);
   assert.equal(submitted.status, 'running');
 
@@ -53,8 +53,8 @@ test('C5-2 duplicate submit returns the same durable run id without a second stu
   const { runtime, client } = await startStub({ delayMs: 25 });
   const task = makeValidTask();
 
-  const first = await client.submit({ idempotencyKey: 'client-idem', task });
-  const duplicate = await client.submit({ idempotencyKey: 'client-idem', task });
+  const first = await client.submit({ idempotencyKey: 'client-idem', task, leaseExpiresAt: Date.now() + 60_000 });
+  const duplicate = await client.submit({ idempotencyKey: 'client-idem', task, leaseExpiresAt: Date.now() + 60_000 });
 
   assert.equal(duplicate.duplicate, true);
   assert.equal(duplicate.runId, first.runId);
@@ -64,7 +64,7 @@ test('C5-2 duplicate submit returns the same durable run id without a second stu
 
 test('C5-3 cancel returns the service terminal acknowledgement', async () => {
   const { client } = await startStub({ delayMs: 10_000 });
-  const submitted = await client.submit({ idempotencyKey: 'client-cancel', task: makeValidTask() });
+  const submitted = await client.submit({ idempotencyKey: 'client-cancel', task: makeValidTask(), leaseExpiresAt: Date.now() + 60_000 });
   const cancelled = await client.cancel(submitted.runId);
 
   assert.equal(cancelled.acknowledged, true);
@@ -81,7 +81,38 @@ test('C5-4 client refuses non-loopback service origins', () => {
 
 test('C5-5 invalid arguments fail before any service request', async () => {
   const { client } = await startStub();
-  await assert.rejects(() => client.submit({ idempotencyKey: '', task: makeValidTask() }), TypeError);
+  await assert.rejects(() => client.submit({ idempotencyKey: '', task: makeValidTask(), leaseExpiresAt: Date.now() + 60_000 }), TypeError);
   await assert.rejects(() => client.getStatus(''), TypeError);
   await assert.rejects(() => client.cancel(''), TypeError);
+});
+
+
+test('C6-1 leaseValid extends the service watchdog through the client boundary', async () => {
+  const { runtime, client } = await startStub({ delayMs: 10_000 });
+  const initial = Date.now() + 120;
+  const submitted = await client.submit({
+    idempotencyKey: 'client-lease',
+    task: makeValidTask(),
+    leaseExpiresAt: initial,
+  });
+
+  const extended = Date.now() + 500;
+  const renewal = await client.leaseValid(submitted.runId, extended);
+  assert.equal(renewal.runId, submitted.runId);
+  assert.equal(renewal.status, 'running');
+  assert.equal(renewal.leaseExpiresAt, extended);
+  assert.equal(renewal.accepted, true);
+  assert.equal(runtime.service.registry.getAttachedLeaseDeadline(submitted.runId), extended);
+
+  await client.cancel(submitted.runId);
+});
+
+test('C6-2 submit requires the initial lease deadline and leaseValid validates arguments locally', async () => {
+  const { client } = await startStub();
+  await assert.rejects(
+    () => client.submit({ idempotencyKey: 'missing-deadline', task: makeValidTask() }),
+    TypeError,
+  );
+  await assert.rejects(() => client.leaseValid('', Date.now() + 1000), TypeError);
+  await assert.rejects(() => client.leaseValid('run-1', 0), TypeError);
 });

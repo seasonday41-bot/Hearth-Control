@@ -34,10 +34,13 @@ export const validateSubmitRequest = (input) => {
     return { ok: false, errors: [{ path: '$', code: 'INVALID_TYPE', message: 'request must be an object' }] };
   }
   const errors = [];
-  rejectUnknownFields(input, new Set(['version', 'idempotency_key', 'task']), errors);
+  rejectUnknownFields(input, new Set(['version', 'idempotency_key', 'task', 'lease_expires_at']), errors);
   validateEnvelopeVersion(input, errors);
   if (!isNonEmptyString(input.idempotency_key) || input.idempotency_key.trim().length > 256) {
     errors.push({ path: 'idempotency_key', code: 'INVALID_VALUE', message: 'must be a non-empty string up to 256 characters' });
+  }
+  if (!Number.isInteger(input.lease_expires_at) || input.lease_expires_at <= 0) {
+    errors.push({ path: 'lease_expires_at', code: 'INVALID_VALUE', message: 'must be a positive epoch-millisecond integer' });
   }
   const taskResult = validateExecutorXTask(input.task);
   if (!taskResult.ok) {
@@ -48,6 +51,7 @@ export const validateSubmitRequest = (input) => {
   return finalize(errors, {
     version: EXECUTOR_API_VERSION,
     idempotency_key: typeof input.idempotency_key === 'string' ? input.idempotency_key.trim() : input.idempotency_key,
+    lease_expires_at: input.lease_expires_at,
     task: taskResult.ok ? taskResult.value : input.task,
   });
 };
@@ -71,6 +75,26 @@ const validateRunRequest = (input, operation) => {
 export const validateStatusRequest = (input) => validateRunRequest(input, 'status');
 export const validateCancelRequest = (input) => validateRunRequest(input, 'cancel');
 
+export const validateLeaseValidRequest = (input) => {
+  if (!isPlainObject(input)) {
+    return { ok: false, errors: [{ path: '$', code: 'INVALID_TYPE', message: 'lease-valid request must be an object' }] };
+  }
+  const errors = [];
+  rejectUnknownFields(input, new Set(['version', 'run_id', 'lease_expires_at']), errors);
+  validateEnvelopeVersion(input, errors);
+  if (!isNonEmptyString(input.run_id)) {
+    errors.push({ path: 'run_id', code: 'REQUIRED', message: 'must be a non-empty string' });
+  }
+  if (!Number.isInteger(input.lease_expires_at) || input.lease_expires_at <= 0) {
+    errors.push({ path: 'lease_expires_at', code: 'INVALID_VALUE', message: 'must be a positive epoch-millisecond integer' });
+  }
+  return finalize(errors, {
+    version: EXECUTOR_API_VERSION,
+    run_id: typeof input.run_id === 'string' ? input.run_id.trim() : input.run_id,
+    lease_expires_at: input.lease_expires_at,
+  });
+};
+
 const parseWith = (validator, input) => {
   const result = validator(input);
   if (!result.ok) throw new ExecutorApiValidationError(result.errors);
@@ -84,3 +108,4 @@ export const parseSubmitRequest = (input) => {
 };
 export const parseStatusRequest = (input) => parseWith(validateStatusRequest, input);
 export const parseCancelRequest = (input) => parseWith(validateCancelRequest, input);
+export const parseLeaseValidRequest = (input) => parseWith(validateLeaseValidRequest, input);

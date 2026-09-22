@@ -76,6 +76,7 @@ export const EXECUTOR_API_VERSION = 'x-executor-api-v1' as const;
 export interface SubmitRequest {
   version: typeof EXECUTOR_API_VERSION;
   idempotency_key: string;
+  lease_expires_at: number;
   task: XTaskV1;
 }
 
@@ -87,6 +88,12 @@ export interface StatusRequest {
 export interface CancelRequest {
   version: typeof EXECUTOR_API_VERSION;
   run_id: string;
+}
+
+export interface LeaseValidRequest {
+  version: typeof EXECUTOR_API_VERSION;
+  run_id: string;
+  lease_expires_at: number;
 }
 
 export type ExecutorRunStatus =
@@ -118,4 +125,12 @@ export interface CancelResponse {
   run_id: string;
   status: ExecutorRunStatus;
   acknowledged: boolean;
+}
+
+export interface LeaseValidResponse {
+  version: typeof EXECUTOR_API_VERSION;
+  run_id: string;
+  status: ExecutorRunStatus;
+  lease_expires_at: number | null;
+  accepted: boolean;
 }
