@@ -12,7 +12,7 @@ Anti/Antigravity was removed from the active UI, Electron runtime, MCP tools, an
 PLAN = Revised Slices 1-9 with Slice 7.5 real-executor proving stage
 ACTIVE_BRANCH = chore/system-ui-consolidation
 BASE_ORIGIN_MAIN = d60c883703918d86cdada77cedac4765cfcd6541
-CURRENT_SLICE = Slice 6 COMPLETE
+CURRENT_SLICE = Slice 7 COMPLETE
 SLICE_1 = XLeaseKeeper optional onRenewed hook; invoked only after a successful validated renewal; no production wiring yet
 SLICE_2 = XRunStore cancelled terminal status + cancelRunFenced(); live-lease fenced; retention-aware; no orchestration caller yet
 SLICE_3 = standalone executor-contract package + shared fixture corpus + differential compatibility gate against real task-contract.mjs; no production imports
@@ -20,6 +20,7 @@ SLICE_4 = standalone localhost X Coder Service skeleton + own SQLite idempotency
 SLICE_5 = Hearth-side loopback XCoderClient for submit/status/cancel, tested only against Slice 4 stub; no production caller
 SLICE_6 = required initial lease_expires_at + /lease-valid heartbeat + service watchdog; no run-x-task/keeper/production-runtime wiring
 SLICE_6 = submit now requires initial lease_expires_at; service watchdog self-aborts expired runs; leaseValid extends deadlines monotonically; still no live production wiring
+SLICE_7 = standalone cancel-x-task ordering: X terminal ack -> fenced cancelled persistence -> keeper.stop -> release; lease loss/persistence faults never claim clean cancellation and leave keeper/claim untouched
 VALIDATION_SLICE_1 = node --test scripts/test-x-lease-keeper.mjs -> 14/14 PASS
 VALIDATION_SLICE_2 = run-store + fencing 65/65 PASS; run-x-task + startup + queue regressions 126/126 PASS
 VALIDATION_SLICE_3 = executor-contract node --test 9/9 PASS; TypeScript --strict --noEmit PASS; task-contract.mjs and run-x-task.mjs untouched
@@ -28,8 +29,9 @@ VALIDATION_SLICE_5 = client + Slice 4 service/restart suites 11/11 PASS; loopbac
 VALIDATION_SLICE_6 = contract/service/restart/client 27/27 PASS; TypeScript --strict PASS; initial deadline self-abort + renewal extension proven; run-x-task.mjs/lease-keeper.mjs/production-runtime.mjs untouched
 CORRECTION_SLICE_4_HISTORY = b8e860c restart fixture referenced lease_expires_at before schema support was committed; do not treat b8e860c alone as self-contained. Slice 6 restores branch-level protocol/test consistency without rewriting pushed history.
 VALIDATION_SLICE_6 = contract/client/service/watchdog 26/26 PASS; TypeScript --strict PASS; diff vs b560cfe proves run-x-task.mjs, lease-keeper.mjs, production-runtime.mjs untouched
+VALIDATION_SLICE_7 = cancel ordering + XRunStore fencing 23/23 PASS; static clean-success audit PASS; run-x-task.mjs and production-runtime.mjs untouched
 UNRELATED_LOCAL_FILES = scripts/HearthHistoryExport.mq5; scripts/replay-30d.mjs (left untracked and untouched)
-NEXT_EXACT_ACTION = Slice 7 only: add standalone cancel-x-task.mjs with X-ack -> fenced persistence ordering, lease-loss checks, bounded retry, and no clean success without persisted cancelled row; do not wire into runXTask yet
+NEXT_EXACT_ACTION = Slice 7.5 only: read repair-loop/context-loader/edit-writer/model-adapter/local-executor first, then wrap real runTaskWithRepair inside standalone X Coder Service and prove side-by-side equivalence; production run-x-task remains old in-process path
 CUTOVER_RULE = no production X Coder Service traffic before Slice 8; run-x-task.mjs stays in-process until cutover
 RECONCILIATION_RULE = reconcileStartupState() remains SQLite-local and synchronous; never add socket I/O inside it
 ```
