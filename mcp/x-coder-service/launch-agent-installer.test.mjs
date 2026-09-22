@@ -35,6 +35,13 @@ const launchctlSequence = (results) => {
 
 const sleep0 = (_ms) => Promise.resolve();
 
+const trackedSleep = () => {
+  const calls = [];
+  const fn = (ms) => { calls.push(ms); return Promise.resolve(); };
+  fn.calls = calls;
+  return fn;
+};
+
 test('T1 successful upgrade: previous plist is overwritten and no rollback occurs', async () => {
   const plistPath = tmpPlistPath();
   fs.writeFileSync(plistPath, '<old-plist/>', 'utf8');
@@ -144,6 +151,69 @@ test('T3 health failure rolls back to the previous plist and service', async () 
   assert.equal(result.hadPrevious, true);
   assert.equal(result.rollback.restored, true);
   assert.equal(fs.readFileSync(plistPath, 'utf8'), '<old-plist/>');
+});
+
+test('T3b restoring the previous service waits between attempts and recovers from a transient launchd fault', async () => {
+  const plistPath = tmpPlistPath();
+  fs.writeFileSync(plistPath, '<old-plist/>', 'utf8');
+
+  const runLaunchctl = launchctlSequence([
+    { status: 0, stdout: '', stderr: '' }, // pre-install bootout
+    { status: 0, stdout: '', stderr: '' }, // bootstrap candidate succeeds
+    { status: 0, stdout: '', stderr: '' }, // bootout unhealthy candidate
+    { status: 1, stdout: '', stderr: 'Bootstrap failed: 5: Input/output error' }, // restore attempt 0: transient
+    { status: 0, stdout: '', stderr: '' }, // restore attempt 1: succeeds after the delay
+  ]);
+  const sleep = trackedSleep();
+
+  const result = await installXCoderLaunchAgent({
+    plistPath,
+    plistContent: '<candidate-plist/>',
+    domain: 'gui/501',
+    serviceTarget: 'gui/501/label',
+    runLaunchctl,
+    waitForHealth: failHealth,
+    bootstrapRetryDelayMs: 120,
+    sleep,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.stage, 'health');
+  assert.equal(result.rollback.attempted, true);
+  assert.equal(result.rollback.restored, true, 'the transient error 5 must not be reported as a permanent rollback failure');
+  assert.equal(fs.readFileSync(plistPath, 'utf8'), '<old-plist/>');
+  assert.ok(sleep.calls.includes(120), 'the injected sleep must actually be awaited before the successful restore retry');
+});
+
+test('T3c a permanently failing rollback bootstrap is reported as restored:false, not silently swallowed', async () => {
+  const plistPath = tmpPlistPath();
+  fs.writeFileSync(plistPath, '<old-plist/>', 'utf8');
+
+  const runLaunchctl = launchctlSequence([
+    { status: 0, stdout: '', stderr: '' }, // pre-install bootout
+    { status: 0, stdout: '', stderr: '' }, // bootstrap candidate succeeds
+    { status: 0, stdout: '', stderr: '' }, // bootout unhealthy candidate
+    { status: 1, stdout: '', stderr: 'Bootstrap failed: 5: Input/output error' }, // every restore attempt fails
+  ]);
+  const sleep = trackedSleep();
+
+  const result = await installXCoderLaunchAgent({
+    plistPath,
+    plistContent: '<candidate-plist/>',
+    domain: 'gui/501',
+    serviceTarget: 'gui/501/label',
+    runLaunchctl,
+    waitForHealth: failHealth,
+    bootstrapAttempts: 3,
+    bootstrapRetryDelayMs: 10,
+    sleep,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.rollback.attempted, true);
+  assert.equal(result.rollback.restored, false);
+  assert.equal(result.rollback.bootstrap.status, 1);
+  assert.equal(sleep.calls.length, 2, 'a delay must occur between each of the 3 restore attempts, but not a trailing one after the last');
 });
 
 test('T4 first install failure leaves no plist and no loaded service behind', async () => {

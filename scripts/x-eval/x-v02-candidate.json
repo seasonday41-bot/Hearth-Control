@@ -1,8 +1,8 @@
 {
   "name": "x-v0.2-candidate",
   "schema": 1,
-  "frozen_at": "2026-09-22T22:10:27.159Z",
-  "base_head": "054721e4c1a4659efac3644f7b6bc9d1ba481f74",
+  "frozen_at": "2026-09-22T22:21:56.710Z",
+  "base_head": "16a3153f3162443dc1a5cb7242e7bb07cee530e8",
   "committed": false,
   "gold_fingerprint": "f6ac8bfae42af5c5417e2da485f1b61f94c3e3ed6bb72cf5f3f8b142a9bdc03f",
   "x_files": {
@@ -42,11 +42,11 @@
     "mcp/x/skill-integration.mjs": "ae5e02f43a741f583baee8a9455929fc82428ffec0f783b0d863f7690c103502",
     "mcp/x/task-contract.mjs": "fc77927d03b5c3a6b67723858920afe6b43718e37cb6b7d320856cc6b90c5f6f",
     "mcp/x/validation-runner.mjs": "a0b157ede4dab995912feeed7b15a741655d7f172191d5ee3c0b986af6465986",
-    "mcp/x/x-coder-auth.mjs": "ef90689fe97583eab581f2c9fb78c23d4027e2fc991550412794645dfce2dbdc",
-    "mcp/x/x-coder-auth.test.mjs": "abc408cfa29579d427caf0f887dcc4fe58e8297602f99246a8744c9f321ac1b6",
+    "mcp/x/x-coder-auth.mjs": "cd16aa7288c04b02146768047d3a53556f47e9da406101c94c8df15451e2596c",
+    "mcp/x/x-coder-auth.test.mjs": "edb79134444699b1fd75d235d58665580df578ce1f70bcde4f9b1142a0177d70",
     "mcp/x/x-coder-client.mjs": "59effbebe6a7b6e1fe61a1609ac3ed8241fa4dcf21cea2a26858229197281912"
   },
-  "x_sha256": "835abe3e8c43496664f7b5ae3b3d8336e1758fc8e2cd9a033cea3796e6fc6aa1",
+  "x_sha256": "27aab6dd00b73abddb462b6f0fef057c0fbf07a2eb96752b72c05037cfda5615",
   "x_file_count": 39,
   "test_files": {
     "scripts/test-x-cancel-task.mjs": "be29acbf9ec790f55acb657081a7083a6edc3a597653e912ab74e09678d317e5",

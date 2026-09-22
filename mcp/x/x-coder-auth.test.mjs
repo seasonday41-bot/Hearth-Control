@@ -29,6 +29,45 @@ const raceCreator = (secretPath) => new Promise((resolve, reject) => {
   });
 });
 
+// Spawns a real, independent process that exclusively creates secretPath and
+// then deliberately delays before writing the actual secret bytes and
+// closing -- reproducing the "winner holds the file open-but-empty" window a
+// racing reader must wait through, rather than only ever observing a file
+// that is already fully written.
+const spawnDelayedWriter = (secretPath, delayMs) => {
+  const child = spawn(process.execPath, ['--input-type=module', '-e', `
+    import fs from 'node:fs';
+    import crypto from 'node:crypto';
+    const secretPath = ${JSON.stringify(secretPath)};
+    const fd = fs.openSync(secretPath, 'wx', 0o600);
+    await new Promise((resolve) => setTimeout(resolve, ${delayMs}));
+    const secret = crypto.randomBytes(32).toString('hex');
+    fs.writeSync(fd, secret, 0, 'utf8');
+    fs.closeSync(fd);
+    fs.chmodSync(secretPath, 0o600);
+    process.stdout.write(secret);
+  `], { stdio: ['ignore', 'pipe', 'pipe'] });
+  let stdout = '';
+  let stderr = '';
+  child.stdout.on('data', (chunk) => { stdout += chunk; });
+  child.stderr.on('data', (chunk) => { stderr += chunk; });
+  return {
+    exited: new Promise((resolve, reject) => {
+      child.on('error', reject);
+      child.on('close', (code) => (code !== 0 ? reject(new Error(`delayed writer exited ${code}: ${stderr}`)) : resolve(stdout.trim())));
+    }),
+  };
+};
+
+const waitUntil = async (predicate, { timeoutMs = 2000, intervalMs = 2 } = {}) => {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  throw new Error('condition not met before timeout');
+};
+
 const dirs = [];
 const tmpSecretPath = () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hearth-x-coder-auth-'));
@@ -107,4 +146,29 @@ test('R2-3 an existing corrupt secret is rejected, never silently replaced', () 
 
   // The corrupt value must still be there -- no silent regeneration/overwrite.
   assert.equal(fs.readFileSync(secretPath, 'utf8'), 'not-a-valid-secret');
+});
+
+test('R3-1 a genuinely delayed writer: the reader waits through the empty-file window instead of failing, and both converge', async () => {
+  const secretPath = tmpSecretPath();
+  fs.mkdirSync(path.dirname(secretPath), { recursive: true, mode: 0o700 });
+
+  const writer = spawnDelayedWriter(secretPath, 300);
+
+  // Synchronize on the actual observable state -- created but not yet
+  // written -- instead of guessing a sleep duration, so this test reliably
+  // exercises the wait path rather than sometimes racing past it.
+  await waitUntil(() => fs.existsSync(secretPath) && fs.statSync(secretPath).size === 0);
+  assert.equal(fs.statSync(secretPath).size, 0, 'must catch the writer before it writes, to genuinely test the wait');
+
+  // This call is synchronous/blocking (ensureXCoderAuthSecret cannot become
+  // async without forcing XCoderClient's constructor async too), and must
+  // not throw x_coder_auth_secret_unavailable while it waits out the window.
+  const readerSecret = ensureXCoderAuthSecret({ secretPath });
+
+  const writerSecret = await writer.exited;
+
+  assert.match(readerSecret, /^[0-9a-f]{64}$/);
+  assert.equal(readerSecret, writerSecret, 'the reader must converge on the exact secret the delayed writer wrote');
+  assert.equal(fs.readFileSync(secretPath, 'utf8').trim(), readerSecret);
+  assert.equal(fs.statSync(secretPath).mode & 0o777, 0o600);
 });

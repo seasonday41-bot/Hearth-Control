@@ -11,6 +11,7 @@ export const defaultXCoderAuthSecretPath = () =>
 
 const isValidSecret = (value) => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
 const SETTLE_POLL_ATTEMPTS = 200;
+const SETTLE_POLL_DELAY_MS = 5; // 200 * 5ms = 1s worst-case bound on the wait below.
 
 const readSecretFile = (secretPath) => {
   try {
@@ -22,17 +23,35 @@ const readSecretFile = (secretPath) => {
 };
 
 /**
+ * ensureXCoderAuthSecret() is called from a synchronous constructor
+ * (XCoderClient) as well as from async contexts, so it cannot become async
+ * without forcing every caller onto an async factory instead -- real blast
+ * radius across the client, production-runtime, and every test that builds
+ * one inline. Atomics.wait gives a genuine, bounded, synchronous sleep
+ * (Node -- unlike browsers -- allows this on the main thread) instead of a
+ * hot spin, so a loser only burns a handful of 5ms ticks waiting for the
+ * winner's write, not up to 200 back-to-back synchronous reads.
+ */
+const syncSleep = (ms) => {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+};
+
+/**
  * Reads whatever is currently on secretPath. Returns undefined if nothing is
  * there yet. A momentarily-empty file (another process holds an exclusive
- * create but has not written its contents yet) is treated as transient and
- * polled past, never as corruption -- corruption is only ever a *non-empty*
- * value that does not parse as a secret, and that always fails closed.
+ * create but has not written its contents yet) is treated as transient: it
+ * is waited past with a short real delay between checks, never treated as
+ * corruption -- corruption is only ever a *non-empty* value that does not
+ * parse as a secret, and that always fails closed immediately, with no wait.
  */
 const settleSecretFile = (secretPath) => {
   for (let attempt = 0; attempt < SETTLE_POLL_ATTEMPTS; attempt += 1) {
     const raw = readSecretFile(secretPath);
     if (raw === undefined) return undefined;
-    if (raw === '') continue;
+    if (raw === '') {
+      syncSleep(SETTLE_POLL_DELAY_MS);
+      continue;
+    }
     if (!isValidSecret(raw)) throw new Error('x_coder_auth_secret_corrupt');
     return raw;
   }

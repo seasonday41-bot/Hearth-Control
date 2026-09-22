@@ -42,7 +42,12 @@ export async function installXCoderLaunchAgent({
   const hadPrevious = fs.existsSync(plistPath);
   const previousContent = hadPrevious ? fs.readFileSync(plistPath, 'utf8') : null;
 
-  const restorePrevious = () => {
+  // Restoration retries with the same bounded-delay philosophy as the
+  // candidate bootstrap below: a transient launchd fault right after bootout
+  // (e.g. "Bootstrap failed: 5: Input/output error") can clear itself within
+  // a short delay, so retrying at 0ms would falsely report the rollback as
+  // failed even though the previous service was recoverable.
+  const restorePrevious = async () => {
     if (!hadPrevious) {
       removePlistFile(plistPath);
       return { attempted: false, restored: false, bootstrap: null };
@@ -50,6 +55,7 @@ export async function installXCoderLaunchAgent({
     writePlistFile(plistPath, previousContent);
     let bootstrapResult = null;
     for (let attempt = 0; attempt < bootstrapAttempts; attempt += 1) {
+      if (attempt > 0) await sleep(bootstrapRetryDelayMs);
       bootstrapResult = runLaunchctl(['bootstrap', domain, plistPath], { allowFailure: true });
       if (bootstrapResult.status === 0) break;
     }
@@ -90,7 +96,7 @@ export async function installXCoderLaunchAgent({
       ok: false,
       stage: 'bootstrap',
       hadPrevious,
-      rollback: restorePrevious(),
+      rollback: await restorePrevious(),
       bootstrap: bootstrapResult,
       health: null,
     };
@@ -103,7 +109,7 @@ export async function installXCoderLaunchAgent({
       ok: false,
       stage: 'health',
       hadPrevious,
-      rollback: restorePrevious(),
+      rollback: await restorePrevious(),
       bootstrap: bootstrapResult,
       health,
     };
