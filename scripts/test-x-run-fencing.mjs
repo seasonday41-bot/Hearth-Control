@@ -46,6 +46,10 @@ const fail = (item, overrides = {}) => item.runs.failRunFenced({
   runId: 'run-1', taskId: 'task-1', ownerId: item.claim.ownerId, leaseId: item.claim.leaseId,
   error: 'orchestration error', ...overrides,
 });
+const cancel = (item, overrides = {}) => item.runs.cancelRunFenced({
+  runId: 'run-1', taskId: 'task-1', ownerId: item.claim.ownerId, leaseId: item.claim.leaseId,
+  ...overrides,
+});
 
 for (const [gateStatus, hearthOutcome, runStatus] of [
   ['COMPLETED', 'completed', 'completed'],
@@ -125,6 +129,59 @@ test('claimed queued run can fail only with its current recorded lease', () => {
   const mismatched = fixture({ queued: true, recordedLeaseId: 'not-the-claim-lease' });
   assert.equal(fail(mismatched), null);
   assert.equal(mismatched.runs.getRun('run-1').status, 'queued');
+});
+
+test('live owner can persist explicit cancellation without gate/result/error', () => {
+  const item = fixture();
+  const run = cancel(item);
+  assert.equal(run.status, 'cancelled');
+  assert.equal(run.gateStatus, null);
+  assert.equal(run.hearthOutcome, null);
+  assert.equal(run.result, null);
+  assert.equal(run.error, null);
+  assert.equal(item.runs.hasNonTerminalRunForClaimLease(item.claim.leaseId), false);
+});
+
+test('claimed queued run can be cancelled only by its current recorded live lease', () => {
+  const item = fixture({ queued: true });
+  assert.equal(cancel(item, { leaseId: 'wrong-lease' }), null);
+  assert.equal(cancel(item, { ownerId: 'wrong-owner' }), null);
+  assert.equal(cancel(item, { taskId: 'other-task' }), null);
+  assert.equal(item.runs.getRun('run-1').status, 'queued');
+  assert.equal(cancel(item).status, 'cancelled');
+
+  const unclaimed = fixture({ queued: true, recordedLeaseId: null });
+  assert.equal(cancel(unclaimed), null);
+  assert.equal(unclaimed.runs.getRun('run-1').status, 'queued');
+});
+
+test('expired, released, and reclaimed leases cannot cancel a run', async () => {
+  const expired = fixture({ leaseDurationMs: 35 });
+  await sleep(80);
+  assert.equal(cancel(expired), null);
+  assert.equal(expired.runs.getRun('run-1').status, 'running');
+
+  const released = fixture();
+  assert.equal(released.claims.release({ taskId: 'task-1', ownerId: released.claim.ownerId, leaseId: released.claim.leaseId }), true);
+  assert.equal(cancel(released), null);
+  assert.equal(released.runs.getRun('run-1').status, 'running');
+
+  const reclaimed = fixture({ leaseDurationMs: 35 });
+  await sleep(80);
+  const newer = reclaimed.otherClaims.claim({ taskId: 'task-1', ownerId: 'owner-2' });
+  assert.ok(newer);
+  assert.equal(cancel(reclaimed), null);
+  assert.equal(reclaimed.runs.getRun('run-1').status, 'running');
+});
+
+test('cancelled is terminal and cannot be overwritten by later completion/failure/interruption', () => {
+  const item = fixture();
+  assert.equal(cancel(item).status, 'cancelled');
+  const decision = gate('COMPLETED', 'completed');
+  assert.equal(complete(item, decision), null);
+  assert.equal(fail(item), null);
+  assert.equal(item.runs.markInterrupted('run-1'), null);
+  assert.equal(item.runs.getRun('run-1').status, 'cancelled');
 });
 
 test('fenced transitions reject malformed identity and completion mismatch before mutation', () => {

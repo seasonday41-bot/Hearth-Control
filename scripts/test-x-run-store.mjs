@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { XRunStore, XRunStoreError } from '../mcp/x/run-store.mjs';
+import { XRunStore, XRunStoreError, X_RUN_STATUSES, X_RUN_TERMINAL_STATUSES, X_RUN_NON_TERMINAL_STATUSES } from '../mcp/x/run-store.mjs';
 import { XClaimStore } from '../mcp/x/claim-store.mjs';
 
 const dirs = [];
@@ -23,6 +23,12 @@ const neverLive = () => false;
 const fakeGateResult = (gateStatus, hearthOutcome) => ({ gate_status: gateStatus, hearth_outcome: hearthOutcome });
 const fakeXResult = (taskId, gateStatus, hearthOutcome, overrides = {}) => ({
   version: 'x-result-v1', task_id: taskId, gate_status: gateStatus, hearth_outcome: hearthOutcome, ...overrides,
+});
+
+test('R0 cancelled is a terminal X run status, never non-terminal', () => {
+  assert.ok(X_RUN_STATUSES.includes('cancelled'));
+  assert.ok(X_RUN_TERMINAL_STATUSES.includes('cancelled'));
+  assert.equal(X_RUN_NON_TERMINAL_STATUSES.includes('cancelled'), false);
 });
 
 test('R1 opening a store creates the x_runs table in a fresh temp file', () => {
@@ -275,6 +281,32 @@ test('R16b retention ordering is deterministic when updated_at ties (stable rowi
   assert.deepEqual(survivors2.sort(), survivors.sort());
   store.close();
   store2.close();
+});
+
+test('R16c retention treats cancelled rows as terminal rows', () => {
+  const dbPath = tmpDbPath();
+  const claims = new XClaimStore({ storagePath: dbPath, leaseDurationMs: 30_000 });
+  const store = new XRunStore({ storagePath: dbPath, retentionLimit: 1 });
+
+  const firstClaim = claims.claim({ taskId: 'task-cancel-1', ownerId: 'owner-1' });
+  store.createRun({ runId: 'cancel-1', taskId: 'task-cancel-1', claimLeaseId: firstClaim.leaseId });
+  store.markRunning({ runId: 'cancel-1', claimLeaseId: firstClaim.leaseId });
+  assert.equal(store.cancelRunFenced({
+    runId: 'cancel-1', taskId: 'task-cancel-1', ownerId: firstClaim.ownerId, leaseId: firstClaim.leaseId,
+  }).status, 'cancelled');
+  assert.equal(claims.release({ taskId: 'task-cancel-1', ownerId: firstClaim.ownerId, leaseId: firstClaim.leaseId }), true);
+
+  const secondClaim = claims.claim({ taskId: 'task-cancel-2', ownerId: 'owner-2' });
+  store.createRun({ runId: 'cancel-2', taskId: 'task-cancel-2', claimLeaseId: secondClaim.leaseId });
+  store.markRunning({ runId: 'cancel-2', claimLeaseId: secondClaim.leaseId });
+  assert.equal(store.cancelRunFenced({
+    runId: 'cancel-2', taskId: 'task-cancel-2', ownerId: secondClaim.ownerId, leaseId: secondClaim.leaseId,
+  }).status, 'cancelled');
+
+  assert.equal(store.getRun('cancel-1'), null);
+  assert.equal(store.getRun('cancel-2').status, 'cancelled');
+  claims.close();
+  store.close();
 });
 
 test('R17 retention never deletes queued/running rows even far beyond the limit', () => {

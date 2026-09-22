@@ -39,8 +39,8 @@ import { DatabaseSync } from 'node:sqlite';
  * `WHERE status = 'queued'` gate, not merely by convention.
  */
 
-export const X_RUN_STATUSES = Object.freeze(['queued', 'running', 'completed', 'needs_review', 'failed', 'interrupted']);
-export const X_RUN_TERMINAL_STATUSES = Object.freeze(['completed', 'needs_review', 'failed', 'interrupted']);
+export const X_RUN_STATUSES = Object.freeze(['queued', 'running', 'completed', 'needs_review', 'failed', 'interrupted', 'cancelled']);
+export const X_RUN_TERMINAL_STATUSES = Object.freeze(['completed', 'needs_review', 'failed', 'interrupted', 'cancelled']);
 export const X_RUN_NON_TERMINAL_STATUSES = Object.freeze(['queued', 'running']);
 
 export const DEFAULT_RUN_RETENTION_LIMIT = 200;
@@ -184,7 +184,7 @@ export class XRunStore {
   _applyRetention(db) {
     db.prepare(`DELETE FROM x_runs WHERE run_id IN (
       SELECT run_id FROM x_runs
-      WHERE status IN ('completed','needs_review','failed','interrupted')
+      WHERE status IN ('completed','needs_review','failed','interrupted','cancelled')
       ORDER BY updated_at DESC, rowid DESC
       LIMIT -1 OFFSET ?
     )`).run(this.retentionLimit);
@@ -371,6 +371,28 @@ export class XRunStore {
       WHERE run_id = ? AND task_id = ? AND status IN ('queued','running') AND claim_lease_id = ?
       AND ${LIVE_CLAIM_PREDICATE}`)
       .run(bounded, runId, taskId, leaseId, ownerId);
+    if (result.changes === 0) return null;
+    this._applyRetention(db);
+    return this.getRun(runId);
+  }
+
+  /**
+   * Explicit cancellation terminal transition, fenced to the live claim.
+   * Mirrors failRunFenced's ownership guarantees but records cancellation
+   * without a Result Gate outcome or orchestration error. A single atomic
+   * UPDATE may move only this task's queued/running row carrying the exact
+   * live claim lease. `changes === 0` means the run/identity/status/lease
+   * no longer authorizes cancellation and is reported as `null`.
+   */
+  cancelRunFenced({ runId, taskId, ownerId, leaseId } = {}) {
+    if (!runId || typeof runId !== 'string') throw new TypeError('runId is required.');
+    if (!taskId || typeof taskId !== 'string' || !taskId.trim()) throw new TypeError('taskId is required.');
+    requireFencingIdentity(ownerId, leaseId);
+    const db = this._getDb();
+    const result = db.prepare(`UPDATE x_runs SET status = 'cancelled', gate_status = NULL, hearth_outcome = NULL, result_json = NULL, error = NULL, updated_at = ${SQLITE_NOW_MS}
+      WHERE run_id = ? AND task_id = ? AND status IN ('queued','running') AND claim_lease_id = ?
+      AND ${LIVE_CLAIM_PREDICATE}`)
+      .run(runId, taskId, leaseId, ownerId);
     if (result.changes === 0) return null;
     this._applyRetention(db);
     return this.getRun(runId);
