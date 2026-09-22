@@ -176,3 +176,57 @@ test('K10 a slow renewal never overlaps a second timer attempt', async () => {
   assert.equal((await stopped).status, 'stopped');
   assert.equal(calls, 1);
 });
+
+
+test('K11 onRenewed fires only after a successful validated renewal with the authoritative snapshot', async () => {
+  const item = fixture(180);
+  const observed = [];
+  const keeper = new XLeaseKeeper({
+    claimStore: item.first,
+    claim: item.claim,
+    onRenewed: async (renewed) => {
+      observed.push({ ...renewed });
+    },
+  }).start();
+  item.keepers.push(keeper);
+
+  await sleep(90);
+  assert.ok(observed.length >= 1);
+  const first = observed[0];
+  assert.equal(first.taskId, item.claim.taskId);
+  assert.equal(first.ownerId, item.claim.ownerId);
+  assert.equal(first.leaseId, item.claim.leaseId);
+  assert.equal(first.attempt, item.claim.attempt);
+  assert.equal(first.state, 'active');
+  assert.ok(first.leaseExpiresAt > item.claim.leaseExpiresAt);
+  assert.deepEqual(first, keeper.claim);
+});
+
+test('K12 onRenewed is not fired when renewal loses ownership', async () => {
+  const item = fixture(120);
+  let calls = 0;
+  const keeper = new XLeaseKeeper({
+    claimStore: item.first,
+    claim: item.claim,
+    onRenewed: () => { calls += 1; },
+  }).start();
+  item.keepers.push(keeper);
+
+  assert.equal(item.second.release({
+    taskId: item.claim.taskId,
+    ownerId: item.claim.ownerId,
+    leaseId: item.claim.leaseId,
+  }), true);
+
+  const outcome = await keeper.done;
+  assert.equal(outcome.status, 'ownership_lost');
+  assert.equal(calls, 0);
+});
+
+test('K13 onRenewed must be a function when provided', () => {
+  const item = fixture(150);
+  assert.throws(
+    () => new XLeaseKeeper({ claimStore: item.first, claim: item.claim, onRenewed: true }),
+    /onRenewed must be a function/,
+  );
+});

@@ -6,6 +6,23 @@ A local macOS desktop control center, built with Electron, React, TypeScript, an
 
 Anti/Antigravity was removed from the active UI, Electron runtime, MCP tools, and routing. Code jobs use X; general Hearth jobs fail closed and require manual handling. Historical Goal and task records remain readable but cannot restart the retired route. See `docs/RELEASE_PROCESS.md` for the current release workflow.
 
+## Active X Coder extraction handoff
+
+```text
+PLAN = Revised Slices 1-9 with Slice 7.5 real-executor proving stage
+ACTIVE_BRANCH = chore/system-ui-consolidation
+BASE_ORIGIN_MAIN = d60c883703918d86cdada77cedac4765cfcd6541
+CURRENT_SLICE = Slice 1 COMPLETE
+SLICE_1 = XLeaseKeeper optional onRenewed hook; invoked only after a successful validated renewal; no production wiring yet
+VALIDATION = node --test scripts/test-x-lease-keeper.mjs -> 14/14 PASS (post-rebase; Antigravity shared-admission suite was removed from 0.4.24)
+UNRELATED_LOCAL_FILES = scripts/HearthHistoryExport.mq5; scripts/replay-30d.mjs (left untracked and untouched)
+NEXT_EXACT_ACTION = Slice 2 only: extend XRunStore with cancelled terminal status + cancelRunFenced(), retention update, focused tests
+CUTOVER_RULE = no production X Coder Service traffic before Slice 8; run-x-task.mjs stays in-process until cutover
+RECONCILIATION_RULE = reconcileStartupState() remains SQLite-local and synchronous; never add socket I/O inside it
+```
+
+Every completed slice must update this handoff, record validation evidence, commit the slice boundary, and push the active branch before the next slice starts.
+
 ## Archived project handoff (historical; superseded by 0.4.24)
 
 **Last updated: 2026-09-22**
