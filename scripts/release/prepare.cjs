@@ -35,6 +35,7 @@ const gates = [
   ['version consistency', () => problems.length === 0],
   ['build metadata tests', () => run('build metadata tests', ['--test', '--test-concurrency=1', 'scripts/test-release-version.mjs', 'scripts/test-build-metadata.mjs'])],
   ['updater tests', () => run('updater tests', ['scripts/test-updater.mjs'])],
+  ['local update tests', () => run('local update tests', ['--test', 'scripts/test-local-update.mjs'])],
 ];
 
 const results = gates.map(([name, check]) => [name, check()]);

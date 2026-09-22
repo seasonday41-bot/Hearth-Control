@@ -797,6 +797,13 @@ async function fetchAndVerifyUpdate({
     };
   }
 
+  // LOCAL_UPDATE candidates carry a signed source commit/archive instead of
+  // relying on the public DMG artifact. The main process owns the subsequent
+  // source download, isolated build, ad-hoc signing and smoke validation.
+  if (manifest.source) {
+    return { updateAvailable: true, manifest, sourceUpdate: true };
+  }
+
   // Step 8: Download artifact and verify integrity
   const downloadResult = await downloadRemoteArtifact({
     manifest,

@@ -343,6 +343,9 @@ export default function App() {
       if (event.type === 'invest:updated' && event.status) {
         setInvestStatus(event.status);
       }
+      if (event.type === 'updater:state' && event.state) {
+        setUpdateCheck((current) => current ? { ...current, state: event.state as unknown as UpdateStatus } : current);
+      }
       if (event.type === 'log' && event.message) {
         setLogs((current) => [...current, { time: now(), source: event.source ?? 'core', tone: event.tone ?? 'quiet', message: event.message ?? '' }]);
       }
@@ -1233,7 +1236,7 @@ export default function App() {
   };
 
   const updateStatusText: Record<UpdateStatus, string> = {
-    idle: 'Ready to check', checking: 'Checking for update', up_to_date: 'Up to date', update_available: 'Update available', downloading: 'Downloading', verifying: 'Verifying', update_ready: 'Update ready', installing: 'Installing', restarting: 'Restarting', rollback: 'Rollback', error: 'Error',
+    idle: 'Ready to check', checking: 'Checking for update', up_to_date: 'Up to date', update_available: 'Update available', downloading: 'Downloading', verifying: 'Verifying', building: 'Building', update_ready: 'Update ready', installing: 'Installing', restarting: 'Restarting', rollback: 'Rollback', error: 'Error',
   };
 
   const handleApproveRemoteTask = async (task: BridgeTask) => {

@@ -9,6 +9,7 @@ const crypto = require('node:crypto');
 const localUpdater = require('./updater.cjs');
 const remoteUpdater = require('./remote-updater.cjs');
 const remoteUpdateStager = require('./remote-update-stager.cjs');
+const localUpdate = require('./local-update.cjs');
 const remoteUpdateState = require('./remote-update-state.cjs');
 const updateTrust = require('./update-trust-config.cjs');
 const { SecureCredentialStore } = require('./security/secure-credential-store.cjs');
@@ -1224,6 +1225,7 @@ const remoteUpdateOptions = () => ({
   trustedOrigins: updateTrust.TRUSTED_DELIVERY_ORIGINS,
   trustedKeys: updateTrust.TRUSTED_SIGNING_KEYS,
   artifactBaseUrl: updateTrust.ARTIFACT_BASE_URL,
+  sourceArchiveBaseUrl: updateTrust.SOURCE_ARCHIVE_BASE_URL,
   expectedPlatform: process.platform,
   expectedArch: process.arch,
 });
@@ -2925,11 +2927,26 @@ app.whenReady().then(async () => {
         return { state: localUpdater.UPDATE_STATES.ERROR, currentVersion: info.currentVersion, currentBuildId: info.currentBuildId, available: null, error: 'The published release changed. Check for updates again.' };
       }
       remoteUpdateSession = { state: 'verifying', manifest: fetched.manifest };
+      sendEvent({ type: 'updater:state', state: 'verifying' });
       phase = 'stage';
-      const staged = await remoteUpdateStager.stageVerifiedUpdate({
-        manifest: fetched.manifest,
-        dmgPath: fetched.dmgPath,
-      });
+      const staged = fetched.manifest.source
+        ? await (async () => {
+          const sourceArchive = await localUpdate.downloadSourceArchive({
+            manifest: fetched.manifest,
+            sourceRoot: remoteUpdateOptions().sourceArchiveBaseUrl,
+            updatesDir: info.updateDirectory,
+            trustedOrigin: remoteUpdateOptions().sourceArchiveBaseUrl.replace(/\/$/, ''),
+            trustedOrigins: [remoteUpdateOptions().sourceArchiveBaseUrl.replace(/\/$/, '')],
+          });
+          sendEvent({ type: 'updater:state', state: 'building' });
+          return localUpdate.buildAndStageLocalUpdate({
+            manifest: fetched.manifest,
+            archivePath: sourceArchive.archivePath,
+            stagingRoot: info.updateDirectory,
+            expectedRepository: updateTrust.SOURCE_REPOSITORY,
+          });
+        })()
+        : await remoteUpdateStager.stageVerifiedUpdate({ manifest: fetched.manifest, dmgPath: fetched.dmgPath });
       updaterDebug('stage_ok', fetched.manifest.buildId);
       phase = 'local_validate';
       const check = await inspectLocalUpdateDirectory(staged.stagedDir, info);
@@ -2949,6 +2966,7 @@ app.whenReady().then(async () => {
         manifest: fetched.manifest,
         stagedDir: staged.stagedDir,
       };
+      sendEvent({ type: 'updater:state', state: 'update_ready' });
       updaterDebug('update_ready', fetched.manifest.buildId);
       return check;
     } catch (error) {

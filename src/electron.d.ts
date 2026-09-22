@@ -170,7 +170,7 @@ interface InvestStatus {
   search_ai: { permission: PermissionValue; ready: boolean; approval_required: boolean };
   invest_ai: { ready: boolean };
 }
-interface ServerEvent { type: 'state' | 'log' | 'approval' | 'approval:resolved' | 'bridge:state' | 'publicTasks:state' | 'goals:updated' | 'invest:updated'; state?: ServerState | BridgeState | PublicTasksState; status?: InvestStatus; goal?: Goal; source?: string; tone?: string; message?: string; requestId?: string; permission?: string; action?: string; allowed?: boolean; reason?: 'user' | 'timeout' | 'aborted' | 'shutdown'; }
+interface ServerEvent { type: 'state' | 'log' | 'approval' | 'approval:resolved' | 'bridge:state' | 'publicTasks:state' | 'goals:updated' | 'invest:updated' | 'updater:state'; state?: ServerState | BridgeState | PublicTasksState | UpdateStatus; status?: InvestStatus; goal?: Goal; source?: string; tone?: string; message?: string; requestId?: string; permission?: string; action?: string; allowed?: boolean; reason?: 'user' | 'timeout' | 'aborted' | 'shutdown'; }
 
 interface XQueueStatus {
   found: boolean;
@@ -249,7 +249,7 @@ interface PublicTasksState {
   accountEmail: string | null;
 }
 
-type UpdateStatus = 'idle' | 'checking' | 'up_to_date' | 'update_available' | 'downloading' | 'verifying' | 'update_ready' | 'installing' | 'restarting' | 'rollback' | 'error';
+type UpdateStatus = 'idle' | 'checking' | 'up_to_date' | 'update_available' | 'downloading' | 'verifying' | 'building' | 'update_ready' | 'installing' | 'restarting' | 'rollback' | 'error';
 type UpdateInstallBlocker = 'X_ACTIVE' | 'GOAL_ACTIVE' | 'DURABLE_JOB_ACTIVE' | 'UPDATER_BUSY' | 'RUNTIME_STATE_UNAVAILABLE';
 interface UpdaterInfo { currentVersion: string; currentBuildId: string; currentCommit: string | null; builtFromDirtyTree?: boolean; builtAt: string | null; updateDirectory: string; }
 interface UpdateCheck extends Pick<UpdaterInfo, 'currentVersion' | 'currentBuildId'> {

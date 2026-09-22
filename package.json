@@ -18,6 +18,7 @@
     "test:mcp": "node scripts/verify-mcp.mjs",
     "test:mcp:stdio": "node scripts/verify-stdio.mjs",
     "test:updater": "node scripts/test-updater.mjs",
+    "test:local-update": "node --test scripts/test-local-update.mjs",
     "test:safety": "node scripts/test-safety.mjs",
     "test:bridge": "node scripts/test-bridge.mjs",
     "test:goal-runner": "node scripts/test-goal-runner.mjs",

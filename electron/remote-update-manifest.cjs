@@ -182,6 +182,20 @@ function validateRemoteManifestSchema(manifest, options = {}) {
     throw new Error('Manifest releaseNotes must be a string.');
   }
 
+  // Optional source-build metadata used only by the owner's LOCAL_UPDATE
+  // mode. Public DMG updates remain unchanged; when present this signed
+  // record pins the source repository, full commit, archive path and hash.
+  if (manifest.source !== undefined) {
+    const source = manifest.source;
+    if (!source || typeof source !== 'object' || Array.isArray(source)
+      || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(source.repository || '')
+      || !/^[0-9a-f]{40}$/.test(source.commit || '')
+      || source.archivePath !== `${source.repository}/archive/${source.commit}.tar.gz`
+      || !/^[a-f0-9]{64}$/i.test(source.sha256 || '')) {
+      throw new Error('Manifest source metadata is invalid.');
+    }
+  }
+
   if (requireSignature) {
     if (!manifest.signature || typeof manifest.signature !== 'object' || Array.isArray(manifest.signature)) {
       throw new Error('Manifest signature object is required.');

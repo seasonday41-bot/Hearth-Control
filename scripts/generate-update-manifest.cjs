@@ -51,6 +51,7 @@ async function replaceOutputDirectory({ outputDirectory, stagingDirectory }) {
  *   relativeArtifactPath?: string,
  *   channel?: string,
  *   releaseNotes?: string,
+ *   source?: { repository: string, commit: string, archivePath: string, sha256: string },
  * }} params
  */
 async function generateRemoteManifestV2({
@@ -60,6 +61,7 @@ async function generateRemoteManifestV2({
   relativeArtifactPath,
   channel = 'stable',
   releaseNotes = '',
+  source,
 }) {
   if (!metadata || typeof metadata !== 'object') {
     throw new Error('Metadata object is required for remote manifest.');
@@ -104,6 +106,7 @@ async function generateRemoteManifestV2({
       sha256: dmgSha256,
     },
     releaseNotes: releaseNotes !== undefined ? releaseNotes : (metadata.releaseNotes || ''),
+    ...(source ? { source } : {}),
   };
 
   validateRemoteManifestSchema(manifest, { requireSignature: false });
@@ -117,6 +120,7 @@ async function packageUpdateBundle({
   relativeArtifactPath,
   channel = 'stable',
   releaseNotes = '',
+  source,
 }) {
   const release = path.join(root, 'release');
   const sourceApp = path.join(release, 'mac-arm64', APP_NAME);
@@ -161,6 +165,7 @@ async function packageUpdateBundle({
         relativeArtifactPath,
         channel,
         releaseNotes,
+        source,
       });
       await fs.promises.writeFile(
         path.join(stagingDirectory, 'remote-update-manifest.unsigned.json'),
