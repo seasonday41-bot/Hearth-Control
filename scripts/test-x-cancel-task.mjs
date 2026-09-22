@@ -250,3 +250,37 @@ test('C7-6 source invariant: no return path reports cancelled=true without the p
   assert.ok(fn.lastIndexOf('if (!persistedRun)', successIndex) >= 0, 'success must be dominated by persistedRun guard');
   assert.match(fn.slice(successIndex, successIndex + 300), /run:\s*persistedRun/);
 });
+
+
+test('C7-7 distinct service run id is used for X ack while Hearth persists the original run id', async () => {
+  const item = fixture();
+  const calls = [];
+  const realCancel = item.runStore.cancelRunFenced.bind(item.runStore);
+  item.runStore.cancelRunFenced = (args) => {
+    calls.push({ kind: 'persist', runId: args.runId });
+    return realCancel(args);
+  };
+
+  const result = await cancelXTask({
+    runId: 'run-1',
+    xCoderRunId: 'service-run-99',
+    taskId: 'task-1',
+    claim: item.claim,
+    claimStore: item.claimStore,
+    runStore: item.runStore,
+    keeper: item.keeper,
+    xCoderClient: {
+      async cancel(runId) {
+        calls.push({ kind: 'x_cancel', runId });
+        return ack(runId);
+      },
+    },
+  });
+
+  assert.equal(result.cancelled, true);
+  assert.deepEqual(calls.slice(0, 2), [
+    { kind: 'x_cancel', runId: 'service-run-99' },
+    { kind: 'persist', runId: 'run-1' },
+  ]);
+  assert.equal(item.runStore.getRun('run-1').status, 'cancelled');
+});

@@ -12,9 +12,12 @@ const notCancelled = (status, extra = {}) => ({
   ...extra,
 });
 
-const validateInputs = ({ runId, taskId, claim, claimStore, runStore, keeper, xCoderClient, maxPersistAttempts }) => {
+const validateInputs = ({ runId, xCoderRunId, taskId, claim, claimStore, runStore, keeper, xCoderClient, maxPersistAttempts }) => {
   if (typeof runId !== 'string' || !runId.trim()) throw new TypeError('runId is required.');
   if (typeof taskId !== 'string' || !taskId.trim()) throw new TypeError('taskId is required.');
+  if (xCoderRunId !== undefined && (typeof xCoderRunId !== 'string' || !xCoderRunId.trim())) {
+    throw new TypeError('xCoderRunId must be a non-empty string when provided.');
+  }
   if (!claim || claim.taskId !== taskId || typeof claim.ownerId !== 'string' || !claim.ownerId ||
       typeof claim.leaseId !== 'string' || !claim.leaseId) {
     throw new TypeError('cancelXTask requires the original claim identity for this task.');
@@ -48,6 +51,7 @@ const ownerStillLive = (claimStore, claim) =>
  */
 export async function cancelXTask({
   runId,
+  xCoderRunId = runId,
   taskId,
   claim,
   claimStore,
@@ -57,16 +61,17 @@ export async function cancelXTask({
   maxPersistAttempts = 3,
   logger = console,
 } = {}) {
-  validateInputs({ runId, taskId, claim, claimStore, runStore, keeper, xCoderClient, maxPersistAttempts });
+  validateInputs({ runId, xCoderRunId, taskId, claim, claimStore, runStore, keeper, xCoderClient, maxPersistAttempts });
+  const serviceRunId = xCoderRunId ?? runId;
 
   let ack;
   try {
-    ack = await xCoderClient.cancel(runId);
+    ack = await xCoderClient.cancel(serviceRunId);
   } catch (error) {
     return notCancelled('x_cancel_error', { error: describeError(error) });
   }
 
-  if (!ack || ack.runId !== runId || ack.acknowledged !== true || ack.status !== 'cancelled') {
+  if (!ack || ack.runId !== serviceRunId || ack.acknowledged !== true || ack.status !== 'cancelled') {
     return notCancelled('x_cancel_not_acknowledged', { xAck: ack ?? null });
   }
 
@@ -162,6 +167,7 @@ export async function cancelXTask({
     cancelled: true,
     clean: cleanup.keeperStatus === 'stopped' && cleanup.released === true && cleanup.error === null,
     status: 'cancelled',
+    xCoderRunId: serviceRunId,
     run: persistedRun,
     xAck: ack,
     persistAttempts,

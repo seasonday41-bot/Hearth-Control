@@ -2,6 +2,7 @@ import { resolveHearthRuntimeDatabasePath } from './runtime-paths.mjs';
 import { XClaimStore } from './claim-store.mjs';
 import { XRunStore } from './run-store.mjs';
 import { createOllamaModelAdapter } from './model-adapter.mjs';
+import { createXCoderClient } from './x-coder-client.mjs';
 
 /**
  * Lazy, per-process singleton for the real X production dependencies.
@@ -75,10 +76,23 @@ export function getProductionXRuntime() {
 
   runStore.reconcileStartupState(makeIsClaimLive(claimStore));
 
+  // Client construction is local/inert: no socket call occurs here. Keeping
+  // reconciliation above this line preserves the hard startup invariant that
+  // SQLite reconciliation is synchronous and network-independent.
+  const xCoderClient = createXCoderClient();
+  const modelAdapter = createOllamaModelAdapter();
+  Object.defineProperty(modelAdapter, 'xCoderClient', {
+    value: xCoderClient,
+    enumerable: false,
+    configurable: false,
+    writable: false,
+  });
+
   singleton = {
     claimStore,
     runStore,
-    modelAdapter: createOllamaModelAdapter(),
+    modelAdapter,
+    xCoderClient,
     ownerId: `mcp-${process.pid}`,
   };
   return singleton;

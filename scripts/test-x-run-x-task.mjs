@@ -10,6 +10,7 @@ import { XRunStore } from '../mcp/x/run-store.mjs';
 import { XExecutionAbortedError } from '../mcp/x/cancellation.mjs';
 import { X_TASK_VERSION } from '../mcp/x/task-contract.mjs';
 import { runXTask } from '../mcp/x/run-x-task.mjs';
+import { createTestXCoderClient } from './lib/test-x-coder-client.mjs';
 
 const fixtures = [];
 function fixture(leaseDurationMs = 400) {
@@ -21,13 +22,14 @@ function fixture(leaseDurationMs = 400) {
   const claims = new XClaimStore({ storagePath: dbPath, leaseDurationMs });
   const otherClaims = new XClaimStore({ storagePath: dbPath, leaseDurationMs });
   const runs = new XRunStore({ storagePath: dbPath });
-  const item = { root, dbPath, claims, otherClaims, runs };
+  const item = { root, dbPath, claims, otherClaims, runs, xCoderRuntimes: [] };
   fixtures.push(item);
   return item;
 }
 
-afterEach(() => {
+afterEach(async () => {
   for (const item of fixtures.splice(0)) {
+    for (const runtime of item.xCoderRuntimes.splice(0)) { try { await runtime.client.close(); } catch {} }
     item.claims.close();
     item.otherClaims.close();
     item.runs.close();
@@ -63,9 +65,23 @@ const model = (actions = []) => ({
   },
 });
 const create = (pathName = 'src/ok.js') => ({ type: 'create', path: pathName, content: 'ok\n' });
-const start = (item, task = taskFor(item), adapter = model(), overrides = {}) => runXTask(task, adapter, {
-  claimStore: item.claims, runStore: item.runs, ownerId: 'owner-a', ...overrides,
-});
+const start = (item, task = taskFor(item), adapter = model(), overrides = {}) => {
+  const { executionOptions = {}, xCoderClient: injectedClient, ...runOptions } = overrides;
+  let xCoderClient = injectedClient;
+  if (!xCoderClient) {
+    const runtime = createTestXCoderClient({ root: item.root, modelAdapter: adapter, executionOptions });
+    item.xCoderRuntimes.push(runtime);
+    xCoderClient = runtime.client;
+  }
+  return runXTask(task, adapter, {
+    claimStore: item.claims,
+    runStore: item.runs,
+    ownerId: 'owner-a',
+    xCoderClient,
+    xCoderPollIntervalMs: 1,
+    ...runOptions,
+  });
+};
 
 function deferred() {
   let resolve;
@@ -206,13 +222,17 @@ test('ordinary execution throw uses failRunFenced and never stores an X result',
 
 test('explicit X cancellation is not converted into an ordinary failed run', async () => {
   const item = fixture();
-  const executionOptions = Object.defineProperty({}, 'modelOptions', {
-    enumerable: true, get() { throw new XExecutionAbortedError(); },
-  });
-  const admitted = await start(item, taskFor(item), model(), { executionOptions });
+  const adapter = waitingModel();
+  const admitted = await start(item, taskFor(item), adapter);
+  await adapter.entered;
+
+  const cancelled = await admitted.cancel();
+  assert.equal(cancelled.cancelled, true);
+  assert.equal(cancelled.status, 'cancelled');
+
   const result = await admitted.done;
   assert.equal(result.status, 'cancelled');
-  assert.equal(item.runs.getRun(admitted.runId).status, 'running');
+  assert.equal(item.runs.getRun(admitted.runId).status, 'cancelled');
   assert.equal(item.claims.getActiveClaim(), null);
 });
 
@@ -399,9 +419,18 @@ test('two independent run callers sharing SQLite cannot execute concurrently', a
   assert.equal(first.accepted, true);
   await adapter.entered;
   let secondCalled = 0;
-  const second = await runXTask(taskFor(item, 'task-x-2'), {
+  const secondAdapter = {
     async generate() { secondCalled += 1; return model().generate(); },
-  }, { claimStore: item.otherClaims, runStore: item.runs, ownerId: 'owner-b' });
+  };
+  const secondRuntime = createTestXCoderClient({ root: item.root, modelAdapter: secondAdapter });
+  item.xCoderRuntimes.push(secondRuntime);
+  const second = await runXTask(taskFor(item, 'task-x-2'), secondAdapter, {
+    claimStore: item.otherClaims,
+    runStore: item.runs,
+    ownerId: 'owner-b',
+    xCoderClient: secondRuntime.client,
+    xCoderPollIntervalMs: 1,
+  });
   assert.deepEqual(second, { accepted: false, reason: 'no_capacity', runId: null });
   assert.equal(secondCalled, 0);
   item.otherClaims.release({ taskId: 'task-x-1', ownerId: 'owner-a', leaseId: item.claims.getRaw('task-x-1').leaseId });

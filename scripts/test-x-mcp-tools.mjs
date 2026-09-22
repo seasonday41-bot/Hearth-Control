@@ -10,6 +10,7 @@ import { registerWorkspaceTools, toolNames } from '../mcp/tools.mjs';
 import { XClaimStore } from '../mcp/x/claim-store.mjs';
 import { XRunStore } from '../mcp/x/run-store.mjs';
 import { X_TASK_VERSION } from '../mcp/x/task-contract.mjs';
+import { createTestXCoderClient } from './lib/test-x-coder-client.mjs';
 
 const fixtures = [];
 function fixture() {
@@ -18,12 +19,13 @@ function fixture() {
   fs.mkdirSync(path.join(root, 'src'));
   fs.mkdirSync(path.join(root, 'scripts'));
   fs.writeFileSync(path.join(root, 'scripts/test-pass.mjs'), "import test from 'node:test';\ntest('passes', () => {});\n");
-  const item = { root, dbPath, stores: [] };
+  const item = { root, dbPath, stores: [], xCoderRuntimes: [] };
   fixtures.push(item);
   return item;
 }
 afterEach(() => {
   for (const item of fixtures.splice(0)) {
+    for (const runtime of item.xCoderRuntimes.splice(0)) { try { runtime.client.close(); } catch {} }
     for (const store of item.stores) store.close();
     fs.rmSync(item.root, { recursive: true, force: true });
   }
@@ -48,6 +50,15 @@ function registerFor(item, overrides = {}) {
   const { claimStore, runStore } = overrides.claimStore ? overrides : realStores(item);
   const ownerId = overrides.ownerId ?? `owner-${Math.random().toString(36).slice(2)}`;
   const modelAdapter = overrides.modelAdapter ?? model();
+  if (!modelAdapter.xCoderClient) {
+    const runtime = createTestXCoderClient({ root: item.root, modelAdapter });
+    item.xCoderRuntimes.push(runtime);
+    Object.defineProperty(modelAdapter, 'xCoderClient', {
+      value: runtime.client,
+      enumerable: false,
+      configurable: true,
+    });
+  }
   registerWorkspaceTools(server, {
     workspace: item.root,
     permissions: {},

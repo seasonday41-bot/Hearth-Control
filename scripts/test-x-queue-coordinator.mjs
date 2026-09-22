@@ -20,9 +20,11 @@ import { XClaimStore } from '../mcp/x/claim-store.mjs';
 import { XRunStore } from '../mcp/x/run-store.mjs';
 import { X_TASK_VERSION } from '../mcp/x/task-contract.mjs';
 import { runXTask } from '../mcp/x/run-x-task.mjs';
+import { createTestXCoderClient } from './lib/test-x-coder-client.mjs';
 
 const dirs = [];
 const stores = [];
+const fixtureItems = [];
 
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hearth-x-queue-coord-'));
@@ -36,10 +38,17 @@ function fixture() {
   const runStore = new XRunStore({ storagePath: dbPath });
   const queueStore = new XQueueStore({ storagePath: queuePath }).load();
   stores.push(claimStore, runStore);
-  return { root, dbPath, queuePath, claimStore, runStore, queueStore };
+  const item = { root, dbPath, queuePath, claimStore, runStore, queueStore, xCoderRuntimes: [] };
+  fixtureItems.push(item);
+  return item;
 }
 
 afterEach(() => {
+  for (const item of fixtureItems.splice(0)) {
+    for (const runtime of item.xCoderRuntimes.splice(0)) {
+      try { runtime.client.close(); } catch {}
+    }
+  }
   for (const store of stores.splice(0)) store.close();
   for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
@@ -117,10 +126,20 @@ function twoStageControllableModel(actions = []) {
 }
 
 function coordinatorFor(item, overrides = {}) {
+  const modelAdapter = overrides.modelAdapter ?? fastModel([create()]);
+  if (!modelAdapter.xCoderClient) {
+    const runtime = createTestXCoderClient({ root: item.root, modelAdapter });
+    item.xCoderRuntimes.push(runtime);
+    Object.defineProperty(modelAdapter, 'xCoderClient', {
+      value: runtime.client,
+      enumerable: false,
+      configurable: true,
+    });
+  }
   return new XQueueCoordinator({
     queueStore: item.queueStore, claimStore: item.claimStore, runStore: item.runStore,
-    modelAdapter: overrides.modelAdapter ?? fastModel([create()]),
-    ownerId: overrides.ownerId ?? `owner-${Math.random().toString(36).slice(2)}`,
+    modelAdapter,
+    ownerId: overrides.ownerId ?? ('owner-' + Math.random().toString(36).slice(2)),
     leaseDurationMs: overrides.leaseDurationMs,
     onAdmissionAccepted: overrides.onAdmissionAccepted,
     onCapacityBlocked: overrides.onCapacityBlocked,
@@ -434,10 +453,19 @@ test('11 a real, terminal X run this coordinator never dispatched is untracked -
   // of the real, unmodified runXTask), proving the B1 invariant against a
   // genuinely real, persisted terminal run -- not merely a nonexistent
   // runId -- that this coordinator simply never tracked.
+  const externalModel = fastModel([create('outside/no.js')]);
+  const externalRuntime = createTestXCoderClient({ root: item.root, modelAdapter: externalModel });
+  item.xCoderRuntimes.push(externalRuntime);
   const externalAdmitted = await runXTask(
     taskFor(item, 'external-task', { allowedTools: ['repo_read', 'repo_edit'] }),
-    fastModel([create('outside/no.js')]),
-    { claimStore: item.claimStore, runStore: item.runStore, ownerId: 'external-owner-not-this-coordinator' },
+    externalModel,
+    {
+      claimStore: item.claimStore,
+      runStore: item.runStore,
+      ownerId: 'external-owner-not-this-coordinator',
+      xCoderClient: externalRuntime.client,
+      xCoderPollIntervalMs: 1,
+    },
   );
   assert.equal(externalAdmitted.accepted, true);
 

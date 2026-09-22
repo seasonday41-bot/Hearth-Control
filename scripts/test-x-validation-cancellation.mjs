@@ -8,6 +8,7 @@ import { XClaimStore } from '../mcp/x/claim-store.mjs';
 import { XRunStore } from '../mcp/x/run-store.mjs';
 import { X_TASK_VERSION } from '../mcp/x/task-contract.mjs';
 import { runXTask } from '../mcp/x/run-x-task.mjs';
+import { createTestXCoderClient } from './lib/test-x-coder-client.mjs';
 
 /**
  * Closes the one integration gap identified in the prior runXTask safety
@@ -96,16 +97,21 @@ test('slow', async () => {
   const claims = new XClaimStore({ storagePath: dbPath, leaseDurationMs: 1000 });
   const otherClaims = new XClaimStore({ storagePath: dbPath, leaseDurationMs: 1000 });
   const runs = new XRunStore({ storagePath: dbPath });
+  let xCoderRuntime = null;
 
   try {
+    const adapter = model([{ type: 'create', path: 'src/ok.js', content: 'ok\n' }]);
+    xCoderRuntime = createTestXCoderClient({ root, modelAdapter: adapter });
     const admitted = await runXTask(
       taskFor(root),
-      model([{ type: 'create', path: 'src/ok.js', content: 'ok\n' }]),
+      adapter,
       {
         claimStore: claims,
         runStore: runs,
+        xCoderClient: xCoderRuntime.client,
         ownerId: 'owner-a',
         leaseDurationMs: 1000,
+        xCoderPollIntervalMs: 1,
       },
     );
     assert.equal(admitted.accepted, true);
@@ -139,6 +145,7 @@ test('slow', async () => {
       'validation child must remain terminated; it must not continue in background',
     );
   } finally {
+    try { xCoderRuntime?.client.close(); } catch {}
     claims.close();
     otherClaims.close();
     runs.close();
