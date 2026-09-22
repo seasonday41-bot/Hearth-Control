@@ -256,6 +256,7 @@ interface UpdateCheck extends Pick<UpdaterInfo, 'currentVersion' | 'currentBuild
   state: UpdateStatus;
   available: { version: string; buildId: string; builtAt: string; platform: string; arch: string; dmgPath: string | null } | null;
   latestRelease?: { version: string; buildId: string; builtAt: string; platform: string; arch: string; dmgPath: string | null };
+  latestMain?: { version: string; buildId: string; builtAt: string | null; commit: string | null };
   error: string | null;
 }
 

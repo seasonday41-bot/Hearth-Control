@@ -155,18 +155,18 @@ export default function OverviewSystemPage({
             <div><dt>Current build</dt><dd title={updaterInfo?.currentBuildId}>{updaterInfo?.currentBuildId ?? '—'}</dd></div>
             <div><dt>Commit</dt><dd title={updaterInfo?.currentCommit ?? undefined}>{updaterInfo?.currentCommit ? `${updaterInfo.currentCommit.slice(0, 7)}${updaterInfo.builtFromDirtyTree ? ' (dirty tree)' : ''}` : '—'}</dd></div>
             <div><dt>Build time</dt><dd>{updaterInfo?.builtAt ? new Date(updaterInfo.builtAt).toLocaleString() : 'Development build'}</dd></div>
-            {updateCheck?.state === 'up_to_date' && updateCheck.latestRelease && <div><dt>Latest release</dt><dd title={updateCheck.latestRelease.buildId}>v{updateCheck.latestRelease.version} · {updateCheck.latestRelease.buildId}</dd></div>}
+            {updateCheck?.latestMain && <div><dt>Latest main</dt><dd title={updateCheck.latestMain.commit ?? updateCheck.latestMain.buildId}>v{updateCheck.latestMain.version} · {updateCheck.latestMain.buildId}</dd></div>}
             {updateCheck?.available && <div><dt>New build</dt><dd>v{updateCheck.available.version} · {updateCheck.available.buildId}</dd></div>}
           </dl>
           {updateCheck?.error && <p className="update-error">{updateCheck.error}</p>}
           <div className="update-actions">
             <button type="button" className="subtle-action" disabled={updateBusy} onClick={checkForUpdate}>{updateBusy && updateCheck?.state === 'checking' ? 'Checking…' : 'Check for Update'}</button>
-            {updateCheck?.state === 'update_available' && <button type="button" className="update-install" disabled={updateBusy} onClick={prepareUpdate}>Download / Prepare</button>}
+            {updateCheck?.state === 'update_available' && <button type="button" className="update-install" disabled={updateBusy} onClick={prepareUpdate}>Build / Prepare</button>}
             <button type="button" className="update-install" disabled={updateBusy || updateCheck?.state !== 'update_ready'} onClick={installUpdate}>{updateCheck?.state === 'installing' ? 'Installing…' : 'Install Update'}</button>
             <button type="button" className="text-action" onClick={() => setShowUpdateDetails((visible) => !visible)}>{showUpdateDetails ? 'Hide Details' : 'View Details'}</button>
           </div>
           {showUpdateDetails && <div className="update-details">
-            <p>Remote updates are checked from the built-in Hearth GitHub Releases trust configuration and must pass signature, download, and staging verification before Install is enabled.</p>
+            <p>Local updates check the built-in trusted private Git repository and fixed main branch, pin the exact commit, build in isolated staging, ad-hoc sign, verify, and reuse the existing backup/rollback installer. Public GitHub Releases remain a separate distribution path.</p>
             <p><strong>Manual trusted folder</strong><code>{updaterInfo?.updateDirectory ?? '—'}</code></p>
             <button type="button" className="text-action" disabled={updateBusy} onClick={chooseUpdateDirectory}>Choose manual update folder</button>
           </div>}

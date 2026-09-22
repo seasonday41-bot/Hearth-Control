@@ -164,8 +164,11 @@ test('4. valid newer signed manifest reaches update_available decision', async (
   remote.validatePlatformAndArch(manifest, { expectedPlatform: 'darwin', expectedArch: 'arm64' });
   assert.equal(updater.isManifestNewer({ manifest, currentVersion: CURRENT_VERSION, currentBuiltAt: CURRENT_BUILT_AT }), true);
   const checkHandler = mainSource.slice(mainSource.indexOf("ipcMain.handle('updater:check'"), mainSource.indexOf("ipcMain.handle('updater:prepare'"));
-  assert.ok(checkHandler.includes('remoteUpdateState.checkRemoteUpdate({'));
-  assert.ok(remoteStateSource.includes("state: 'update_available'"));
+  assert.ok(checkHandler.includes('localUpdate.checkGitMainUpdate({'), 'visible Check for Update must use trusted private Git main');
+  assert.ok(checkHandler.includes('updateTrust.SOURCE_REPOSITORY'));
+  assert.ok(checkHandler.includes('updateTrust.SOURCE_BRANCH'));
+  assert.equal(checkHandler.includes('remoteUpdateState.checkRemoteUpdate({'), false, 'visible local update check must not depend on Latest Release');
+  assert.ok(remoteStateSource.includes("state: 'update_available'"), 'public signed-release compatibility path remains available');
 });
 
 test('5. verified remote download + staging reaches existing local updater update_ready', async () => {

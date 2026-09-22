@@ -1215,6 +1215,7 @@ const safeRemoteUpdateError = (error) => {
   if (/platform|arch/i.test(message)) return 'The published update is not compatible with this Mac.';
   if (/size|sha-?256|checksum|artifact/i.test(message)) return 'The downloaded update failed integrity verification.';
   if (/redirect|origin|protocol|DNS|network|request|URL|hostname|address/i.test(message)) return 'The update service could not be reached securely.';
+  if (/LOCAL_UPDATE|git|repository|credential|fetch|main ref/i.test(message)) return 'The private Git update source could not be reached securely.';
   if (/mount|staging|application bundle|detach/i.test(message)) return 'The downloaded update could not be prepared safely.';
   return 'The remote update could not be prepared safely.';
 };
@@ -2876,10 +2877,15 @@ app.whenReady().then(async () => {
     if (!mainWindow || event.sender.id !== mainWindow.webContents.id) throw new Error('Update checks must come from the local Hearth window.');
     const info = getUpdaterInfo();
     try {
-      const checked = await remoteUpdateState.checkRemoteUpdate({
-        currentSession: remoteUpdateSession,
-        info,
-        remoteOptions: remoteUpdateOptions(),
+      const checked = await localUpdate.checkGitMainUpdate({
+        currentVersion: info.currentVersion,
+        currentBuildId: info.currentBuildId,
+        currentBuiltAt: info.builtAt,
+        currentCommit: info.currentCommit,
+        isPackaged: info.isPackaged,
+        stagingRoot: info.updateDirectory,
+        expectedRepository: updateTrust.SOURCE_REPOSITORY,
+        expectedBranch: updateTrust.SOURCE_BRANCH,
       });
       remoteUpdateSession = checked.session;
       return checked.result;
@@ -2902,6 +2908,47 @@ app.whenReady().then(async () => {
     }
     let phase = 'fetch';
     try {
+      if (remoteUpdateSession?.mode === 'local_git') {
+        const expectedManifest = remoteUpdateSession.manifest;
+        const rechecked = await localUpdate.checkGitMainUpdate({
+          currentVersion: info.currentVersion,
+          currentBuildId: info.currentBuildId,
+          currentBuiltAt: info.builtAt,
+          currentCommit: info.currentCommit,
+          isPackaged: info.isPackaged,
+          stagingRoot: info.updateDirectory,
+          expectedRepository: updateTrust.SOURCE_REPOSITORY,
+          expectedBranch: updateTrust.SOURCE_BRANCH,
+        });
+        if (rechecked.session?.manifest?.buildId !== expectedBuildId
+          || rechecked.session?.manifest?.source?.commit !== expectedManifest?.source?.commit) {
+          remoteUpdateSession = null;
+          return { state: localUpdater.UPDATE_STATES.ERROR, currentVersion: info.currentVersion, currentBuildId: info.currentBuildId, available: null, error: 'Git main changed. Check for updates again.' };
+        }
+        remoteUpdateSession = { ...rechecked.session, state: 'building' };
+        sendEvent({ type: 'updater:state', state: 'building' });
+        phase = 'stage';
+        const staged = await localUpdate.buildAndStageGitUpdate({
+          manifest: rechecked.session.manifest,
+          stagingRoot: info.updateDirectory,
+          expectedRepository: updateTrust.SOURCE_REPOSITORY,
+        });
+        phase = 'local_validate';
+        const check = await inspectLocalUpdateDirectory(staged.stagedDir, info);
+        if (check.state !== localUpdater.UPDATE_STATES.UPDATE_READY) {
+          throw new Error(check.error || 'The staged update did not pass local updater validation.');
+        }
+        remoteUpdateSession = {
+          state: localUpdater.UPDATE_STATES.UPDATE_READY,
+          mode: 'local_git',
+          manifest: rechecked.session.manifest,
+          stagedDir: staged.stagedDir,
+        };
+        sendEvent({ type: 'updater:state', state: 'update_ready' });
+        updaterDebug('update_ready', rechecked.session.manifest.buildId);
+        return check;
+      }
+
       remoteUpdateSession = { ...remoteUpdateSession, state: 'downloading' };
       const fetched = await remoteUpdater.fetchAndVerifyUpdate({
         ...remoteUpdateOptions(),

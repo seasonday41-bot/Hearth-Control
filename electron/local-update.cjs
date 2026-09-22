@@ -7,13 +7,30 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { execFile } = require('node:child_process');
 const util = require('node:util');
-const { PRODUCT_NAME, MANIFEST_NAME, sha256Directory, isInside } = require('./updater.cjs');
+const { PRODUCT_NAME, MANIFEST_NAME, sha256Directory, isInside, isManifestNewer } = require('./updater.cjs');
 const { safeFetchWithRedirects } = require('./remote-updater.cjs');
 
 const execFileAsync = util.promisify(execFile);
 const SOURCE_COMMIT = /^[0-9a-f]{40}$/;
 const REPOSITORY = /^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/;
 const MAX_SOURCE_BYTES = 500 * 1024 * 1024;
+const NPM_CANDIDATES = Object.freeze(['/opt/homebrew/bin/npm', '/usr/local/bin/npm']);
+
+async function resolveNpmExecutable() {
+  for (const candidate of NPM_CANDIDATES) {
+    try {
+      await fs.promises.access(candidate, fs.constants.X_OK);
+      return candidate;
+    } catch {}
+  }
+  throw new Error('LOCAL_UPDATE npm executable was not found in trusted macOS locations.');
+}
+
+const buildToolEnv = (npmPath) => {
+  const existing = String(process.env.PATH || '').split(path.delimiter).filter(Boolean);
+  const preferred = [path.dirname(npmPath), '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin'];
+  return { ...process.env, PATH: [...new Set([...preferred, ...existing])].join(path.delimiter) };
+};
 
 const validateSourceManifest = (manifest, { expectedRepository } = {}) => {
   const source = manifest?.source;
@@ -77,15 +94,17 @@ async function downloadSourceArchive({ manifest, sourceRoot, updatesDir, trusted
   }
 }
 
-async function buildPreparedSource({ manifest, source, repoRoot, buildRoot, execFileFn, sign }) {
+async function buildPreparedSource({ manifest, source, repoRoot, buildRoot, execFileFn, sign, npmPath }) {
   const packageJson = JSON.parse(await fs.promises.readFile(path.join(repoRoot, 'package.json'), 'utf8'));
   if (packageJson.version !== manifest.version) throw new Error('LOCAL_UPDATE source version does not match manifest.');
-  await execFileFn('npm', ['ci'], { cwd: repoRoot, shell: false, timeout: 15 * 60 * 1000 });
-  await execFileFn('npm', ['run', 'dist:mac'], {
+  const npmExecutable = npmPath || await resolveNpmExecutable();
+  const toolEnv = buildToolEnv(npmExecutable);
+  await execFileFn(npmExecutable, ['ci'], { cwd: repoRoot, shell: false, timeout: 15 * 60 * 1000, env: toolEnv });
+  await execFileFn(npmExecutable, ['run', 'dist:mac'], {
     cwd: repoRoot,
     shell: false,
     timeout: 30 * 60 * 1000,
-    env: { ...process.env, HEARTH_BUILD_SOURCE_COMMIT: source.commit },
+    env: { ...toolEnv, HEARTH_BUILD_SOURCE_COMMIT: source.commit },
   });
   const meta = JSON.parse(await fs.promises.readFile(path.join(repoRoot, 'electron', 'build-meta.json'), 'utf8').catch(() => '{}'));
   if (meta.version !== manifest.version || meta.buildId !== manifest.buildId || meta.commit !== source.commit || meta.dirty === true) {
@@ -105,7 +124,109 @@ async function buildPreparedSource({ manifest, source, repoRoot, buildRoot, exec
   return { buildRoot, stagedDir: staged, stagedAppPath: path.join(staged, PRODUCT_NAME), localManifest };
 }
 
-async function buildAndStageGitUpdate({ manifest, stagingRoot, expectedRepository, execFileFn = execFileAsync, sign = true }) {
+const GIT_BRANCH = /^[A-Za-z0-9._/-]+$/;
+
+const publicGitCandidate = (manifest) => manifest ? ({
+  version: manifest.version,
+  buildId: manifest.buildId,
+  builtAt: manifest.builtAt,
+  platform: manifest.platform,
+  arch: manifest.arch,
+  dmgPath: null,
+  commit: manifest.source?.commit || null,
+}) : null;
+
+async function checkGitMainUpdate({
+  currentVersion,
+  currentBuildId,
+  currentBuiltAt,
+  currentCommit,
+  isPackaged,
+  stagingRoot,
+  expectedRepository,
+  expectedBranch = 'main',
+  execFileFn = execFileAsync,
+}) {
+  if (isPackaged === false) {
+    return {
+      session: null,
+      result: { state: 'up_to_date', currentVersion, currentBuildId, available: null, error: null, devMode: true },
+    };
+  }
+  if (!SOURCE_COMMIT.test(String(currentCommit || ''))) throw new Error('LOCAL_UPDATE current build has no trusted commit identity.');
+  if (!REPOSITORY.test(expectedRepository || '')) throw new Error('LOCAL_UPDATE trusted source repository is invalid.');
+  if (!GIT_BRANCH.test(expectedBranch || '') || expectedBranch !== 'main') throw new Error('LOCAL_UPDATE trusted source branch is invalid.');
+
+  const remoteUrl = 'https://github.com/' + expectedRepository + '.git';
+  const remoteRef = 'refs/heads/' + expectedBranch;
+  const remote = await execFileFn('/usr/bin/git', ['ls-remote', '--exit-code', remoteUrl, remoteRef], { shell: false, timeout: 60_000 });
+  const line = String(remote.stdout || '').trim();
+  const match = /^([0-9a-f]{40})\s+(refs\/heads\/[A-Za-z0-9._/-]+)$/.exec(line);
+  if (!match || match[2] !== remoteRef) throw new Error('LOCAL_UPDATE could not resolve the trusted Git main ref.');
+  const remoteCommit = match[1];
+
+  if (remoteCommit === currentCommit) {
+    return {
+      session: null,
+      result: {
+        state: 'up_to_date',
+        currentVersion,
+        currentBuildId,
+        available: null,
+        latestMain: { version: currentVersion, buildId: currentBuildId, builtAt: currentBuiltAt, commit: remoteCommit },
+        error: null,
+      },
+    };
+  }
+
+  const root = path.resolve(stagingRoot);
+  await safeMkdir(root);
+  const checkRoot = path.join(root, '.git-main-check-' + crypto.randomUUID());
+  if (!isInside(root, checkRoot)) throw new Error('LOCAL_UPDATE Git check path escaped its trusted root.');
+  try {
+    await execFileFn('/usr/bin/git', ['init', checkRoot], { shell: false, timeout: 60_000 });
+    await execFileFn('/usr/bin/git', ['-C', checkRoot, 'remote', 'add', 'origin', remoteUrl], { shell: false, timeout: 60_000 });
+    await execFileFn('/usr/bin/git', ['-C', checkRoot, 'fetch', '--depth=1', '--no-tags', 'origin', remoteCommit], { shell: false, timeout: 5 * 60 * 1000 });
+    const fetchedHead = String((await execFileFn('/usr/bin/git', ['-C', checkRoot, 'rev-parse', 'FETCH_HEAD'], { shell: false, timeout: 30_000 })).stdout || '').trim();
+    if (fetchedHead !== remoteCommit) throw new Error('LOCAL_UPDATE fetched Git main commit does not match the resolved remote commit.');
+    const actualRemote = String((await execFileFn('/usr/bin/git', ['-C', checkRoot, 'remote', 'get-url', 'origin'], { shell: false, timeout: 30_000 })).stdout || '').trim();
+    if (actualRemote !== remoteUrl) throw new Error('LOCAL_UPDATE Git check remote does not match the trusted repository.');
+
+    const packageText = String((await execFileFn('/usr/bin/git', ['-C', checkRoot, 'show', 'FETCH_HEAD:package.json'], { shell: false, timeout: 30_000 })).stdout || '');
+    const packageJson = JSON.parse(packageText);
+    if (typeof packageJson.version !== 'string' || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(packageJson.version)) {
+      throw new Error('LOCAL_UPDATE Git main package version is invalid.');
+    }
+    const committedAt = String((await execFileFn('/usr/bin/git', ['-C', checkRoot, 'show', '-s', '--format=%cI', 'FETCH_HEAD'], { shell: false, timeout: 30_000 })).stdout || '').trim();
+    if (!committedAt || Number.isNaN(Date.parse(committedAt))) throw new Error('LOCAL_UPDATE Git main commit timestamp is invalid.');
+
+    const manifest = {
+      version: packageJson.version,
+      buildId: packageJson.version + '-' + remoteCommit.slice(0, 7),
+      builtAt: committedAt,
+      platform: 'darwin',
+      arch: 'arm64',
+      source: { repository: expectedRepository, commit: remoteCommit, transport: 'git' },
+    };
+    validateSourceManifest(manifest, { expectedRepository });
+    const candidate = publicGitCandidate(manifest);
+    const newer = isManifestNewer({ manifest, currentVersion, currentBuiltAt });
+    if (!newer) {
+      return {
+        session: null,
+        result: { state: 'up_to_date', currentVersion, currentBuildId, available: null, latestMain: candidate, error: null },
+      };
+    }
+    return {
+      session: { state: 'update_available', mode: 'local_git', manifest },
+      result: { state: 'update_available', currentVersion, currentBuildId, available: candidate, latestMain: candidate, error: null },
+    };
+  } finally {
+    await fs.promises.rm(checkRoot, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+async function buildAndStageGitUpdate({ manifest, stagingRoot, expectedRepository, execFileFn = execFileAsync, sign = true, npmPath }) {
   const source = validateSourceManifest(manifest, { expectedRepository });
   if (source.transport !== 'git') throw new Error('LOCAL_UPDATE git transport is required.');
   const root = path.resolve(stagingRoot);
@@ -116,22 +237,22 @@ async function buildAndStageGitUpdate({ manifest, stagingRoot, expectedRepositor
   await fs.promises.rm(buildRoot, { recursive: true, force: true });
   await safeMkdir(buildRoot);
   try {
-    await execFileFn('git', ['init', repoRoot], { shell: false, timeout: 60_000 });
-    await execFileFn('git', ['-C', repoRoot, 'remote', 'add', 'origin', remoteUrl], { shell: false, timeout: 60_000 });
-    await execFileFn('git', ['-C', repoRoot, 'fetch', '--depth=1', '--no-tags', 'origin', source.commit], { shell: false, timeout: 5 * 60 * 1000 });
-    await execFileFn('git', ['-C', repoRoot, 'checkout', '--detach', 'FETCH_HEAD'], { shell: false, timeout: 60_000 });
-    const head = String((await execFileFn('git', ['-C', repoRoot, 'rev-parse', 'HEAD'], { shell: false, timeout: 30_000 })).stdout || '').trim();
+    await execFileFn('/usr/bin/git', ['init', repoRoot], { shell: false, timeout: 60_000 });
+    await execFileFn('/usr/bin/git', ['-C', repoRoot, 'remote', 'add', 'origin', remoteUrl], { shell: false, timeout: 60_000 });
+    await execFileFn('/usr/bin/git', ['-C', repoRoot, 'fetch', '--depth=1', '--no-tags', 'origin', source.commit], { shell: false, timeout: 5 * 60 * 1000 });
+    await execFileFn('/usr/bin/git', ['-C', repoRoot, 'checkout', '--detach', 'FETCH_HEAD'], { shell: false, timeout: 60_000 });
+    const head = String((await execFileFn('/usr/bin/git', ['-C', repoRoot, 'rev-parse', 'HEAD'], { shell: false, timeout: 30_000 })).stdout || '').trim();
     if (head !== source.commit) throw new Error('LOCAL_UPDATE fetched Git commit does not match the signed source identity.');
-    const actualRemote = String((await execFileFn('git', ['-C', repoRoot, 'remote', 'get-url', 'origin'], { shell: false, timeout: 30_000 })).stdout || '').trim();
+    const actualRemote = String((await execFileFn('/usr/bin/git', ['-C', repoRoot, 'remote', 'get-url', 'origin'], { shell: false, timeout: 30_000 })).stdout || '').trim();
     if (actualRemote !== remoteUrl) throw new Error('LOCAL_UPDATE Git remote does not match the trusted repository.');
-    return await buildPreparedSource({ manifest, source, repoRoot, buildRoot, execFileFn, sign });
+    return await buildPreparedSource({ manifest, source, repoRoot, buildRoot, execFileFn, sign, npmPath });
   } catch (error) {
     await fs.promises.rm(buildRoot, { recursive: true, force: true }).catch(() => {});
     throw error;
   }
 }
 
-async function buildAndStageLocalUpdate({ manifest, archivePath, stagingRoot, expectedRepository, execFileFn = execFileAsync, sign = true }) {
+async function buildAndStageLocalUpdate({ manifest, archivePath, stagingRoot, expectedRepository, execFileFn = execFileAsync, sign = true, npmPath }) {
   const source = validateSourceManifest(manifest, { expectedRepository });
   const archiveHash = crypto.createHash('sha256').update(await fs.promises.readFile(archivePath)).digest('hex');
   if (archiveHash !== source.sha256.toLowerCase()) throw new Error('LOCAL_UPDATE source SHA-256 mismatch.');
@@ -147,11 +268,11 @@ async function buildAndStageLocalUpdate({ manifest, archivePath, stagingRoot, ex
     const top = entries.filter((entry) => entry.isDirectory());
     if (top.length !== 1 || !top[0].name.endsWith(`-${source.commit}`)) throw new Error('LOCAL_UPDATE source archive root does not match the signed commit.');
     const repoRoot = path.join(checkout, top[0].name);
-    return await buildPreparedSource({ manifest, source, repoRoot, buildRoot, execFileFn, sign });
+    return await buildPreparedSource({ manifest, source, repoRoot, buildRoot, execFileFn, sign, npmPath });
   } catch (error) {
     await fs.promises.rm(buildRoot, { recursive: true, force: true }).catch(() => {});
     throw error;
   }
 }
 
-module.exports = { MAX_SOURCE_BYTES, validateSourceManifest, downloadSourceArchive, buildAndStageLocalUpdate, buildAndStageGitUpdate };
+module.exports = { MAX_SOURCE_BYTES, NPM_CANDIDATES, resolveNpmExecutable, validateSourceManifest, downloadSourceArchive, publicGitCandidate, checkGitMainUpdate, buildAndStageLocalUpdate, buildAndStageGitUpdate };

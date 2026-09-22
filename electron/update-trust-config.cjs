@@ -6,6 +6,7 @@ const RELEASE_OWNER = 'seasonday41-bot';
 const RELEASE_REPOSITORY = 'Hearth-Control-Releases';
 const RELEASE_REPOSITORY_URL = 'https://github.com/seasonday41-bot/Hearth-Control-Releases';
 const SOURCE_REPOSITORY = 'seasonday41-bot/Hearth-Control';
+const SOURCE_BRANCH = 'main';
 const MANIFEST_URL = 'https://github.com/seasonday41-bot/Hearth-Control-Releases/releases/latest/download/manifest.json';
 const ARTIFACT_BASE_URL = 'https://github.com/seasonday41-bot/Hearth-Control-Releases/releases/latest/download/';
 const SOURCE_ARCHIVE_BASE_URL = 'https://codeload.github.com/';
@@ -30,6 +31,7 @@ module.exports = Object.freeze({
   RELEASE_REPOSITORY,
   RELEASE_REPOSITORY_URL,
   SOURCE_REPOSITORY,
+  SOURCE_BRANCH,
   MANIFEST_URL,
   ARTIFACT_BASE_URL,
   SOURCE_ARCHIVE_BASE_URL,
