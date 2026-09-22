@@ -12,13 +12,15 @@ Anti/Antigravity was removed from the active UI, Electron runtime, MCP tools, an
 PLAN = Revised Slices 1-9 with Slice 7.5 real-executor proving stage
 ACTIVE_BRANCH = chore/system-ui-consolidation
 BASE_ORIGIN_MAIN = d60c883703918d86cdada77cedac4765cfcd6541
-CURRENT_SLICE = Slice 2 COMPLETE
+CURRENT_SLICE = Slice 3 COMPLETE
 SLICE_1 = XLeaseKeeper optional onRenewed hook; invoked only after a successful validated renewal; no production wiring yet
 SLICE_2 = XRunStore cancelled terminal status + cancelRunFenced(); live-lease fenced; retention-aware; no orchestration caller yet
+SLICE_3 = standalone executor-contract package + shared fixture corpus + differential compatibility gate against real task-contract.mjs; no production imports
 VALIDATION_SLICE_1 = node --test scripts/test-x-lease-keeper.mjs -> 14/14 PASS
 VALIDATION_SLICE_2 = run-store + fencing 65/65 PASS; run-x-task + startup + queue regressions 126/126 PASS
+VALIDATION_SLICE_3 = executor-contract node --test 9/9 PASS; TypeScript --strict --noEmit PASS; task-contract.mjs and run-x-task.mjs untouched
 UNRELATED_LOCAL_FILES = scripts/HearthHistoryExport.mq5; scripts/replay-30d.mjs (left untracked and untouched)
-NEXT_EXACT_ACTION = Slice 3 only: build standalone executor-contract package + differential compatibility suite against the real task-contract.mjs
+NEXT_EXACT_ACTION = Slice 4 only: add standalone X Coder Service skeleton with durable idempotency registry and restart -> interrupted semantics; Hearth production remains untouched
 CUTOVER_RULE = no production X Coder Service traffic before Slice 8; run-x-task.mjs stays in-process until cutover
 RECONCILIATION_RULE = reconcileStartupState() remains SQLite-local and synchronous; never add socket I/O inside it
 ```
