@@ -5,12 +5,6 @@ import { promisify } from 'node:util';
 import * as z from 'zod/v4';
 import { createWorkspaceGuard } from './workspace.mjs';
 import { createHearthSkillRegistry } from './skills/registry.mjs';
-import {
-  detectAntigravity,
-  startAntigravityTask,
-  getAntigravityTask,
-  sendAntigravityMessage,
-} from './executors/antigravity.mjs';
 import { runXTask } from './x/run-x-task.mjs';
 import { getProductionXRuntime } from './x/production-runtime.mjs';
 
@@ -35,10 +29,6 @@ export const toolNames = [
   'vercel_project_get',
   'vercel_deployments_list',
   'vercel_deployment_get',
-  'antigravity_status',
-  'antigravity_start',
-  'antigravity_task',
-  'antigravity_send',
   'x_start',
   'x_task',
   'x_enqueue',
@@ -155,7 +145,7 @@ export const registerWorkspaceTools = (server, options) => {
   const skillRegistry = createHearthSkillRegistry();
   const permissions = options.permissions ?? {};
   const requirePermission = async (name, action) => {
-    const level = permissions[name] ?? (name === 'Antigravity' ? 'Ask' : 'Blocked');
+    const level = permissions[name] ?? 'Blocked';
     if (level === 'Allow') return;
     if (level === 'Ask' && options.requestApproval) {
       const allowed = await options.requestApproval({ permission: name, action });
@@ -594,72 +584,6 @@ export const registerWorkspaceTools = (server, options) => {
     } catch (error) { return failure(error); }
   });
 
-  server.registerTool('antigravity_status', {
-    title: 'Antigravity status',
-    description: 'Check availability and installation status of Antigravity and agentapi on this system.',
-    inputSchema: {},
-  }, async () => {
-    try {
-      const status = await detectAntigravity();
-      return text(JSON.stringify(status, null, 2));
-    } catch (error) { return failure(error); }
-  });
-
-  server.registerTool('antigravity_start', {
-    title: 'Start Antigravity task',
-    description: 'Start a new programmatic task in Antigravity via agentapi. Operates strictly within the active Hearth workspace.',
-    inputSchema: {
-      prompt: z.string().min(1).describe('The instruction or goal for the Antigravity agent (max 64 KiB)'),
-      title: z.string().optional().describe('Optional short title for this task'),
-    },
-    annotations: { destructiveHint: true },
-  }, async ({ prompt, title }) => {
-    try {
-      await requirePermission('Antigravity', `Start Antigravity task: ${title || prompt.slice(0, 60)}`);
-      const activeWorkspace = await guard.resolveExistingPath('.');
-      const result = await startAntigravityTask({
-        workspace: activeWorkspace,
-        prompt,
-        title,
-        runner: options?.antigravityRunner,
-        customAgyPath: options?.customAgyPath,
-        customAgentApiPath: options?.customAgentApiPath,
-        awaitCompletion: false,
-        claimStore: xRuntime.claimStore,
-      });
-      return text(JSON.stringify(result, null, 2));
-    } catch (error) { return failure(error); }
-  });
-
-  server.registerTool('antigravity_task', {
-    title: 'Get Antigravity task',
-    description: 'Get live status, recent events, and progress of an Antigravity task created by Hearth.',
-    inputSchema: {
-      taskId: z.string().min(1).describe('Hearth Task ID'),
-    },
-  }, async ({ taskId }) => {
-    try {
-      const task = getAntigravityTask(taskId);
-      return text(JSON.stringify(task, null, 2));
-    } catch (error) { return failure(error); }
-  });
-
-  server.registerTool('antigravity_send', {
-    title: 'Send message to Antigravity task',
-    description: 'Send a follow-up message to an existing running or waiting Antigravity task.',
-    inputSchema: {
-      taskId: z.string().min(1).describe('Hearth Task ID'),
-      message: z.string().min(1).describe('Message or follow-up prompt to send (max 64 KiB)'),
-    },
-    annotations: { destructiveHint: true },
-  }, async ({ taskId, message }) => {
-    try {
-      await requirePermission('Antigravity', `Send message to Antigravity task ${taskId}`);
-      const result = await sendAntigravityMessage({ taskId, message });
-      return text(JSON.stringify(result, null, 2));
-    } catch (error) { return failure(error); }
-  });
-
   server.registerTool('x_start', {
     title: 'Start X coding task',
     description: 'Admit one x-task-v1 payload into the local X coding pipeline (bounded repair loop -> deterministic Result Gate -> x-result-v1). Returns immediately with a run_id and never waits for model execution; poll x_task with that run_id for status and, once terminal, the full result. Never retries outside X\'s own bounded repair policy and never routes a result to Codex or Claude.',
@@ -743,7 +667,7 @@ export const registerWorkspaceTools = (server, options) => {
 
   server.registerTool('hearth_job_submit', {
     title: 'Submit Hearth job',
-    description: 'Submit one agent-agnostic hearth-job-v1 payload. Hearth deterministically selects the existing X, Antigravity, or XAU/USD Market Specialist route; callers cannot select a worker/provider directly.',
+    description: 'Submit one agent-agnostic hearth-job-v1 payload. Hearth deterministically selects the existing X or XAU/USD Market Specialist route; callers cannot select a worker/provider directly.',
     inputSchema: {
       job: z.any().describe('A complete hearth-job-v1 payload. Unknown fields and worker/provider selection are rejected by Electron-owned ingress.'),
     },
@@ -761,7 +685,7 @@ export const registerWorkspaceTools = (server, options) => {
 
   server.registerTool('hearth_job_status', {
     title: 'Get Hearth job status',
-    description: 'Read normalized status for a previously submitted hearth-job-v1 by job_id from existing X receipt or shared TaskStore truth (Antigravity or XAU/USD Market Specialist).',
+    description: 'Read normalized status for a previously submitted hearth-job-v1 by job_id from existing X receipt or shared TaskStore truth (XAU/USD Market Specialist).',
     inputSchema: {
       job_id: z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/),
     },
@@ -854,7 +778,7 @@ export const registerWorkspaceTools = (server, options) => {
         id: z.string().min(1).max(200).optional(),
         title: z.string().min(1).max(200),
         description: z.string().max(2000).optional(),
-        route: z.enum(['auto', 'mcp', 'antigravity', 'manual', 'x']),
+        route: z.enum(['auto', 'mcp', 'manual', 'x']),
         xTask: z.object({}).passthrough().optional(),
         required: z.boolean().optional(),
       })).min(1),

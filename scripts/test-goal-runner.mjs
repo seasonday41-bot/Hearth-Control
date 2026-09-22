@@ -195,8 +195,8 @@ await test('waiting step does not complete goal: preserves waiting state', async
     objective: 'Step requires human feedback',
     workspace: testWorkspace,
     steps: [
-      { id: 's1', title: 'Automated step', description: 'Passes', required: true },
-      { id: 's2', title: 'Review step', description: 'Requires review', required: true },
+      { id: 's1', title: 'Automated step', description: 'Passes', route: 'mcp', required: true },
+      { id: 's2', title: 'Review step', description: 'Requires review', route: 'mcp', required: true },
     ],
   });
 
@@ -286,7 +286,7 @@ await test('checkpoint creation: creates sanitized checkpoint structure', async 
     filesChanged: ['src/App.tsx'],
     checks: { tests: true, build: true },
     nextStep: 's2',
-    route: 'antigravity',
+    route: 'manual',
   });
 
   assert.equal(cp.goalId, goal.id);
@@ -295,7 +295,7 @@ await test('checkpoint creation: creates sanitized checkpoint structure', async 
   assert.equal(cp.completedSteps, 1);
   assert.equal(cp.checks.tests, true);
   assert.equal(cp.nextStep, 's2');
-  assert.equal(cp.route, 'antigravity');
+  assert.equal(cp.route, 'manual');
 
   const saved = storage.getGoal(goal.id);
   assert.equal(saved.checkpoints.length, 1);
@@ -399,75 +399,19 @@ await test('resume continues from checkpoint/current step without restarting', a
   assert.equal(finalGoal.steps[1].status, 'completed');
 });
 
-// ── 13. Permissions Cannot Be Bypassed ─────────────────────────────────────
-await test('permissions cannot be bypassed: blocked Antigravity permission stops execution', async () => {
+// ── 13. Retired route cannot be created ──────────────────────────────────────
+await test('retired execution route is rejected for new goals', async () => {
   const storage = new GoalStorage({ storagePath });
-  const runner = new GoalRunner({
-    storage,
-    antigravityExecutor: {
-      startAntigravityTask: async () => { throw new Error('Should not be reached'); },
-      getAntigravityTask: () => null,
-    },
-  });
-
-  const goal = await runner.create_goal({
-    title: 'Permission Test',
-    objective: 'Blocked permission',
-    workspace: testWorkspace,
-    steps: [{ id: 's1', title: 'Antigravity step', description: 'Run agent', route: 'antigravity', required: true }],
-  });
-
-  await runner.run_goal(goal.id, {
-    permissions: { Antigravity: 'Blocked' },
-  });
-
-  const saved = storage.getGoal(goal.id);
-  assert.equal(saved.status, 'error');
-  assert.match(saved.error, /Antigravity permission is Blocked/);
+  const runner = new GoalRunner({ storage });
+  await assert.rejects(() => runner.create_goal({
+    title: 'Retired route', objective: 'Verify fail-closed creation', workspace: testWorkspace,
+    steps: [{ id: 's1', title: 'Legacy step', route: 'antigravity' }],
+  }), /goal_step_route_retired/);
 });
 
-// ── 14. Existing Task Console Still Works ──────────────────────────────────
-await test('existing Task Console still works: imports and exports intact', async () => {
-  const { startAntigravityTask, detectAntigravity } = await import('../mcp/executors/antigravity.mjs');
-  assert.equal(typeof startAntigravityTask, 'function');
-  assert.equal(typeof detectAntigravity, 'function');
-
+await test('shared Bridge client remains importable', async () => {
   const { HearthBridgeClient } = await import('../mcp/bridge/client.mjs');
   assert.equal(typeof HearthBridgeClient, 'function');
-});
-
-// ── 15. Existing Completion False-DONE Protections Still Work ───────────────
-await test('existing completion false-DONE protections still work in step execution', async () => {
-  const storage = new GoalStorage({ storagePath });
-  let taskStatus = 'waiting';
-
-  const runner = new GoalRunner({
-    storage,
-    antigravityExecutor: {
-      startAntigravityTask: async () => ({ taskId: 'mock-task-1', conversationId: 'c1' }),
-      getAntigravityTask: () => ({
-        taskId: 'mock-task-1',
-        status: taskStatus, // Waiting due to false-DONE protection
-        lastAnswer: 'Working on it...',
-        completion: { status: 'waiting', reason: 'Missing completion contract' },
-      }),
-    },
-  });
-
-  const goal = await runner.create_goal({
-    title: 'False DONE Test',
-    objective: 'Verify false-done keeps waiting',
-    workspace: testWorkspace,
-    steps: [{ id: 's1', title: 'Step 1', description: 'Run', route: 'antigravity', required: true }],
-  });
-
-  await runner.run_goal(goal.id, {
-    permissions: { Antigravity: 'Allow' },
-  });
-
-  const saved = storage.getGoal(goal.id);
-  assert.equal(saved.status, 'waiting', 'False-DONE response must keep goal in waiting status');
-  assert.equal(saved.steps[0].status, 'waiting');
 });
 
 // ── 16. Manual Step Waiting & No Implicit Resume ────────────────────────────
@@ -751,8 +695,8 @@ await test('resume_goal: final onProgress receives completed goal after resuming
     objective: 'Verify resume_goal delivers terminal onProgress',
     workspace: testWorkspace,
     steps: [
-      { id: 's1', title: 'Automated step', description: 'Passes', required: true },
-      { id: 's2', title: 'Review step', description: 'Requires review', required: true },
+      { id: 's1', title: 'Automated step', description: 'Passes', route: 'mcp', required: true },
+      { id: 's2', title: 'Review step', description: 'Requires review', route: 'mcp', required: true },
     ],
   });
 

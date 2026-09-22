@@ -1,7 +1,7 @@
 type ConnectorTone = 'connected' | 'ready' | 'disabled' | 'offline' | 'unavailable';
 
 export type AIConnectorItem = {
-  id: 'x' | 'gpt' | 'codex' | 'anti' | 'claude';
+  id: 'x' | 'gpt' | 'codex' | 'claude';
   name: string;
   badge: string;
   role: string;

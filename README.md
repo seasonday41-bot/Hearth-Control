@@ -2,7 +2,11 @@
 
 A local macOS desktop control center, built with Electron, React, TypeScript, and Vite.
 
-## 🚨 READ FIRST — Canonical continuation path
+## Current 0.4.24 architecture
+
+Anti/Antigravity was removed from the active UI, Electron runtime, MCP tools, and routing. Code jobs use X; general Hearth jobs fail closed and require manual handling. Historical Goal and task records remain readable but cannot restart the retired route. See `docs/RELEASE_PROCESS.md` for the current release workflow.
+
+## Archived project handoff (historical; superseded by 0.4.24)
 
 **Last updated: 2026-09-22**
 
@@ -559,7 +563,7 @@ SCOPE / SECURITY =
   durable evidence source = existing Goal checkpoints
 ```
 
-### P8 detailed checklist — current truth
+### P8 detailed checklist — historical implementation
 
 - [x] Create `feature/p8-multi-agent-router-v1` from `main@d0278c4c6ba0f90fd895164fa268bcf7818a1730`
 - [x] Audit current X queue, Antigravity TaskStore, JobManager, Goal Runner, Review Queue, and specialist lifecycle before adding any router
@@ -1344,7 +1348,7 @@ NEXT_PHASE = P8_MULTI_AGENT_ROUTER_UNIVERSAL_INGRESS
 NEXT_EXACT_ACTION = audit current task/job/Goal/X/specialist routing and design the smallest generic Hearth job ingress for user-facing ส่งงาน: commands without exposing x-task-v1 as the permanent user contract
 ```
 
-### P8 — Multi-Agent Router + universal ingress — COMPLETE / VALIDATED / FROZEN
+### P8 — Multi-Agent Router + universal ingress — historical implementation
 
 Canonical design: `docs/HEARTH-MULTI-AGENT-ROUTER-V1.md`.
 

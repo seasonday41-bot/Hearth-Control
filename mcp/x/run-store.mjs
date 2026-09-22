@@ -14,8 +14,7 @@ import { DatabaseSync } from 'node:sqlite';
  * process identity, lease shape, or which store owns global admission --
  * that stays claim-store.mjs's job, exactly as it already is today.
  *
- * This is X's own orchestration-lifecycle vocabulary, not a reuse of
- * Antigravity's `TaskStore` status set. `interrupted` here is assigned
+ * This is X's own orchestration-lifecycle vocabulary. `interrupted` here is assigned
  * only by startup reconciliation, never by the Result Gate -- it means
  * "this run's process is gone," not that X ever judged it FAILED.
  *

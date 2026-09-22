@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { redactSecrets } from '../executors/antigravity.mjs';
+import { redactSecrets } from '../security/redact-secrets.mjs';
 
 export const SPECIALIST_TARGETS = Object.freeze(['codex', 'work']);
 

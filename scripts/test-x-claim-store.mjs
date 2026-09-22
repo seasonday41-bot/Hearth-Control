@@ -169,7 +169,7 @@ test('C12 expired lease after restart can be reclaimed safely', async () => {
   assert.equal(reclaimed.ownerId, 'owner-2');
 });
 
-test('C13 X task claim table is isolated from the Antigravity continuation claim table', () => {
+test('C13 X task claim table is isolated from the legacy continuation claim table', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hearth-x-claims-'));
   dirs.push(dir);
   const claimStore = makeStore(path.join(dir, 'x-claims.sqlite'));

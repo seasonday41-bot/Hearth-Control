@@ -4,7 +4,6 @@ import { localhostHostValidation } from '@modelcontextprotocol/sdk/server/middle
 import { createMcpServer } from './create-server.mjs';
 import { toolNames } from './tools.mjs';
 import crypto from 'node:crypto';
-import { onAntigravityAdmissionReleased } from './executors/antigravity-admission.mjs';
 
 // Build Express app manually so we can set body-parser limit to 12 MB.
 // This allows write_file's own 10 MB guard to fire with a readable error
@@ -146,12 +145,6 @@ const reviewQueueTransportFor = (response) => {
       roundTrip('goal_list_specialist_handoffs_request', { goalId }),
   };
 };
-
-onAntigravityAdmissionReleased(() => {
-  if (typeof process.send === 'function') {
-    try { process.send({ type: 'x_capacity_released_hint' }); } catch {}
-  }
-});
 
 const settleApproval = (requestId, allowed, reason) => {
   const pending = approvals.get(requestId);

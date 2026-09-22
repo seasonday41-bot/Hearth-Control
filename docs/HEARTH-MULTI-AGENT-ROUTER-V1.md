@@ -1,5 +1,7 @@
 # Hearth Multi-Agent Router + Universal Ingress V1
 
+> Historical design record. Anti/Antigravity has been removed from the active 0.4.24 product; references below describe prior architecture and must not be used as current operating instructions.
+
 Status: P8 canonical design
 Created: 2026-09-20
 Baseline: main@d0278c4c6ba0f90fd895164fa268bcf7818a1730

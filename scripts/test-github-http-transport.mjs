@@ -35,7 +35,7 @@ test('P4 HTTP transport round-trips GitHub read request through parent IPC with 
       ...process.env,
       CONTROL_PORT: String(port),
       CONTROL_WORKSPACE: root,
-      CONTROL_PERMISSIONS: JSON.stringify({ Git: 'Allow', Files: 'Allow', Terminal: 'Blocked', Browser: 'Blocked', Antigravity: 'Blocked' }),
+      CONTROL_PERMISSIONS: JSON.stringify({ Git: 'Allow', Files: 'Allow', Terminal: 'Blocked', Browser: 'Blocked' }),
       HEARTH_RUNTIME_DIR: root,
     },
   });

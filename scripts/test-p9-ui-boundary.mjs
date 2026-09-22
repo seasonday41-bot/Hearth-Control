@@ -12,17 +12,17 @@ const preload = fs.readFileSync(new URL('../electron/preload.cjs', import.meta.u
 const main = fs.readFileSync(new URL('../electron/main.cjs', import.meta.url), 'utf8');
 const runner = fs.readFileSync(new URL('../mcp/goals/runner.mjs', import.meta.url), 'utf8');
 
-test('P9.1 Workspace AI Connectors renders X, GPT, Codex, Anti, Claude and global AgentDock is removed', () => {
+test('P9.1 Workspace AI Connectors renders X, GPT, Codex, Claude and global AgentDock is removed', () => {
   assert.match(app, /<AIConnectorPanel connectors=\{connectorItems\}/);
   assert.doesNotMatch(app, /<AgentDock/);
-  for (const id of ['x', 'gpt', 'codex', 'anti', 'claude']) {
+  for (const id of ['x', 'gpt', 'codex', 'claude']) {
     assert.match(app, new RegExp("id: '" + id + "'"));
   }
   assert.match(connectors, /Connector switches affect new work only/);
   assert.doesNotMatch(connectors, /token|credential|workspaceRoot|repair_budget/i);
 });
 
-test('P9.2 X, Codex and Anti toggles map to real permission settings; GPT maps to Remote Bridge', () => {
+test('P9.2 X and Codex toggles map to real permission settings; GPT maps to Remote Bridge', () => {
   assert.match(app, /name: 'X'/);
   assert.match(app, /name: 'Codex'/);
   assert.match(app, /setPermissionEnabled/);
@@ -30,7 +30,6 @@ test('P9.2 X, Codex and Anti toggles map to real permission settings; GPT maps t
   assert.match(app, /setConnectorEnabled/);
   assert.match(app, /setPermissionEnabled\('X', enabled\)/);
   assert.match(app, /setPermissionEnabled\('Codex', enabled\)/);
-  assert.match(app, /setPermissionEnabled\('Antigravity', enabled\)/);
   assert.match(app, /void toggleBridge\(\)/);
 });
 
@@ -107,5 +106,5 @@ test('P9.7 Goals UI exposes clear history with confirmation and terminal count o
 });
 
 test('P9.8 P9 connector component does not create execution/runtime authority', () => {
-  assert.doesNotMatch(connectors, /hearth_job_submit|ingestXTask|startAntigravityTask|GoalRunner|JobManager/);
+  assert.doesNotMatch(connectors, /hearth_job_submit|ingestXTask|GoalRunner|JobManager/);
 });

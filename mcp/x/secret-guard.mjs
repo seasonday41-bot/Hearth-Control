@@ -2,10 +2,7 @@
  * Pure, dependency-free content Secret Guard.
  *
  * Deliberately has zero imports and zero side effects so any Phase 5A
- * read-only module can use it without pulling in a lifecycle module (e.g.
- * `mcp/executors/antigravity.mjs`, which owns process/task/completion state
- * and is not something a bounded context loader should depend on merely to
- * reuse a string-redaction regex).
+ * read-only module can use it without pulling in process or task lifecycle code.
  *
  * This is intentionally string-in/string-out with no knowledge of files,
  * tasks, or the network -- it only recognizes and masks secret-shaped text.

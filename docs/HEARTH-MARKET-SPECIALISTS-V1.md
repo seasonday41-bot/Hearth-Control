@@ -1,5 +1,7 @@
 # Hearth Market Specialists V1 — XAU/USD First
 
+> Historical design record. Anti/Antigravity has been removed from the active 0.4.24 product; references below describe prior architecture and must not be used as current operating instructions.
+
 Status: implemented and validated on feature branch
 Branch: `feature/market-specialists-v1`
 Scope: Search AI + Invest AI before any Investment App work.

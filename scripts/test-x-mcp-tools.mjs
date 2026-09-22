@@ -355,7 +355,7 @@ test('T15 existing MCP tools remain registered and unaffected by the new X tools
   const item = fixture();
   const { server } = registerFor(item);
   for (const name of ['workspace_info', 'list_files', 'read_file', 'write_file', 'git_status', 'git_diff', 'run_command',
-    'antigravity_status', 'antigravity_start', 'antigravity_task', 'antigravity_send', 'x_start', 'x_task']) {
+    'x_start', 'x_task']) {
     assert.ok(server.tools.has(name), `expected tool '${name}' to still be registered`);
     assert.ok(toolNames.includes(name), `expected '${name}' listed in toolNames`);
   }

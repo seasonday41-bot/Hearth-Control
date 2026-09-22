@@ -1,4 +1,6 @@
-import { redactSecrets, MAX_PAYLOAD_BYTES } from '../executors/antigravity.mjs';
+import { redactSecrets } from '../security/redact-secrets.mjs';
+
+export const MAX_PAYLOAD_BYTES = 65536;
 
 /**
  * Validates and sanitizes a raw remote task row from Supabase.
@@ -200,7 +202,7 @@ export class HearthBridgeClient {
   }
 
   /**
-   * Rejects a pending task. Does not call Antigravity.
+   * Rejects a pending task without dispatching an executor.
    * @param {{ taskId: string }} params
    * @returns {Promise<boolean>}
    */

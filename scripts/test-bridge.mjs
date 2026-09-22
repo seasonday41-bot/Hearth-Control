@@ -6,7 +6,7 @@
  * SAFETY GUARANTEES:
  * - Uses 100% in-memory mock transport (createMockTransport)
  * - Zero external HTTP requests to Supabase or the internet
- * - Zero live Antigravity execution
+ * - Zero live executor invocation
  * - Zero database migrations applied
  */
 
@@ -16,21 +16,13 @@ import {
   createMockTransport,
   syncRemoteTaskState,
   flushPendingRemoteSyncs,
+  MAX_PAYLOAD_BYTES,
 } from '../mcp/bridge/client.mjs';
 import {
   getOrCreateDeviceId,
   generatePairingSecret,
   hashPairingSecret,
 } from '../mcp/bridge/identity.mjs';
-import {
-  MAX_PAYLOAD_BYTES,
-  classifyCompletion,
-  isTaskActivelyRunning,
-  hasRunningTask,
-  taskRegistry,
-  setTaskStore,
-  sendAntigravityMessage,
-} from '../mcp/executors/antigravity.mjs';
 import { TaskStore } from '../mcp/executors/task-store.mjs';
 import os from 'node:os';
 import path from 'node:path';
@@ -89,7 +81,7 @@ await test('1. remote task parsing parses valid row correctly', async () => {
   assert(parsed.source === 'chatgpt', 'source must match');
 });
 
-// ── 2. Invalid payload rejected ─────────────────────────────────────────────
+
 await test('2. invalid payload rejected (missing id, prompt, or wrong status)', async () => {
   let threwMissingPrompt = false;
   try {
@@ -108,7 +100,7 @@ await test('2. invalid payload rejected (missing id, prompt, or wrong status)', 
   assert(threwNonPending, 'Must throw for non-pending status');
 });
 
-// ── 3. >64KiB prompt rejected ───────────────────────────────────────────────
+
 await test('3. >64KiB prompt rejected before execution', async () => {
   const oversized = 'x'.repeat(MAX_PAYLOAD_BYTES + 1);
   let threw = false;
@@ -121,7 +113,7 @@ await test('3. >64KiB prompt rejected before execution', async () => {
   assert(threw, 'Must throw on >64KiB prompt');
 });
 
-// ── 4. Arbitrary workspace field ignored/rejected ───────────────────────────
+
 await test('4. arbitrary workspace field ignored/rejected from remote payload', async () => {
   const rowWithMaliciousWorkspace = {
     id: 'task-exploit',
@@ -141,7 +133,7 @@ await test('4. arbitrary workspace field ignored/rejected from remote payload', 
   assert(parsed.prompt === 'Harmless prompt', 'prompt preserved');
 });
 
-// ── 5. Pending task never auto executes ─────────────────────────────────────
+
 await test('5. pending task never auto executes upon fetch', async () => {
   const mock = createMockTransport([
     { id: 't5', device_id: testDeviceId, status: 'pending', prompt: 'Test auto exec' }
@@ -163,7 +155,7 @@ await test('5. pending task never auto executes upon fetch', async () => {
   assert(dbTask.status === 'pending', 'DB status must remain pending');
 });
 
-// ── 6. Approve triggers executor once ───────────────────────────────────────
+
 await test('6. approve triggers executor once and locks task', async () => {
   const mock = createMockTransport([
     { id: 't6', device_id: testDeviceId, status: 'pending', prompt: 'Run once' }
@@ -177,7 +169,7 @@ await test('6. approve triggers executor once and locks task', async () => {
   client.enabled = true;
 
   let executionCount = 0;
-  const executeAntigravity = async (task) => {
+  const executeTask = async (task) => {
     executionCount++;
     return { taskId: 'hearth-local-1', conversationId: 'conv-1' };
   };
@@ -187,7 +179,7 @@ await test('6. approve triggers executor once and locks task', async () => {
   assert(claimResult.claimed === true, 'Claim must succeed');
 
   if (claimResult.claimed) {
-    await executeAntigravity(claimResult.task);
+    await executeTask(claimResult.task);
   }
 
   assert(executionCount === 1, 'Executor must be invoked exactly once');
@@ -196,7 +188,7 @@ await test('6. approve triggers executor once and locks task', async () => {
   assert(dbTask.approved_at !== undefined, 'approved_at must be populated');
 });
 
-// ── 7. Reject never triggers executor ───────────────────────────────────────
+
 await test('7. reject never triggers executor and retains record', async () => {
   const mock = createMockTransport([
     { id: 't7', device_id: testDeviceId, status: 'pending', prompt: 'Reject me' }
@@ -210,7 +202,7 @@ await test('7. reject never triggers executor and retains record', async () => {
   client.enabled = true;
 
   let executorInvoked = false;
-  const executeAntigravity = () => { executorInvoked = true; };
+  const executeTask = () => { executorInvoked = true; };
 
   const success = await client.rejectTask({ taskId: 't7' });
   assert(success === true, 'Reject must succeed');
@@ -221,7 +213,7 @@ await test('7. reject never triggers executor and retains record', async () => {
   assert(dbTask.status === 'rejected', 'DB status must be rejected');
 });
 
-// ── 8. Duplicate claim prevented ───────────────────────────────────────────
+
 await test('8. duplicate claim prevented (atomic conditional update)', async () => {
   const mock = createMockTransport([
     { id: 't8', device_id: testDeviceId, status: 'pending', prompt: 'Race task' }
@@ -248,7 +240,7 @@ await test('8. duplicate claim prevented (atomic conditional update)', async () 
   assert(claimB.claimed === false, 'Client B claim must fail (0 rows affected)');
 });
 
-// ── 9. Done result sanitized ────────────────────────────────────────────────
+
 await test('9. done result sanitized before writing back to DB', async () => {
   const mock = createMockTransport([
     { id: 't9', device_id: testDeviceId, status: 'running', prompt: 'Sanitize result' }
@@ -276,7 +268,7 @@ await test('9. done result sanitized before writing back to DB', async () => {
   assert(dbTask.result.includes('[REDACTED]'), 'Must include [REDACTED]');
 });
 
-// ── 10. Error sanitized ─────────────────────────────────────────────────────
+
 await test('10. error sanitized before writing back to DB', async () => {
   const mock = createMockTransport([
     { id: 't10', device_id: testDeviceId, status: 'running', prompt: 'Sanitize error' }
@@ -301,33 +293,7 @@ await test('10. error sanitized before writing back to DB', async () => {
   assert(dbTask.error.includes('[REDACTED_JWT]'), 'Must contain [REDACTED_JWT]');
 });
 
-// ── 10b. Waiting completion is non-terminal ───────────────────────────────
-await test('10b. remote bridge preserves waiting without finished_at', async () => {
-  const mock = createMockTransport([
-    { id: 't10b', device_id: testDeviceId, status: 'running', prompt: 'Wait for artifact' }
-  ]);
-  const client = new HearthBridgeClient({
-    deviceId: testDeviceId,
-    supabaseUrl: 'https://mock.supabase.co',
-    supabaseAnonKey: 'mock-anon',
-    fetchFn: mock.fetch,
-  });
 
-  await client.updateTaskResult({
-    taskId: 't10b',
-    hearthTaskId: 'ht-10b',
-    conversationId: 'c-10b',
-    status: 'waiting',
-    result: 'Completed response received; required artifact is not available yet.',
-  });
-
-  const dbTask = mock.getTasks().find(t => t.id === 't10b');
-  assert(dbTask.status === 'waiting', 'Waiting status must be preserved');
-  assert(!Object.hasOwn(dbTask, 'finished_at'), 'Waiting row must not receive finished_at');
-  assert(dbTask.conversation_id === 'c-10b', 'Conversation ID must be retained for follow-up');
-});
-
-// ── 11. Disconnected transport doesn't break local Task Console ─────────────
 await test('11. disconnected transport does not throw fatal crash', async () => {
   const failingFetch = async () => {
     throw new Error('ECONNREFUSED: Network unreachable');
@@ -349,7 +315,7 @@ await test('11. disconnected transport does not throw fatal crash', async () => 
   assert(caughtError, 'Error should be captured gracefully without terminating process');
 });
 
-// ── 12. Bridge disabled performs zero remote polling ────────────────────────
+
 await test('12. bridge disabled performs zero remote polling', async () => {
   let networkCalls = 0;
   const trackingFetch = async () => {
@@ -368,7 +334,7 @@ await test('12. bridge disabled performs zero remote polling', async () => {
   assert(networkCalls === 0, 'Zero network calls must be made when disabled');
 });
 
-// ── 13. Task from other deviceId ignored ────────────────────────────────────
+
 await test('13. task from other deviceId ignored by parser', async () => {
   const rowFromOtherDevice = {
     id: 't13',
@@ -386,7 +352,7 @@ await test('13. task from other deviceId ignored by parser', async () => {
   assert(threw, 'Must reject row with mismatched device_id');
 });
 
-// ── 14. Malformed database row rejected safely ──────────────────────────────
+
 await test('14. malformed database row rejected safely without crashing fetch loop', async () => {
   const mock = createMockTransport([
     null,
@@ -406,7 +372,7 @@ await test('14. malformed database row rejected safely without crashing fetch lo
   assert(valid[0].id === 'valid-14', 'Correct valid task retained');
 });
 
-// ── 15. App cleanup stops polling/subscription ──────────────────────────────
+
 await test('15. app cleanup stops polling timer cleanly', async () => {
   const client = new HearthBridgeClient({
     deviceId: testDeviceId,
@@ -424,13 +390,14 @@ await test('15. app cleanup stops polling timer cleanly', async () => {
   assert(client.pollTimer === null, 'Timer must be cleared');
 });
 
-// ── Additional verification: Identity & Pairing Hash ───────────────────────
+
 await test('16. pairing secret generation and sha-256 hash match', async () => {
   const { secret, hash } = generatePairingSecret();
   assert(secret.startsWith('hearth_sec_'), 'Secret must have hearth_sec_ prefix');
   assert(hash.length === 64, 'SHA-256 hash must be 64 hex characters');
   assert(hashPairingSecret(secret) === hash, 'Hash must be deterministic');
 });
+
 
 await test('17. device identity persists random UUID without machine fingerprinting', async () => {
   const tmpDir = path.join(os.tmpdir(), `hearth-identity-test-${Date.now()}`);
@@ -441,7 +408,7 @@ await test('17. device identity persists random UUID without machine fingerprint
   try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
 });
 
-// ── 18. remote task linkage persisted ─────────────────────────────────────────
+
 await test('18. remote task linkage persisted to tasks.json', async () => {
   const tmpDir = path.join(os.tmpdir(), `hearth-remote-test-${Date.now()}-18`);
   const filePath = path.join(tmpDir, 'tasks.json');
@@ -468,7 +435,7 @@ await test('18. remote task linkage persisted to tasks.json', async () => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
-// ── 19. hearth_task_id/conversation_id sync on start ─────────────────────────
+
 await test('19. hearth_task_id/conversation_id sync on start', async () => {
   const mock = createMockTransport([
     { id: 'remote-row-19', device_id: testDeviceId, status: 'running', prompt: 'Sync on start' }
@@ -501,7 +468,7 @@ await test('19. hearth_task_id/conversation_id sync on start', async () => {
   assert.equal(dbTask.conversation_id, 'conv-init-19', 'conversation_id must be synced on start');
 });
 
-// ── 20. restart restores remote linkage ──────────────────────────────────────
+
 await test('20. restart restores remote linkage and transitions running to recovery_required', async () => {
   const tmpDir = path.join(os.tmpdir(), `hearth-remote-test-${Date.now()}-20`);
   const filePath = path.join(tmpDir, 'tasks.json');
@@ -537,7 +504,7 @@ await test('20. restart restores remote linkage and transitions running to recov
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
-// ── 21. recovery resume DONE syncs same Supabase row ─────────────────────────
+
 await test('21. recovery resume DONE syncs same Supabase row', async () => {
   const initialRow = {
     id: 'remote-row-21',
@@ -594,7 +561,7 @@ await test('21. recovery resume DONE syncs same Supabase row', async () => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
-// ── 22. recovery Mark Failed syncs error ─────────────────────────────────────
+
 await test('22. recovery Mark Failed syncs error to Supabase', async () => {
   const mock = createMockTransport([
     { id: 'remote-row-22', device_id: testDeviceId, status: 'running', prompt: 'Fail in recovery' }
@@ -628,7 +595,7 @@ await test('22. recovery Mark Failed syncs error to Supabase', async () => {
   assert(dbTask.finished_at, 'finished_at must be set on error');
 });
 
-// ── 23. bridge offline terminal sync is queued and retried ───────────────────
+
 await test('23. bridge offline terminal sync is queued and retried upon reconnect', async () => {
   const tmpDir = path.join(os.tmpdir(), `hearth-remote-test-${Date.now()}-23`);
   const store = new TaskStore(path.join(tmpDir, 'tasks.json'));
@@ -700,7 +667,7 @@ await test('23. bridge offline terminal sync is queued and retried upon reconnec
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
-// ── 24. duplicate sync idempotent ────────────────────────────────────────────
+
 await test('24. duplicate sync calls on same task are idempotent', async () => {
   const mock = createMockTransport([
     { id: 'remote-row-24', device_id: testDeviceId, status: 'running', prompt: 'Idempotency test' }
@@ -730,7 +697,7 @@ await test('24. duplicate sync calls on same task are idempotent', async () => {
   assert.equal(mock.getTasks()[0].status, 'done');
 });
 
-// ── 25. local task unaffected ────────────────────────────────────────────────
+
 await test('25. local task is completely unaffected by remote sync logic', async () => {
   const mock = createMockTransport([]);
   const client = new HearthBridgeClient({
@@ -754,274 +721,7 @@ await test('25. local task is completely unaffected by remote sync logic', async
   assert.equal(mock.getTasks().length, 0, 'Zero network calls or DB mutations for local task');
 });
 
-// ── 26. strict completion / false-DONE unchanged ────────────────────────────
-await test('26. strict completion contract and false-DONE protections unchanged for remote tasks', async () => {
-  // Prose with "success" status in JSON must NOT be classified as completed
-  const proseWithSuccess = 'Job finished. ```json\n{"status":"success","summary":"Done"}\n```';
-  const classified1 = classifyCompletion({
-    response: proseWithSuccess,
-    executorStatus: 'SUCCESS',
-  });
-  assert.equal(classified1.status, 'waiting', 'Status success is invalid and remains waiting');
 
-  // Valid completed schema
-  const validCompleted = 'Finished turn. ```json\n{"status":"completed","summary":"Build verified"}\n```';
-  const classified2 = classifyCompletion({
-    response: validCompleted,
-    executorStatus: 'SUCCESS',
-  });
-  assert.equal(classified2.status, 'done');
-  assert.equal(classified2.summary, 'Build verified');
-});
-
-// ── 27. ERROR releases active lock ──────────────────────────────────────────
-await test('27. ERROR releases active lock', async () => {
-  const errTask = {
-    taskId: 'task-err-27',
-    remoteTaskId: 'remote-row-27',
-    source: 'remote',
-    status: 'error',
-    error: 'Antigravity exited without a final response.',
-    child: null,
-  };
-  taskRegistry.set(errTask.taskId, errTask);
-
-  // Authoritative predicate must report false
-  assert.equal(isTaskActivelyRunning(errTask), false, 'Error task is not actively running');
-  assert.equal(isTaskActivelyRunning(errTask.taskId), false, 'TaskId lookup for error task returns false');
-
-  // Simulated bridge lock release
-  let activeRemoteTaskId = errTask.remoteTaskId;
-  if (!isTaskActivelyRunning(errTask)) {
-    activeRemoteTaskId = null;
-  }
-  assert.equal(activeRemoteTaskId, null, 'Active lock must be released when task is error');
-  taskRegistry.delete(errTask.taskId);
-});
-
-// ── 28. stale WAITING after restart does not deadlock new task ──────────────
-await test('28. stale WAITING after restart does not deadlock new task', async () => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hearth-bridge-stale-wait-'));
-  const store = new TaskStore(path.join(tempDir, 'tasks.json'));
-  setTaskStore(store);
-
-  // Clear in-memory registry
-  for (const k of taskRegistry.keys()) taskRegistry.delete(k);
-
-  // Persist a waiting task
-  store.saveTask({
-    taskId: 'task-stale-wait-28',
-    remoteTaskId: 'remote-wait-28',
-    source: 'remote',
-    status: 'waiting',
-    workspace: tempDir,
-  });
-
-  // Reconcile startup
-  store.reconcileStartupState();
-  const loadedTask = store.getTask('task-stale-wait-28');
-  assert.equal(loadedTask.status, 'waiting', 'Task remains waiting');
-
-  // Stale waiting without live executor must NOT block new task
-  assert.equal(isTaskActivelyRunning(loadedTask), false, 'Stale waiting task is not actively running');
-  assert.equal(hasRunningTask(), false, 'hasRunningTask must return false for stale waiting');
-
-  setTaskStore(null);
-  fs.rmSync(tempDir, { recursive: true, force: true });
-});
-
-// ── 29. live WAITING same conversation allows follow-up ─────────────────────
-await test('29. live WAITING same conversation allows follow-up', async () => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hearth-bridge-followup-'));
-  const waitingTask = {
-    taskId: 'task-followup-29',
-    conversationId: 'conv-followup-29',
-    workspace: tempDir,
-    status: 'waiting',
-    isResuming: false,
-    recentEvents: [],
-  };
-  taskRegistry.set(waitingTask.taskId, waitingTask);
-
-  const mockRunner = async (_exe, _args, { input }) => {
-    return {
-      stdout: JSON.stringify({
-        event: 'result',
-        result: {
-          conversation_id: 'conv-followup-29',
-          status: 'SUCCESS',
-          response: '```json\n{"status":"completed","summary":"Follow-up successful"}\n```',
-        },
-      }) + '\n',
-    };
-  };
-
-  const res = await sendAntigravityMessage({
-    taskId: waitingTask.taskId,
-    message: 'Proceed with next step',
-    customAgyPath: process.execPath,
-    runner: mockRunner,
-  });
-
-  assert.equal(res.status, 'done', 'Follow-up must complete successfully');
-  assert.equal(waitingTask.status, 'done', 'Task status must transition to done');
-  taskRegistry.delete(waitingTask.taskId);
-  fs.rmSync(tempDir, { recursive: true, force: true });
-});
-
-// ── 30. stale WAITING can coexist with approval of new independent task ──────
-await test('30. stale WAITING can coexist with approval of new independent task according to policy', async () => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hearth-bridge-coexist-'));
-  const store = new TaskStore(path.join(tempDir, 'tasks.json'));
-  setTaskStore(store);
-
-  // Stale waiting task 1
-  store.saveTask({
-    taskId: 'task-coexist-1',
-    remoteTaskId: 'remote-1',
-    source: 'remote',
-    status: 'waiting',
-  });
-
-  // New independent task 2
-  const newRemoteTaskId = 'remote-2';
-  const existing = store.findTaskByRemoteLink({ remoteTaskId: newRemoteTaskId });
-  assert.equal(existing, null, 'New independent task has no duplicate linkage');
-
-  // Authoritative predicate confirms Task 1 does not block Task 2
-  assert.equal(hasRunningTask(), false, 'Stale waiting task 1 does not block new independent task');
-
-  setTaskStore(null);
-  fs.rmSync(tempDir, { recursive: true, force: true });
-});
-
-// ── 31. RUNNING -> WAITING -> ERROR syncs same remote row ───────────────────
-await test('31. RUNNING -> WAITING -> ERROR syncs same remote row', async () => {
-  const mock = createMockTransport([
-    { id: 'remote-row-31', device_id: testDeviceId, status: 'running', prompt: 'Transition test' }
-  ]);
-  const client = new HearthBridgeClient({
-    deviceId: testDeviceId,
-    supabaseUrl: 'https://mock.supabase.co',
-    fetchFn: mock.fetch,
-  });
-  client.enabled = true;
-
-  const task = {
-    taskId: 'hearth-task-31',
-    conversationId: 'conv-31',
-    source: 'remote',
-    remoteTaskId: 'remote-row-31',
-    status: 'running',
-    recentEvents: [],
-  };
-
-  // Step 1: Transitions to WAITING (interim)
-  task.status = 'waiting';
-  task.completion = { summary: 'Waiting for additional input' };
-  const resWait = await syncRemoteTaskState({ bridgeClient: client, task });
-  assert.equal(resWait.synced, true);
-  assert.equal(mock.getTasks()[0].status, 'waiting');
-  assert(!mock.getTasks()[0].finished_at, 'finished_at must not be set on waiting');
-
-  // Step 2: Executor exits without final response -> ERROR
-  task.status = 'error';
-  task.error = 'Antigravity exited without a final response.';
-  const resErr = await syncRemoteTaskState({ bridgeClient: client, task });
-  assert.equal(resErr.synced, true);
-  assert.equal(mock.getTasks()[0].status, 'error');
-  assert.notEqual(mock.getTasks()[0].finished_at, null, 'finished_at must be set on terminal error');
-  assert.equal(mock.getTasks()[0].error, 'Antigravity exited without a final response.');
-  assert.equal(mock.getTasks().length, 1, 'Must still be exactly 1 row; no duplicates');
-});
-
-// ── 32. executor exits without final response -> remote ERROR + finished_at ──
-await test('32. executor exits without final response -> remote ERROR + finished_at', async () => {
-  const mock = createMockTransport([
-    { id: 'remote-row-32', device_id: testDeviceId, status: 'running', prompt: 'Exit without response' }
-  ]);
-  const client = new HearthBridgeClient({
-    deviceId: testDeviceId,
-    supabaseUrl: 'https://mock.supabase.co',
-    fetchFn: mock.fetch,
-  });
-  client.enabled = true;
-
-  // Simulate classifyCompletion with empty response
-  const completion = classifyCompletion({ response: '', executorStatus: 'SUCCESS' });
-  assert.equal(completion.status, 'error');
-  assert.equal(completion.error, 'Antigravity exited without a final response.');
-
-  const task = {
-    taskId: 'hearth-task-32',
-    conversationId: 'conv-32',
-    source: 'remote',
-    remoteTaskId: 'remote-row-32',
-    status: completion.status,
-    error: completion.error,
-    completion,
-  };
-
-  const res = await syncRemoteTaskState({ bridgeClient: client, task });
-  assert.equal(res.synced, true);
-  const row = mock.getTasks()[0];
-  assert.equal(row.status, 'error');
-  assert.notEqual(row.finished_at, null, 'finished_at must be recorded');
-  assert.equal(row.error, 'Antigravity exited without a final response.');
-});
-
-// ── 33. persisted ERROR never restores as WAITING ───────────────────────────
-await test('33. persisted ERROR never restores as WAITING', async () => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hearth-bridge-err-'));
-  const store = new TaskStore(path.join(tempDir, 'tasks.json'));
-
-  store.saveTask({
-    taskId: 'task-err-33',
-    remoteTaskId: 'remote-33',
-    source: 'remote',
-    status: 'error',
-    error: 'Antigravity exited without a final response.',
-  });
-
-  // Reconcile startup
-  store.reconcileStartupState();
-  const task = store.getTask('task-err-33');
-  assert.equal(task.status, 'error', 'Error status must remain strictly error');
-  assert.notEqual(task.status, 'waiting', 'Error must never be restored to waiting');
-  assert.notEqual(task.status, 'running', 'Error must never be restored to running');
-
-  fs.rmSync(tempDir, { recursive: true, force: true });
-});
-
-// ── 34. new remote task can Approve & Run after prior ERROR ─────────────────
-await test('34. new remote task can Approve & Run after prior ERROR', async () => {
-  let activeRemoteTaskId = 'task-prior-err-34';
-  const priorTask = {
-    taskId: 'task-prior-err-34',
-    source: 'remote',
-    status: 'error',
-    error: 'Antigravity exited without a final response.',
-  };
-  taskRegistry.set(priorTask.taskId, priorTask);
-
-  // When approving new task: check if active task is actually running
-  if (activeRemoteTaskId) {
-    const active = isTaskActivelyRunning(activeRemoteTaskId);
-    if (!active) {
-      activeRemoteTaskId = null; // Automatically cleared
-    }
-  }
-
-  assert.equal(activeRemoteTaskId, null, 'Prior error task lock must be automatically cleared');
-
-  // New task can now acquire the lock
-  const newTaskId = 'task-new-34';
-  activeRemoteTaskId = newTaskId;
-  assert.equal(activeRemoteTaskId, newTaskId, 'New remote task successfully claims lock');
-  taskRegistry.delete(priorTask.taskId);
-});
-
-// ── 35. no duplicate remote row/task/conversation ───────────────────────────
 await test('35. no duplicate remote row/task/conversation across transitions', async () => {
   const mock = createMockTransport([
     { id: 'remote-row-35', device_id: testDeviceId, status: 'running', prompt: 'Unique row test' }
@@ -1053,234 +753,7 @@ await test('35. no duplicate remote row/task/conversation across transitions', a
   assert.equal(tasks[0].conversation_id, 'conv-unique-35');
 });
 
-// ── 36. strict completion contract unchanged ────────────────────────────────
-await test('36. strict completion contract unchanged: success/done in json are NOT completed', async () => {
-  const invalidSuccess = classifyCompletion({
-    response: '```json\n{"status":"success","summary":"done"}\n```',
-    executorStatus: 'SUCCESS',
-  });
-  assert.equal(invalidSuccess.status, 'waiting', 'status success must remain waiting');
 
-  const invalidDone = classifyCompletion({
-    response: '```json\n{"status":"done","summary":"done"}\n```',
-    executorStatus: 'SUCCESS',
-  });
-  assert.equal(invalidDone.status, 'waiting', 'status done must remain waiting');
-
-  const validCompleted = classifyCompletion({
-    response: '```json\n{"status":"completed","summary":"verified"}\n```',
-    executorStatus: 'SUCCESS',
-  });
-  assert.equal(validCompleted.status, 'done', 'status completed must transition to done');
-});
-
-// ── 37. recovery/persistence v0.4.3 unchanged ───────────────────────────────
-await test('37. recovery/persistence v0.4.3 unchanged: recovery_required blocks until dismissed', async () => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hearth-bridge-v043-'));
-  const store = new TaskStore(path.join(tempDir, 'tasks.json'));
-  setTaskStore(store);
-
-  // Clear in-memory taskRegistry
-  for (const k of taskRegistry.keys()) taskRegistry.delete(k);
-
-  store.saveTask({
-    taskId: 'task-rec-37',
-    status: 'recovery_required',
-    dismissed: false,
-    workspace: tempDir,
-  });
-
-  assert.equal(hasRunningTask(), true, 'Undismissed recovery_required must block');
-
-  store.dismissTask('task-rec-37');
-  assert.equal(hasRunningTask(), false, 'Dismissed recovery task releases lock');
-
-  setTaskStore(null);
-  fs.rmSync(tempDir, { recursive: true, force: true });
-});
-
-// ── 38. native packaged condition: two stale WAITING tasks + no live process -> new approval succeeds
-await test('38. native packaged condition: two stale WAITING tasks + no live process -> new approval succeeds', async () => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hearth-bridge-native-deadlock-'));
-  const store = new TaskStore(path.join(tempDir, 'tasks.json'));
-  setTaskStore(store);
-
-  // Clear in-memory taskRegistry
-  for (const k of taskRegistry.keys()) taskRegistry.delete(k);
-
-  // Stale waiting task 1 (e.g. prior executor error recovered as waiting)
-  store.saveTask({
-    taskId: 'local-wait-1',
-    remoteTaskId: 'remote-wait-row-1',
-    source: 'remote',
-    status: 'waiting',
-    workspace: tempDir,
-    completion: {
-      status: 'waiting',
-      summary: 'Interim waiting response',
-    },
-  });
-
-  // Stale waiting task 2 (e.g. second remote task left in waiting in DB)
-  store.saveTask({
-    taskId: 'local-wait-2',
-    remoteTaskId: 'remote-wait-row-2',
-    source: 'remote',
-    status: 'waiting',
-    workspace: tempDir,
-    completion: {
-      status: 'waiting',
-      summary: 'Another waiting response',
-    },
-  });
-
-  // Reconcile startup
-  const reconcileRes = store.reconcileStartupState();
-  assert.equal(reconcileRes.reconciledCount, 0, 'Waiting tasks are untouched by startup reconciliation');
-
-  // Exact native bridge state simulation
-  let activeRemoteTaskId = 'remote-wait-row-2'; // May have lingered from resume
-  const newPendingTaskId = 'remote-pending-row-3';
-
-  // Native approval guard in bridge:approve-task
-  const approveGuard = () => {
-    if (activeRemoteTaskId) {
-      if (!isTaskActivelyRunning(activeRemoteTaskId)) {
-        activeRemoteTaskId = null; // Cleared because dormant waiting
-      } else {
-        throw new Error('Another task is currently running.');
-      }
-    }
-    if (hasRunningTask()) {
-      throw new Error('Another task is currently running.');
-    }
-  };
-
-  // Must not throw "Another task is currently running."
-  approveGuard();
-
-  assert.equal(activeRemoteTaskId, null, 'Lingering remote lock must be cleared');
-  assert.equal(hasRunningTask(), false, 'hasRunningTask must be false when only waiting tasks exist');
-
-  // Now the new independent task can claim active lock and start
-  activeRemoteTaskId = newPendingTaskId;
-  assert.equal(activeRemoteTaskId, newPendingTaskId, 'New task claims activeRemoteTaskId');
-
-  setTaskStore(null);
-  fs.rmSync(tempDir, { recursive: true, force: true });
-});
-
-// ── 39. bridge:approve-task runtime closure execution: all bindings exist without ReferenceError
-await test('39. bridge:approve-task runtime closure execution: all bindings exist without ReferenceError', async () => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hearth-bridge-approve-closure-'));
-  const store = new TaskStore(path.join(tempDir, 'tasks.json'));
-  setTaskStore(store);
-
-  // Clear in-memory taskRegistry
-  for (const k of taskRegistry.keys()) taskRegistry.delete(k);
-
-  // Verify electron/main.cjs source contains getAntigravityTask in the bridge:approve-task handler
-  const mainCjsSrc = fs.readFileSync(path.join(process.cwd(), 'electron/main.cjs'), 'utf8');
-  const handlerMatch = mainCjsSrc.match(/ipcMain\.handle\('bridge:approve-task'[\s\S]*?const \{([\s\S]*?)\} = await importFromHere\('\.\.\/mcp\/executors\/antigravity\.mjs'\);/);
-  assert(handlerMatch, 'bridge:approve-task handler must import from antigravity.mjs');
-  const importedSymbols = handlerMatch[1].split(',').map(s => s.trim());
-  assert(importedSymbols.includes('getAntigravityTask'), 'bridge:approve-task MUST import getAntigravityTask');
-  assert(importedSymbols.includes('startAntigravityTask'), 'bridge:approve-task MUST import startAntigravityTask');
-  assert(importedSymbols.includes('hasRunningTask'), 'bridge:approve-task MUST import hasRunningTask');
-  assert(importedSymbols.includes('isTaskActivelyRunning'), 'bridge:approve-task MUST import isTaskActivelyRunning');
-
-  // Execute the exact runtime bridge:approve-task execution block
-  const {
-    hasRunningTask: checkRunning,
-    isTaskActivelyRunning: checkActive,
-    startAntigravityTask: startTask,
-    getAntigravityTask: getTask,
-  } = await import('../mcp/executors/antigravity.mjs');
-
-  const { syncRemoteTaskState: syncRemote } = await import('../mcp/bridge/client.mjs');
-
-  const mock = createMockTransport([
-    { id: 'remote-approve-39', device_id: testDeviceId, status: 'pending', prompt: 'Approve runtime test' }
-  ]);
-  const client = new HearthBridgeClient({
-    deviceId: testDeviceId,
-    supabaseUrl: 'https://mock.supabase.co',
-    fetchFn: mock.fetch,
-  });
-  client.enabled = true;
-
-  const mockRunner = async () => ({
-    stdout: JSON.stringify({
-      event: 'init',
-      conversation_id: 'conv-approve-39',
-    }) + '\n' + JSON.stringify({
-      event: 'result',
-      status: 'SUCCESS',
-      result: {
-        status: 'SUCCESS',
-        response: '```json\n{"status":"completed","summary":"Approval execution success"}\n```',
-      },
-    }) + '\n',
-  });
-
-  // Execute approval path simulating bridge:approve-task
-  const taskId = 'remote-approve-39';
-  let activeRemoteTaskId = null;
-
-  if (activeRemoteTaskId) {
-    if (!checkActive(activeRemoteTaskId)) {
-      activeRemoteTaskId = null;
-    } else {
-      throw new Error('Another task is currently running.');
-    }
-  }
-  if (checkRunning && checkRunning()) {
-    throw new Error('Another task is currently running.');
-  }
-
-  const claimResult = await client.claimTask({ taskId });
-  assert(claimResult.claimed === true, 'Claim must succeed');
-  activeRemoteTaskId = taskId;
-
-  const startRes = await startTask({
-    workspace: tempDir,
-    prompt: 'Approve runtime test',
-    title: 'Test Remote Task',
-    source: 'remote',
-    remoteTaskId: taskId,
-    requestId: 'req-39',
-    userApproved: true,
-    runner: mockRunner,
-    customAgyPath: process.execPath,
-  });
-
-  // Verify getAntigravityTask is defined, callable, and resolves the task object
-  assert(typeof getTask === 'function', 'getAntigravityTask must be a function');
-  const taskObj = getTask(startRes.taskId) || startRes;
-  assert(taskObj !== null && typeof taskObj === 'object', 'taskObj must be resolved');
-  assert.equal(taskObj.taskId, startRes.taskId, 'taskObj must match started taskId');
-
-  // Verify syncRemoteTaskState runs cleanly without error
-  await syncRemote({
-    bridgeClient: client,
-    taskStore: store,
-    task: taskObj,
-    overrides: { status: 'running' },
-  });
-
-  const updatedDb = mock.getTasks().find(t => t.id === taskId);
-  assert.equal(updatedDb.status, 'running', 'DB task must be updated to running');
-  assert.equal(updatedDb.hearth_task_id, startRes.taskId, 'DB task must have hearth_task_id');
-
-  setTaskStore(null);
-  fs.rmSync(tempDir, { recursive: true, force: true });
-});
-
-// ══════════════════════════════════════════════════════════════════════════════
-// Problem B Remote Linkage & Durable Sync Tests (G through L)
-// ══════════════════════════════════════════════════════════════════════════════
-
-// G. Remote start immediately writes hearth_task_id + conversation_id to same row
 await test('G. Remote start immediately writes hearth_task_id + conversation_id to same row', async () => {
   const deviceId = 'dev-g-test';
   const remoteId = 'remote-g-1';
@@ -1363,6 +836,7 @@ await test('G. Remote start immediately writes hearth_task_id + conversation_id 
 });
 
 // H. failed initial remote sync queues retry
+
 await test('H. failed initial remote sync queues retry', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hearth-bridge-h-'));
   const store = new TaskStore({ storagePath: path.join(tempDir, 'tasks.json') });
@@ -1428,6 +902,7 @@ await test('H. failed initial remote sync queues retry', async () => {
 });
 
 // I. restart preserves pending remote linkage
+
 await test('I. restart preserves pending remote linkage', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hearth-bridge-i-'));
   const storagePath = path.join(tempDir, 'tasks.json');
@@ -1470,6 +945,7 @@ await test('I. restart preserves pending remote linkage', async () => {
 });
 
 // J. terminal state updates same remote row
+
 await test('J. terminal state updates same remote row', async () => {
   const deviceId = 'dev-j-test';
   const remoteId = 'remote-j-1';
@@ -1527,6 +1003,7 @@ await test('J. terminal state updates same remote row', async () => {
 });
 
 // K. source=remote without remoteTaskId is rejected/reconciled safely
+
 await test('K. source=remote without remoteTaskId is rejected/reconciled safely', () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hearth-bridge-k-'));
   const store = new TaskStore({ storagePath: path.join(tempDir, 'tasks.json') });
@@ -1574,6 +1051,7 @@ await test('K. source=remote without remoteTaskId is rejected/reconciled safely'
 });
 
 // L. no duplicate task/row/conversation
+
 await test('L. no duplicate task/row/conversation', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hearth-bridge-l-'));
   const store = new TaskStore({ storagePath: path.join(tempDir, 'tasks.json') });

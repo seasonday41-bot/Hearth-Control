@@ -40,7 +40,6 @@ if (!endpointUrl) {
         Files: 'Allow',
         Git: 'Allow',
         Terminal: 'Allow',
-        Antigravity: 'Ask',
         Browser: 'Blocked',
       }),
     },

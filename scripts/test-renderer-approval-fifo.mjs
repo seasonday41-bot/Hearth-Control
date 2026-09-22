@@ -48,7 +48,7 @@ const { upsertApproval, removeApproval } = new Function(`${queueLogicSource}\nre
 
 // ── dynamic: the exact extracted, type-stripped committed logic ──────────
 
-const A = { requestId: 'A', permission: 'Antigravity', action: 'do A' };
+const A = { requestId: 'A', permission: 'X', action: 'do A' };
 const B = { requestId: 'B', permission: 'Terminal', action: 'do B' };
 
 test('APP-Q1 A then B arrives -- A remains active (queue head), B is queued behind it', () => {

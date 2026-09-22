@@ -8,12 +8,7 @@
  * imports nothing from Phase 1-7 and adds no new evidence of its own. It
  * only reads fields Phase 6/7 already produced.
  *
- * This module is standalone: it does not import Phase 6's executor.mjs
- * (the legacy Antigravity executor/lifecycle contract). Its `waiting`
- * vocabulary is unrelated to that module's durable-parent lifecycle
- * semantics -- reusing that vocabulary/import would couple X's own review
- * state to a different system's lifecycle by accident. The locked mapping
- * is instead its own local source of truth:
+ * This module is standalone. Its locked mapping is its own local source of truth:
  *
  *   COMPLETED    <-> hearth_outcome: completed
  *   NEEDS_REVIEW <-> hearth_outcome: waiting

@@ -6,7 +6,6 @@ import { parseXTask } from '../x/task-contract.mjs';
 export const HEARTH_JOB_ROUTES = Object.freeze({
   code_change: 'x',
   code_inspect: 'x',
-  general: 'antigravity',
   market_search: 'market',
   investment_analysis: 'market',
 });
@@ -23,8 +22,6 @@ export const routeHearthJob = (input) => {
     route,
     reason: route === 'x'
       ? `Hearth Router · ${job.kind} uses X coding pipeline`
-      : route === 'antigravity'
-        ? 'Hearth Router · general work uses Antigravity'
         : job.kind === 'market_search'
           ? 'Hearth Router · market_search uses XAU/USD Search AI'
           : 'Hearth Router · investment_analysis uses XAU/USD Invest AI',
@@ -103,29 +100,3 @@ export const adaptHearthJobToXTask = (input, { workspaceRoot, repo = null } = {}
 
   return parseXTask(xTask);
 };
-
-const section = (label, values) => values.length ? `${label}:\n- ${values.join('\n- ')}` : '';
-
-export const buildAntigravityPrompt = (input) => {
-  const { job, route } = routeHearthJob(input);
-  if (route !== 'antigravity') throw new Error('hearth_job_not_antigravity_routable');
-  const pieces = [
-    '[Hearth Universal Job]',
-    `Job ID: ${job.job_id}`,
-    job.title ? `Title: ${job.title}` : '',
-    `Objective: ${job.objective}`,
-    job.problem ? `Context / problem: ${job.problem}` : '',
-    section('Known evidence', job.known_evidence),
-    section('Constraints to preserve', job.constraints.preserve),
-    section('Do not', job.constraints.do_not),
-    section('Acceptance criteria', job.acceptance_criteria),
-    section('Stop conditions', job.stop_conditions),
-    'Operate only inside the Hearth-provided workspace and obey Hearth permission/safety boundaries.',
-  ].filter(Boolean);
-  const prompt = pieces.join('\n\n');
-  if (Buffer.byteLength(prompt, 'utf8') > 64 * 1024) throw new Error('hearth_job_prompt_too_large');
-  return prompt;
-};
-
-export const buildAntigravityRequestId = (input) =>
-  `${hearthJobTaskId(parseHearthJob(input).job_id)}:${computeHearthJobFingerprint(input)}`;

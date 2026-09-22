@@ -78,7 +78,6 @@ const initialPermissions: Array<{ name: string; detail: string; value: Permissio
   { name: 'Files', detail: 'Read and write inside this workspace', value: 'Allow' },
   { name: 'Git', detail: 'Inspect status, history and diffs', value: 'Allow' },
   { name: 'Terminal', detail: 'Run local commands after confirmation', value: 'Ask' },
-  { name: 'Antigravity', detail: 'Run approved tasks through the secure Antigravity CLI', value: 'Ask' },
   { name: 'Vercel', detail: 'Read projects and deployments through the connected Vercel account', value: 'Ask' },
   { name: 'MarketResearch', detail: 'Use fixed-source XAU/USD research for Search AI; this does not control a browser', value: 'Ask' },
   { name: 'Browser', detail: 'General browser automation — unavailable and unrelated to Market Research', value: 'Blocked', disabled: true },
@@ -194,27 +193,15 @@ export default function App() {
   const [publicXAuthMode, setPublicXAuthMode] = useState<'sign-in' | 'sign-up'>('sign-in');
 
   // Goals / Activity states
-  const [taskCenterTab, setTaskCenterTab] = useState<'x' | 'antigravity' | 'remote'>('x');
+  const [taskCenterTab, setTaskCenterTab] = useState<'x' | 'remote'>('x');
   const [activeXRequestId, setActiveXRequestId] = useState<string | null>(null);
   const [activeXStatus, setActiveXStatus] = useState<XQueueStatus | null>(null);
   const [recentXRuns, setRecentXRuns] = useState<XRunSummary[]>([]);
-  const [executorStatus, setExecutorStatus] = useState<AntigravityStatus | null>(null);
   const [codexStatus, setCodexStatus] = useState<{ available: boolean } | null>(null);
   const [claudeStatus, setClaudeStatus] = useState<{ available: boolean } | null>(null);
-  const [taskPrompt, setTaskPrompt] = useState('');
-  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
-  const [activeTaskSource, setActiveTaskSource] = useState<'Local' | 'Remote'>('Local');
-  const [taskData, setTaskData] = useState<AntigravityTaskData | null>(null);
-  const [showTaskProgress, setShowTaskProgress] = useState(false);
-  const [taskSubmitting, setTaskSubmitting] = useState(false);
-  const [recoveryBusy, setRecoveryBusy] = useState(false);
-  const [followUpInput, setFollowUpInput] = useState('');
-  const [followUpSubmitting, setFollowUpSubmitting] = useState(false);
-  const [pollTrigger, setPollTrigger] = useState(0);
-  const [, setNowTick] = useState(Date.now());
 
   // Experimental Chat states; isolated from the Goals / Activity lifecycle.
-  const [chatProvider, setChatProvider] = useState<'local' | 'external'>('local');
+  const [chatProvider, setChatProvider] = useState<'local'>('local');
   const [chatModel, setChatModel] = useState('qwen3.5:9b-hermes');
   const [chatProfile, setChatProfile] = useState<'fast' | 'normal' | 'deep'>('normal');
   const [chatLongResponse, setChatLongResponse] = useState(false);
@@ -249,20 +236,12 @@ export default function App() {
   const [newGoalObjective, setNewGoalObjective] = useState('');
   const [newGoalConstraints, setNewGoalConstraints] = useState('');
   const [newGoalSteps, setNewGoalSteps] = useState<Array<{ title: string; description: string; route: StepRoute; required: boolean }>>([
-    { title: '', description: '', route: 'antigravity', required: true },
+    { title: '', description: '', route: 'manual', required: true },
   ]);
 
   const isGoalActive = useMemo(() => goals.some((g) => ['running', 'waiting', 'paused'].includes(g.status)), [goals]);
   const terminalGoalCount = useMemo(() => goals.filter((g) => ['completed', 'error'].includes(g.status)).length, [goals]);
   const selectedGoal = useMemo(() => goals.find((g) => g.id === selectedGoalId) || goals[0] || null, [goals, selectedGoalId]);
-
-  const activeTaskIdRef = useRef<string | null>(null);
-  const pollingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const startTaskLockRef = useRef(false);
-
-  useEffect(() => {
-    activeTaskIdRef.current = activeTaskId;
-  }, [activeTaskId]);
 
   useEffect(() => {
     if (!activeXRequestId) return;
@@ -318,7 +297,6 @@ export default function App() {
     Promise.all([
       window.controlApp.getSettings(),
       window.controlApp.getServerState(),
-      window.controlApp.antigravityStatus().catch(() => null),
       window.controlApp.codexStatus().catch(() => null),
       window.controlApp.claudeStatus().catch(() => null),
       window.controlApp.bridgeGetState().catch(() => null),
@@ -326,10 +304,9 @@ export default function App() {
       window.controlApp.updaterGetInfo().catch(() => null),
       window.controlApp.updaterCheck().catch(() => null),
       window.controlApp.goalsList().catch(() => []),
-      window.controlApp.antigravityListTasks().catch(() => []),
       window.controlApp.connectionsList().catch(() => []),
       window.controlApp.investStatusGet().catch(() => null),
-    ]).then(([settings, state, executor, codex, claude, bridge, publicX, updateInfo, update, goalsList, taskList, connectionList, invest]) => {
+    ]).then(([settings, state, codex, claude, bridge, publicX, updateInfo, update, goalsList, connectionList, invest]) => {
       if (!active) return;
       if (settings.workspace) setWorkspace(settings.workspace);
       setPort(settings.port);
@@ -337,7 +314,6 @@ export default function App() {
       setPermissions((current) => current.map((item) => ({ ...item, value: settings.permissions[item.name] ?? item.value })));
       setRunning(state.running);
       setPid(state.pid);
-      if (executor) setExecutorStatus(executor);
       if (codex) setCodexStatus(codex);
       if (claude) setClaudeStatus(claude);
       if (bridge) setBridgeState(bridge);
@@ -347,16 +323,6 @@ export default function App() {
       if (goalsList) setGoals(goalsList);
       if (Array.isArray(connectionList)) setConnections(connectionList);
       if (invest) setInvestStatus(invest);
-
-      if (Array.isArray(taskList) && taskList.length > 0) {
-        const recoveringOrActive = taskList.find((t: any) => !t.dismissed && ['recovery_required', 'running', 'starting', 'waiting'].includes(t.status))
-          || taskList.find((t: any) => !t.dismissed);
-        if (recoveringOrActive) {
-          setActiveTaskId(recoveringOrActive.taskId);
-          setActiveTaskSource(recoveringOrActive.source === 'remote' ? 'Remote' : 'Local');
-          setTaskData(recoveringOrActive);
-        }
-      }
 
       setSettingsReady(true);
     });
@@ -547,61 +513,6 @@ export default function App() {
     void window.controlApp.validateWorkspace(workspace).then((result) => setWorkspaceValid(result.valid));
   }, [workspace]);
 
-  // Single polling timer instance per active task
-  useEffect(() => {
-    if (pollingTimerRef.current) {
-      clearInterval(pollingTimerRef.current);
-      pollingTimerRef.current = null;
-    }
-    if (!activeTaskId) return;
-
-    let isSubscribed = true;
-    const poll = async () => {
-      const currentId = activeTaskIdRef.current;
-      if (!currentId || !isSubscribed) return;
-      try {
-        const data = await window.controlApp.antigravityTask(currentId);
-        if (!isSubscribed || activeTaskIdRef.current !== currentId) return;
-        setTaskData(data);
-        if (data.status === 'done' || data.status === 'error') {
-          if (pollingTimerRef.current) {
-            clearInterval(pollingTimerRef.current);
-            pollingTimerRef.current = null;
-          }
-        }
-      } catch (err) {
-        console.error('Task poll error:', err);
-      }
-    };
-
-    void poll();
-    pollingTimerRef.current = setInterval(poll, 2500);
-
-    return () => {
-      isSubscribed = false;
-      if (pollingTimerRef.current) {
-        clearInterval(pollingTimerRef.current);
-        pollingTimerRef.current = null;
-      }
-    };
-  }, [activeTaskId, pollTrigger]);
-
-  const isTaskRunning = Boolean(
-    taskSubmitting ||
-    (taskData && !taskData.dismissed && (
-      ['pending', 'starting', 'running'].includes(taskData.status) ||
-      taskData.status === 'recovery_required' ||
-      (taskData.status === 'paused' && (taskData as any).retainExecutionLock)
-    ))
-  );
-
-  // Ticker for live elapsed time while task is active
-  useEffect(() => {
-    if (!isTaskRunning) return;
-    const interval = setInterval(() => setNowTick(Date.now()), 1000);
-    return () => clearInterval(interval);
-  }, [isTaskRunning]);
-
   const now = () => new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(new Date());
   const allowed = useMemo(() => permissions.filter((item) => item.value === 'Allow').length, [permissions]);
   const healthyConnections = useMemo(() => connections.filter((item) => item.status === 'CONNECTED').length, [connections]);
@@ -623,7 +534,7 @@ export default function App() {
     .slice(0, 8), [goals]);
   const flash = (message: string) => { setNotice(message); window.setTimeout(() => setNotice(''), 2200); };
 
-  const promptBytes = useMemo(() => new TextEncoder().encode(taskPrompt).length, [taskPrompt]);
+  const isTaskRunning = recentXRuns.some((run) => run.status === 'queued' || run.status === 'running');
 
   const xPerm = permissions.find((p) => p.name === 'X')?.value ?? 'Ask';
   const xReady = running && workspaceValid !== false && xPerm !== 'Blocked';
@@ -631,9 +542,8 @@ export default function App() {
   const xPendingTasks = useMemo(() => bridgeState?.pendingTasks.filter((task) => task.routedTo === 'x') ?? [], [bridgeState?.pendingTasks]);
   const remotePendingTasks = useMemo(() => bridgeState?.pendingTasks.filter((task) => task.routedTo !== 'x') ?? [], [bridgeState?.pendingTasks]);
   const codexPerm = permissions.find((p) => p.name === 'Codex')?.value ?? 'Ask';
-  const antigravityPerm = permissions.find((p) => p.name === 'Antigravity')?.value ?? 'Ask';
 
-  const setPermissionEnabled = (permissionName: 'X' | 'Codex' | 'Antigravity', enabled: boolean) => {
+  const setPermissionEnabled = (permissionName: 'X' | 'Codex', enabled: boolean) => {
     const nextValue: Permission = enabled ? 'Ask' : 'Blocked';
     setPermissions((current) => {
       const next = current.map((item) => item.name === permissionName ? { ...item, value: nextValue } : item);
@@ -650,7 +560,6 @@ export default function App() {
     const gptConnected = bridgeState?.connected === true;
     const codexAvailable = codexStatus?.available === true;
     const claudeAvailable = claudeStatus?.available === true;
-    const antiAvailable = executorStatus?.available === true;
 
     return [
       {
@@ -691,18 +600,6 @@ export default function App() {
         hint: codexAvailable ? codexPerm : 'CLI missing',
       },
       {
-        id: 'anti',
-        name: 'Anti',
-        badge: 'A',
-        role: 'Antigravity · general execution',
-        detail: antiAvailable ? 'Antigravity executor is available' : 'Antigravity executor is unavailable',
-        state: antigravityPerm === 'Blocked' ? 'Disabled' : antiAvailable ? 'Connected' : 'Offline',
-        tone: antigravityPerm === 'Blocked' ? 'disabled' : antiAvailable ? 'connected' : 'offline',
-        enabled: antigravityPerm !== 'Blocked',
-        canToggle: true,
-        hint: antigravityPerm,
-      },
-      {
         id: 'claude',
         name: 'Claude',
         badge: 'Cl',
@@ -715,7 +612,7 @@ export default function App() {
         hint: claudeAvailable ? 'CLI detected' : 'CLI missing',
       },
     ];
-  }, [running, workspaceValid, xPerm, bridgeState?.signedIn, bridgeState?.enabled, bridgeState?.connected, bridgeBusy, codexStatus?.available, claudeStatus?.available, codexPerm, executorStatus?.available, antigravityPerm]);
+  }, [running, workspaceValid, xPerm, bridgeState?.signedIn, bridgeState?.enabled, bridgeState?.connected, bridgeBusy, codexStatus?.available, claudeStatus?.available, codexPerm]);
 
   const setConnectorEnabled = (connectorId: AIConnectorItem['id'], enabled: boolean) => {
     if (connectorId === 'x') {
@@ -724,10 +621,6 @@ export default function App() {
     }
     if (connectorId === 'codex') {
       setPermissionEnabled('Codex', enabled);
-      return;
-    }
-    if (connectorId === 'anti') {
-      setPermissionEnabled('Antigravity', enabled);
       return;
     }
     if (connectorId === 'gpt') {
@@ -739,21 +632,6 @@ export default function App() {
   const rotateXPerm = () => {
     const index = permissions.findIndex((p) => p.name === 'X');
     if (index !== -1) rotatePermission(index);
-  };
-
-  const rotateAntigravityPerm = () => {
-    const index = permissions.findIndex((p) => p.name === 'Antigravity');
-    if (index !== -1) rotatePermission(index);
-  };
-
-  const formatElapsed = (created?: string, completed?: string) => {
-    if (!created) return '—';
-    const start = new Date(created).getTime();
-    const end = completed ? new Date(completed).getTime() : Date.now();
-    const sec = Math.max(0, Math.floor((end - start) / 1000));
-    const mins = Math.floor(sec / 60);
-    const remainingSec = sec % 60;
-    return mins > 0 ? `${mins}m ${remainingSec}s` : `${remainingSec}s`;
   };
 
   const toggleServer = async () => {
@@ -983,7 +861,7 @@ export default function App() {
       setNewGoalTitle('');
       setNewGoalObjective('');
       setNewGoalConstraints('');
-      setNewGoalSteps([{ title: '', description: '', route: 'antigravity', required: true }]);
+      setNewGoalSteps([{ title: '', description: '', route: 'manual', required: true }]);
       flash(`Goal '${created.title}' created`);
     } catch (err: any) {
       flash(`Create error: ${err.message}`);
@@ -1127,11 +1005,7 @@ export default function App() {
     document.querySelector('.main-content')?.scrollTo({ top: 0 });
   };
 
-  useEffect(() => {
-    setShowTaskProgress(false);
-  }, [activeTaskId]);
-
-  const handleChatProviderChange = (provider: 'local' | 'external') => {
+  const handleChatProviderChange = (provider: 'local') => {
     setChatProvider(provider);
     setChatResult(null);
     setChatError('');
@@ -1149,21 +1023,10 @@ export default function App() {
     setChatElapsedMs(0);
     setChatFollowOutput(true);
     chatStreamStartedRef.current = Date.now();
-    if (chatProvider === 'local') {
-      const requestId = crypto.randomUUID();
-      chatRequestIdRef.current = requestId;
-      setChatStreaming(true);
-      window.controlApp.localChatStreamStart({ requestId, provider: 'local', messages: [{ role: 'user', content: chatPrompt.trim() }], model: chatModel, profile: chatProfile, longResponse: chatLongResponse, ollamaAvailable: Boolean(chatHealth?.ok) });
-      return;
-    }
-    try {
-      const result = await window.controlApp.localChatSend({ provider: 'external', messages: [{ role: 'user', content: chatPrompt.trim() }] });
-      if (!result?.ok) setChatError(result?.error?.message || 'Provider request failed');
-      else setChatResult(result);
-      if (result?.response) setChatStreamText(result.response);
-      setChatElapsedMs(Number.isFinite(result?.elapsedMs) ? result.elapsedMs : Math.max(0, Date.now() - chatStreamStartedRef.current));
-    } catch (error: any) { setChatError(error?.message || 'Provider request failed'); }
-    finally { setChatBusy(false); }
+    const requestId = crypto.randomUUID();
+    chatRequestIdRef.current = requestId;
+    setChatStreaming(true);
+    window.controlApp.localChatStreamStart({ requestId, provider: 'local', messages: [{ role: 'user', content: chatPrompt.trim() }], model: chatModel, profile: chatProfile, longResponse: chatLongResponse, ollamaAvailable: Boolean(chatHealth?.ok) });
   };
 
   const handleLocalChatStop = () => {
@@ -1189,144 +1052,6 @@ export default function App() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [approval]);
-
-  const handleStartTask = async () => {
-    if (startTaskLockRef.current || !taskPrompt.trim() || isTaskRunning || taskSubmitting) return;
-    if (promptBytes > 65536) {
-      flash('Prompt exceeds maximum 64 KiB limit');
-      return;
-    }
-    startTaskLockRef.current = true;
-    setTaskSubmitting(true);
-    // Do not leave a prior task's result visible during executor startup.
-    setActiveTaskId(null);
-    setActiveTaskSource('Local');
-    const title = taskPrompt.trim().slice(0, 96) || 'New task';
-    setTaskData({
-      taskId: 'pending...',
-      conversationId: null,
-      workspace,
-      title,
-      status: 'starting',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      lastEvent: null,
-      recentEvents: [],
-      lastAnswer: null,
-      error: null,
-      completion: null,
-    });
-    try {
-      const res = await window.controlApp.antigravityStart({ prompt: taskPrompt.trim(), title });
-      setActiveTaskId(res.taskId);
-      setActiveTaskSource('Local');
-      setTaskData((current) => ({
-        taskId: res.taskId,
-        conversationId: res.conversationId || null,
-        workspace: res.workspace || workspace,
-        title: current?.title || title,
-        status: (res.status as AntigravityTaskData['status']) || 'running',
-        createdAt: res.startedAt || new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        lastEvent: null,
-        recentEvents: [],
-        lastAnswer: null,
-        error: null,
-        completion: (res as any).completion || null,
-      }));
-      flash(`Task ${res.taskId.slice(0, 8)} started`);
-    } catch (err: any) {
-      const errorMsg = err?.message || 'Failed to start task';
-      setTaskData((current) => ({
-        taskId: current && current.taskId !== 'pending...' ? current.taskId : 'failed',
-        conversationId: current?.conversationId || null,
-        workspace,
-        title: current?.title || title,
-        status: 'error',
-        createdAt: current?.createdAt || new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        lastEvent: null,
-        recentEvents: current?.recentEvents || [],
-        lastAnswer: null,
-        error: errorMsg,
-        completion: null,
-      }));
-      flash(`Failed to start task: ${errorMsg}`);
-    } finally {
-      setTaskSubmitting(false);
-      startTaskLockRef.current = false;
-    }
-  };
-
-  const handleSendFollowUp = async () => {
-    if (!followUpInput.trim() || !activeTaskId || followUpSubmitting) return;
-    const msgBytes = new TextEncoder().encode(followUpInput).length;
-    if (msgBytes > 65536) {
-      flash('Message exceeds maximum 64 KiB limit');
-      return;
-    }
-    setFollowUpSubmitting(true);
-    try {
-      // Clear the old terminal state before the next response is classified.
-      setTaskData((current) => current ? { ...current, status: 'running', lastAnswer: null, error: null, completion: null } : current);
-      await window.controlApp.antigravitySend({ taskId: activeTaskId, message: followUpInput.trim() });
-      setFollowUpInput('');
-      flash('Follow-up message sent');
-      setPollTrigger((prev) => prev + 1);
-    } catch (err: any) {
-      flash(`Failed to send follow-up: ${err?.message || 'Unknown error'}`);
-    } finally {
-      setFollowUpSubmitting(false);
-    }
-  };
-
-  const handleResumeTask = async () => {
-    if (!activeTaskId || recoveryBusy) return;
-    setRecoveryBusy(true);
-    try {
-      const res = await window.controlApp.antigravityResume(activeTaskId);
-      setTaskData((current) => current ? {
-        ...current,
-        status: (res.status as AntigravityTaskData['status']) || 'running',
-        error: null,
-      } : null);
-      flash(`Task ${activeTaskId.slice(0, 8)} resumed`);
-      setPollTrigger((prev) => prev + 1);
-    } catch (err: any) {
-      flash(`Resume error: ${err?.message || 'Failed to resume'}`);
-    } finally {
-      setRecoveryBusy(false);
-    }
-  };
-
-  const handleMarkTaskFailed = async () => {
-    if (!activeTaskId || recoveryBusy) return;
-    setRecoveryBusy(true);
-    try {
-      const res = await window.controlApp.antigravityMarkFailed({ taskId: activeTaskId, reason: 'Marked failed by user from recovery' });
-      setTaskData(res);
-      flash(`Task ${activeTaskId.slice(0, 8)} marked failed`);
-    } catch (err: any) {
-      flash(`Error marking failed: ${err?.message || 'Failed'}`);
-    } finally {
-      setRecoveryBusy(false);
-    }
-  };
-
-  const handleDismissTask = async () => {
-    if (!activeTaskId || recoveryBusy) return;
-    setRecoveryBusy(true);
-    try {
-      await window.controlApp.antigravityDismiss(activeTaskId);
-      setActiveTaskId(null);
-      setTaskData(null);
-      flash('Task dismissed from active view');
-    } catch (err: any) {
-      flash(`Dismiss error: ${err?.message || 'Failed'}`);
-    } finally {
-      setRecoveryBusy(false);
-    }
-  };
 
   const toggleBridge = async () => {
     if (bridgeBusy || !bridgeState) return;
@@ -1512,34 +1237,20 @@ export default function App() {
   };
 
   const handleApproveRemoteTask = async (task: BridgeTask) => {
-    if (bridgeBusy || (task.routedTo !== 'x' && isTaskRunning)) {
-      flash(task.routedTo === 'x' ? 'X approval is already in progress' : 'Cannot run while another task is running');
+    if (task.routedTo !== 'x') {
+      flash('This remote task has no available execution route');
       return;
     }
+    if (bridgeBusy) return;
     setBridgeBusy(true);
-    if (task.routedTo !== 'x') {
-      setActiveTaskId(null);
-      setActiveTaskSource('Remote');
-      setTaskData({ taskId: 'pending', conversationId: null, workspace, title: task.title || 'Remote task', status: 'pending', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), lastEvent: null, recentEvents: [], lastAnswer: null, error: null, completion: null });
-    }
     try {
       const res = await window.controlApp.bridgeApproveTask(task.id);
-      if (res.routedTo === 'x') {
-        setActiveXRequestId(res.taskId);
-        setActiveXStatus({ found: true, request_id: res.taskId, queue_id: res.queueId, queue_status: 'pending' });
-        setTaskCenterTab('x');
-        setReviewTask(null);
-        flash('X task approved and queued (' + (res.queueId || res.taskId) + ')');
-      } else {
-        setTaskData(null);
-        setActiveTaskId(res.taskId);
-        setActiveTaskSource('Remote');
-        setReviewTask(null);
-        setTaskCenterTab('antigravity');
-        flash('Remote task approved (' + res.taskId + ')');
-      }
+      setActiveXRequestId(res.taskId);
+      setActiveXStatus({ found: true, request_id: res.taskId, queue_id: res.queueId, queue_status: 'pending' });
+      setTaskCenterTab('x');
+      setReviewTask(null);
+      flash('X task approved and queued (' + (res.queueId || res.taskId) + ')');
     } catch (err: any) {
-      if (task.routedTo !== 'x') setTaskData(null);
       flash('Failed to approve task: ' + (err?.message || 'Unknown error'));
     } finally {
       setBridgeBusy(false);
@@ -1725,27 +1436,8 @@ export default function App() {
             isGoalActive={isGoalActive}
             isTaskRunning={isTaskRunning}
             flash={flash}
-            formatElapsed={formatElapsed}
-            executorStatus={executorStatus}
             taskCenterTab={taskCenterTab}
             setTaskCenterTab={setTaskCenterTab}
-            taskPrompt={taskPrompt}
-            setTaskPrompt={setTaskPrompt}
-            promptBytes={promptBytes}
-            taskSubmitting={taskSubmitting}
-            handleStartTask={handleStartTask}
-            taskData={taskData}
-            activeTaskSource={activeTaskSource}
-            showTaskProgress={showTaskProgress}
-            setShowTaskProgress={setShowTaskProgress}
-            followUpInput={followUpInput}
-            setFollowUpInput={setFollowUpInput}
-            followUpSubmitting={followUpSubmitting}
-            handleSendFollowUp={handleSendFollowUp}
-            handleResumeTask={handleResumeTask}
-            handleDismissTask={handleDismissTask}
-            handleMarkTaskFailed={handleMarkTaskFailed}
-            recoveryBusy={recoveryBusy}
             xPerm={xPerm}
             xReady={xReady}
             rotateXPerm={rotateXPerm}
@@ -1753,8 +1445,6 @@ export default function App() {
             activeXStatus={activeXStatus}
             liveXRuns={liveXRuns}
             recentXRuns={recentXRuns}
-            antigravityPerm={antigravityPerm}
-            rotateAntigravityPerm={rotateAntigravityPerm}
             bridgeState={bridgeState}
             bridgeBusy={bridgeBusy}
             toggleBridge={toggleBridge}
@@ -1860,9 +1550,6 @@ export default function App() {
             flash={flash}
             isGoalActive={isGoalActive}
             isTaskRunning={isTaskRunning}
-            executorStatus={executorStatus}
-            activeTaskId={activeTaskId}
-            taskData={taskData}
             logs={logs}
             setLogs={setLogs}
             approvalEvidence={approvalEvidence}
@@ -1959,7 +1646,6 @@ export default function App() {
                         setNewGoalSteps(next);
                       }}
                     >
-                      <option value="antigravity">Antigravity</option>
                       <option value="mcp">MCP Tool</option>
                       <option value="manual">Manual</option>
                     </select>
@@ -2000,7 +1686,7 @@ export default function App() {
                 type="button"
                 className="remote-action-btn review"
                 style={{ alignSelf: 'flex-start', marginTop: '4px' }}
-                onClick={() => setNewGoalSteps([...newGoalSteps, { title: '', description: '', route: 'antigravity', required: true }])}
+                onClick={() => setNewGoalSteps([...newGoalSteps, { title: '', description: '', route: 'manual', required: true }])}
               >
                 + Add Step
               </button>
@@ -2039,14 +1725,14 @@ export default function App() {
               >
                 Reject Task
               </button>
-              <button
+              {reviewTask.routedTo === 'x' && <button
                 className="allow-button"
                 autoFocus
-                disabled={reviewTask.routedTo === 'x' ? bridgeBusy : (bridgeBusy || isTaskRunning || !executorStatus?.available || antigravityPerm === 'Blocked')}
+                disabled={bridgeBusy}
                 onClick={() => handleApproveRemoteTask(reviewTask)}
               >
                 Approve & Run
-              </button>
+              </button>}
             </div>
           </section>
         </div>

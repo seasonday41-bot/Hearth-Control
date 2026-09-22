@@ -40,7 +40,6 @@ test('P8 HTTP transport round-trips generic submit/status through Electron paren
         Git: 'Allow',
         Terminal: 'Blocked',
         Browser: 'Blocked',
-        Antigravity: 'Ask',
         X: 'Ask',
       }),
       HEARTH_RUNTIME_DIR: root,

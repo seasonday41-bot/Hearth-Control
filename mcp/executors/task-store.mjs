@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
-import { redactSecrets } from './antigravity.mjs';
+import { redactSecrets } from '../security/redact-secrets.mjs';
 
 export const SCHEMA_VERSION = 1;
 
@@ -53,12 +53,12 @@ export const sanitizeTaskForPersistence = (raw) => {
   const remoteSyncPending = Boolean(raw.remoteSyncPending);
   const remoteSyncStatus = typeof raw.remoteSyncStatus === 'string' ? raw.remoteSyncStatus : (remoteSyncPending ? 'pending' : null);
   const remoteSyncError = raw.remoteSyncError ? redactSecrets(String(raw.remoteSyncError)) : null;
-  const requestedRoute = ['auto', 'mcp', 'antigravity', 'manual'].includes(raw.requestedRoute)
+  const requestedRoute = ['auto', 'mcp', 'manual', 'antigravity'].includes(raw.requestedRoute)
     ? raw.requestedRoute
     : 'auto';
-  const resolvedRoute = ['mcp', 'antigravity', 'manual'].includes(raw.resolvedRoute)
+  const resolvedRoute = ['mcp', 'manual', 'antigravity'].includes(raw.resolvedRoute)
     ? raw.resolvedRoute
-    : 'antigravity';
+    : 'manual';
   const routeReason = raw.routeReason ? redactSecrets(String(raw.routeReason)).slice(0, 300) : null;
   const routeTransitions = [];
   if (Array.isArray(raw.routeTransitions)) {

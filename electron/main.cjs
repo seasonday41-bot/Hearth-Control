@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, safeStorage, Notification, shell } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } = require('electron');
 const { Worker } = require('node:worker_threads');
 const { fork, spawn } = require('node:child_process');
 const http = require('node:http');
@@ -11,7 +11,6 @@ const remoteUpdater = require('./remote-updater.cjs');
 const remoteUpdateStager = require('./remote-update-stager.cjs');
 const remoteUpdateState = require('./remote-update-state.cjs');
 const updateTrust = require('./update-trust-config.cjs');
-const { createTaskNotifier } = require('./task-notifications.cjs');
 const { SecureCredentialStore } = require('./security/secure-credential-store.cjs');
 const { ConnectionService } = require('./connections/connection-service.cjs');
 const { GitHubClient } = require('./github/github-client.cjs');
@@ -39,7 +38,7 @@ const defaults = {
   // X's own publishable key (see publicTasksClientInstance below).
   publicTasksSupabaseUrl: 'https://pavrugcmxdgdxrjinzlm.supabase.co',
   publicTasksSupabaseAnonKey: '',
-  permissions: { X: 'Ask', Codex: 'Ask', Files: 'Allow', Git: 'Allow', Terminal: 'Ask', Browser: 'Blocked', MarketResearch: 'Ask', Antigravity: 'Ask', Vercel: 'Ask' },
+  permissions: { X: 'Ask', Codex: 'Ask', Files: 'Allow', Git: 'Allow', Terminal: 'Ask', Browser: 'Blocked', MarketResearch: 'Ask', Vercel: 'Ask' },
 };
 let mainWindow;
 let serverProcess;
@@ -60,7 +59,6 @@ let connectionService = null;
 let githubConnectionService = null;
 let supabaseProjectService = null;
 let vercelConnectionService = null;
-let jobManager = null;
 let xQueueCoordinator = null;
 let xQueueStore = null;
 let xQueueDispatchEnabled = false;
@@ -74,12 +72,10 @@ const xQueueInflight = new Map();
 const xQueueRequests = new Map();
 const pendingXApprovals = new Map();
 const hearthJobRequests = new Map();
-const hearthJobGeneralInflight = new Map();
 const hearthJobMarketInflight = new Map();
 let xWakeupTimer = null;
 let xGetNextWakeupDeadline = null;
 let xReconcileRuntimeNow = null;
-let continuationRecoveryTimer = null;
 let updaterInstallInProgress = false;
 let remoteUpdateSession = null;
 const localApprovals = new Map();
@@ -117,84 +113,11 @@ let bridgeState = {
   pendingGoalRequests: [],
   activeGoalRequestId: null,
 };
-const taskNotifier = createTaskNotifier({ Notification, app });
-const taskMonitors = new Map();
 const localChatStreams = new Map();
 const localChatTestApprovals = new Map();
 let localChatTestRunner = null;
-let isStartingTask = false;
 let storageAuditWorker = null;
 let storageAuditItems = new Map();
-const monitorTaskTransition = async (taskId) => {
-  if (!taskId || taskMonitors.has(taskId)) return;
-  let lastSyncedConversationId = null;
-  let lastSyncedStatus = null;
-
-  try {
-    const { getAntigravityTask, onTaskTransition } = await importFromHere('../mcp/executors/antigravity.mjs');
-    const { syncRemoteTaskState } = await importFromHere('../mcp/bridge/client.mjs');
-
-    const checkAndSync = async (currentTask) => {
-      const task = currentTask || getAntigravityTask(taskId) || (taskStore ? taskStore.getTask(taskId) : null);
-      if (!task) return;
-      taskNotifier.setDockBadge(task.status);
-
-      // Synchronize remote task state to Supabase
-      if (task.source === 'remote' && task.remoteTaskId) {
-        const needsSync =
-          task.remoteSyncPending ||
-          (task.conversationId && task.conversationId !== lastSyncedConversationId) ||
-          (task.status !== lastSyncedStatus) ||
-          ['waiting', 'done', 'error'].includes(task.status);
-
-        if (needsSync) {
-          lastSyncedConversationId = task.conversationId;
-          lastSyncedStatus = task.status;
-          await syncRemoteTaskState({ bridgeClient: bridgeClientInstance, taskStore, task });
-        }
-      }
-
-      // Release active remote lock on terminal states
-      if (['done', 'error'].includes(task.status)) {
-        if (bridgeState.activeRemoteTaskId === task.remoteTaskId || bridgeState.activeRemoteTaskId === task.taskId) {
-          bridgeState.activeRemoteTaskId = null;
-          sendEvent({ type: 'bridge:state', state: bridgeState });
-        }
-      }
-
-      // Terminal completion cleanup (done or error)
-      if (taskNotifier.notify(task) || ['done', 'error'].includes(task.status)) {
-        cleanup();
-      }
-    };
-
-    const unsubscribe = onTaskTransition((updatedTask) => {
-      if (updatedTask && (updatedTask.taskId === taskId || updatedTask.remoteTaskId === taskId)) {
-        void checkAndSync(updatedTask);
-      }
-    });
-
-    const cleanup = () => {
-      unsubscribe();
-      const timer = taskMonitors.get(taskId);
-      if (timer) {
-        clearInterval(timer);
-        taskMonitors.delete(taskId);
-      }
-    };
-
-    const timer = setInterval(() => void checkAndSync(), 2500);
-    taskMonitors.set(taskId, timer);
-    await checkAndSync();
-  } catch {
-    const timer = taskMonitors.get(taskId);
-    if (timer) {
-      clearInterval(timer);
-      taskMonitors.delete(taskId);
-    }
-  }
-};
-
 const settingsPath = () => path.join(app.getPath('userData'), 'settings.json');
 const defaultUpdateDirectory = () => path.join(app.getPath('userData'), 'updates');
 const readSettings = () => {
@@ -838,18 +761,6 @@ const resolveHearthJobWorkspace = async (reportedWorkspace, launchWorkspace) => 
   return settingsRoot;
 };
 
-const publicHearthAntigravityStatus = (task) => ({
-  task_id: task.taskId,
-  status: task.status,
-  title: task.title || null,
-  created_at: task.createdAt || null,
-  updated_at: task.updatedAt || null,
-  last_event: task.lastEvent || null,
-  completion: task.completion || null,
-  error: task.error || null,
-  route_reason: task.routeReason || null,
-});
-
 const hearthMarketKindFromTask = (task) => {
   const match = /^hearthmarket:(market_search|investment_analysis):/.exec(task?.requestId || '');
   return match?.[1] || null;
@@ -885,13 +796,6 @@ const cancelHearthJobRequest = (transportId) => {
     waiter.xInflight.waiters.delete(transportId);
     if (!waiter.xInflight.committed && waiter.xInflight.waiters.size === 0) {
       waiter.xInflight.abort.abort();
-    }
-  }
-
-  if (waiter.generalInflight) {
-    waiter.generalInflight.waiters.delete(transportId);
-    if (!waiter.generalInflight.committed && waiter.generalInflight.waiters.size === 0) {
-      waiter.generalInflight.abort.abort();
     }
   }
 
@@ -970,9 +874,9 @@ const handleHearthJobStatus = async (message, launchWorkspace) => {
     return {
       found: true,
       job_id: jobId,
-      route: marketKind ? 'market' : 'antigravity',
-      status: storedTask.status,
-      detail: marketKind ? publicHearthMarketStatus(storedTask) : publicHearthAntigravityStatus(storedTask),
+      route: marketKind ? 'market' : 'unsupported',
+      status: marketKind ? storedTask.status : 'unavailable',
+      detail: marketKind ? publicHearthMarketStatus(storedTask) : { reason: 'route_retired' },
     };
   }
   return { found: false, job_id: jobId, reason: 'not_found' };
@@ -985,8 +889,6 @@ const handleHearthJobSubmit = async (message, child, launchWorkspace, waiter) =>
   const {
     routeHearthJob,
     adaptHearthJobToXTask,
-    buildAntigravityPrompt,
-    buildAntigravityRequestId,
     computeHearthJobFingerprint,
     hearthJobTaskId,
     hearthJobXRequestId,
@@ -1009,7 +911,6 @@ const handleHearthJobSubmit = async (message, child, launchWorkspace, waiter) =>
 
   if (xReceipt && storedTask) throw hearthJobError('ambiguous_job_state');
   if (route === 'x' && storedTask) throw hearthJobError('job_route_conflict');
-  if (route === 'antigravity' && (xReceipt || storedMarketKind)) throw hearthJobError('job_route_conflict');
   if (route === 'market' && (xReceipt || (storedTask && !storedMarketKind))) throw hearthJobError('job_route_conflict');
 
   if (route === 'x') {
@@ -1220,114 +1121,6 @@ const handleHearthJobSubmit = async (message, child, launchWorkspace, waiter) =>
     }
   }
 
-  const fingerprint = computeHearthJobFingerprint(job);
-  const requestId = buildAntigravityRequestId(job);
-  const current = taskStore.getTask(taskId);
-  if (current) {
-    if (current.requestId !== requestId) throw hearthJobError('job_id_conflict');
-    return {
-      accepted: true,
-      job_id: job.job_id,
-      route: 'antigravity',
-      status: current.status,
-      detail: publicHearthAntigravityStatus(current),
-    };
-  }
-
-  const existingInflight = hearthJobGeneralInflight.get(taskId);
-  if (existingInflight) {
-    if (existingInflight.fingerprint !== fingerprint) throw hearthJobError('job_id_conflict');
-    existingInflight.waiters.add(waiter.transportId);
-    waiter.generalInflight = existingInflight;
-    return existingInflight.promise;
-  }
-
-  const shared = {
-    fingerprint,
-    waiters: new Set([waiter.transportId]),
-    abort: new AbortController(),
-    committed: false,
-    promise: null,
-  };
-  waiter.generalInflight = shared;
-  hearthJobGeneralInflight.set(taskId, shared);
-
-  shared.promise = (async () => {
-    const permission = readSettings().permissions?.Antigravity ?? 'Ask';
-    if (permission === 'Blocked') throw hearthJobError('permission_blocked');
-    if (permission !== 'Allow' && permission !== 'Ask') throw hearthJobError('permission_blocked');
-
-    if (permission === 'Ask') {
-      const allowed = await requestHearthJobPermissionApproval(
-        shared,
-        child,
-        'Antigravity',
-        `Submit Hearth general job: ${job.title || job.objective.slice(0, 80)}`,
-      );
-      if (!allowed) throw hearthJobError('permission_denied');
-    }
-
-    if (shared.abort.signal.aborted || xShuttingDown || shared.waiters.size === 0 || serverProcess !== child) {
-      throw hearthJobError('transport_unavailable');
-    }
-
-    let currentRoot;
-    try {
-      currentRoot = await fs.promises.realpath(readSettings().workspace);
-    } catch {
-      throw hearthJobError('workspace_mismatch');
-    }
-    if (currentRoot !== settingsRoot) throw hearthJobError('workspace_mismatch');
-
-    const afterApproval = taskStore.getTask(taskId);
-    if (afterApproval) {
-      if (afterApproval.requestId !== requestId) throw hearthJobError('job_id_conflict');
-      return {
-        accepted: true,
-        job_id: job.job_id,
-        route: 'antigravity',
-        status: afterApproval.status,
-        detail: publicHearthAntigravityStatus(afterApproval),
-      };
-    }
-
-    // This is the P8 general-route commit boundary. Every permission and
-    // transport/workspace liveness check has passed. From this point onward
-    // the existing Antigravity start transaction owns launch/recovery truth;
-    // a caller disconnect must not retroactively tear down admitted work.
-    shared.committed = true;
-    const { startAntigravityTask, getAntigravityTask } = await importFromHere('../mcp/executors/antigravity.mjs');
-    const { getProductionAntigravityClaimStore } = await importFromHere('../mcp/executors/antigravity-admission.mjs');
-    const result = await startAntigravityTask({
-      workspace: settingsRoot,
-      prompt: buildAntigravityPrompt(job),
-      title: job.title || job.objective.slice(0, 120),
-      userApproved: true,
-      awaitCompletion: false,
-      source: 'local',
-      requestId,
-      requestedRoute: 'auto',
-      resolvedRoute: 'antigravity',
-      routeReason: reason,
-      existingTaskId: taskId,
-      claimStore: getProductionAntigravityClaimStore(),
-    });
-    void monitorTaskTransition(result.taskId);
-    const started = getAntigravityTask(result.taskId);
-    return {
-      accepted: true,
-      job_id: job.job_id,
-      route: 'antigravity',
-      status: started.status,
-      detail: publicHearthAntigravityStatus(started),
-    };
-  })();
-
-  try {
-    return await shared.promise;
-  } finally {
-    if (hearthJobGeneralInflight.get(taskId) === shared) hearthJobGeneralInflight.delete(taskId);
-  }
 };
 
 // Fast-restart X liveness: a single one-shot wakeup, never polling/setInterval.
@@ -1452,7 +1245,7 @@ const getInstallUpdateDirectory = () => (
 );
 
 const getUpdaterRuntimeBlocker = ({ ignoreUpdaterBusy = false } = {}) => {
-  if (typeof xGetNextWakeupDeadline !== 'function' || !goalRunner || !jobManager) {
+  if (typeof xGetNextWakeupDeadline !== 'function' || !goalRunner) {
     return localUpdater.evaluateUpdaterRuntimePreflight({ runtimeAvailable: false });
   }
 
@@ -1460,8 +1253,8 @@ const getUpdaterRuntimeBlocker = ({ ignoreUpdaterBusy = false } = {}) => {
     return localUpdater.evaluateUpdaterRuntimePreflight({
       xActive: xGetNextWakeupDeadline() != null,
       goalActive: goalRunner.is_goal_active(),
-      queuedJobCount: jobManager.listJobs({ status: 'queued' }).length,
-      runningJobCount: jobManager.listJobs({ status: 'running' }).length,
+      queuedJobCount: 0,
+      runningJobCount: 0,
       updaterBusy: !ignoreUpdaterBusy && updaterInstallInProgress,
     });
   } catch {
@@ -1692,7 +1485,7 @@ const startServer = async ({ workspace, port }) => {
         finishResolve(serverState);
       }
     if (message?.type === 'approval') sendEvent(message);
-    // Child-owned (Antigravity/Files/Terminal/Browser) approval lifecycle
+    // Child-owned (Files/Terminal/Browser) approval lifecycle
     // notification -- a plain relay, exactly like 'approval' above. Main
     // never reinterprets it; it only forwards the child's own resolution.
     if (message?.type === 'approval:resolved') sendEvent(message);
@@ -1709,10 +1502,6 @@ const startServer = async ({ workspace, port }) => {
       }
     }
     if (message?.type === 'x_admission_hint') armXWakeup();
-    if (message?.type === 'x_capacity_released_hint' && xQueueDispatchEnabled) {
-      xQueueCoordinator?.kick();
-      armXQueueCapacityWakeup();
-    }
     if (message?.type === 'x_queue_request_cancel') cancelXQueueRequest(message.transportId);
     if (message?.type === 'x_queue_enqueue_request' || message?.type === 'x_queue_status_request') {
       if (typeof message.transportId !== 'string' || !/^[0-9a-f-]{36}$/i.test(message.transportId) || xQueueRequests.has(message.transportId)) return;
@@ -1739,7 +1528,7 @@ const startServer = async ({ workspace, port }) => {
       if (message.type === 'hearth_job_submit_request' && hearthJobRequests.has(message.transportId)) return;
 
       const waiter = message.type === 'hearth_job_submit_request'
-        ? { transportId: message.transportId, child, active: true, xInflight: null, generalInflight: null, marketInflight: null }
+        ? { transportId: message.transportId, child, active: true, xInflight: null, marketInflight: null }
         : null;
       if (waiter) hearthJobRequests.set(message.transportId, waiter);
 
@@ -2344,7 +2133,6 @@ app.whenReady().then(async () => {
 
   try {
     const { TaskStore } = await importFromHere('../mcp/executors/task-store.mjs');
-    const { setTaskStore } = await importFromHere('../mcp/executors/antigravity.mjs');
     const tasksPath = path.join(app.getPath('userData'), 'tasks.json');
     taskStore = new TaskStore({ storagePath: tasksPath });
     taskStore.load();
@@ -2352,7 +2140,6 @@ app.whenReady().then(async () => {
     if (reconciledCount > 0) {
       console.info(`[TaskStore] Reconciled ${reconciledCount} interrupted task(s) to recovery_required.`);
     }
-    setTaskStore(taskStore);
   } catch (err) {
     console.error('Failed to initialize TaskStore:', err);
   }
@@ -2482,72 +2269,11 @@ app.whenReady().then(async () => {
   }
 
   try {
-    const { JobManager, setJobManager } = await importFromHere('../mcp/runtime/job-manager.mjs');
-    const {
-      getAntigravityTask,
-      getAuthoritativeAntigravityTask,
-      resumeAntigravityTask,
-      emitTaskTransition,
-      createTaskContinuationRunner,
-      reconcileDurableContinuations,
-    } = await importFromHere('../mcp/executors/antigravity.mjs');
-    const { getProductionAntigravityClaimStore } = await importFromHere('../mcp/executors/antigravity-admission.mjs');
-    const jobsPath = path.join(app.getPath('userData'), 'jobs.json');
-    jobManager = new JobManager({ storagePath: jobsPath });
-    jobManager.load();
-    const { reconciledCount } = jobManager.reconcileStartupState();
-    if (reconciledCount > 0) {
-      console.info(`[JobManager] Reconciled ${reconciledCount} interrupted job(s) to recovery_required.`);
-    }
-    setJobManager(jobManager);
-
-    jobManager.setTaskResolver((taskId) => {
-      return getAuthoritativeAntigravityTask(taskId);
-    });
-
-    jobManager.setTaskStoreSaver((task) => {
-      if (taskStore) {
-        try { taskStore.saveTask(task); } catch (err) { console.error('[TaskStore] Failed to save job evidence:', err); }
-      }
-      try { emitTaskTransition(task); } catch {}
-    });
-
-    const continuationRunner = createTaskContinuationRunner({
-      jobManager,
-      taskStore,
-      getAntigravityTask,
-      resumeAntigravityTask,
-      emitTaskTransition,
-      syncRemoteTaskState: async (opts) => {
-        const { syncRemoteTaskState } = await importFromHere('../mcp/bridge/client.mjs');
-        return syncRemoteTaskState(opts);
-      },
-      getBridgeClient: () => bridgeClientInstance,
-      getBridgeState: () => bridgeState,
-      sendEvent,
-      monitorTaskTransition,
-      claimStore: getProductionAntigravityClaimStore(),
-    });
-    jobManager.setContinuationRunner(continuationRunner);
-    const reconcileContinuations = () => {
-      void reconcileDurableContinuations({ taskStore, jobManager, continuationRunner })
-        .catch((err) => console.error('[Continuation] Reconciliation failed:', err));
-      void resyncGoalRequestStates();
-    };
-    reconcileContinuations();
-    continuationRecoveryTimer = setInterval(reconcileContinuations, 30000);
-  } catch (err) {
-    console.error('Failed to initialize JobManager:', err);
-  }
-
-  try {
     const { GoalStorage } = await importFromHere('../mcp/goals/storage.mjs');
     const { GoalRunner } = await importFromHere('../mcp/goals/runner.mjs');
-    const antigravityExecutor = await importFromHere('../mcp/executors/antigravity.mjs');
-    const { getProductionAntigravityClaimStore } = await importFromHere('../mcp/executors/antigravity-admission.mjs');
     const goalsPath = path.join(app.getPath('userData'), 'goals.json');
     const goalStorage = new GoalStorage({ storagePath: goalsPath });
-    goalRunner = new GoalRunner({ storage: goalStorage, antigravityExecutor, claimStore: getProductionAntigravityClaimStore() });
+    goalRunner = new GoalRunner({ storage: goalStorage });
   } catch (err) {
     console.error('Failed to initialize GoalRunner:', err);
   }
@@ -2561,7 +2287,6 @@ app.whenReady().then(async () => {
     xGetQueueCapacityDeadline = getNextXQueueCapacityDeadline;
     xReconcileRuntimeNow = reconcileXRuntimeNow;
     xParseTask = parseXTask;
-    const { onAntigravityAdmissionReleased } = await importFromHere('../mcp/executors/antigravity-admission.mjs');
     const queueStorePath = path.join(app.getPath('userData'), 'x-queue.json');
     xQueueStore = new XQueueStore({ storagePath: queueStorePath });
     xQueueStore.load();
@@ -2595,9 +2320,6 @@ app.whenReady().then(async () => {
         return handled;
       };
     }
-    onAntigravityAdmissionReleased(() => {
-      if (xQueueDispatchEnabled) xQueueCoordinator?.kick();
-    });
     xQueueDispatchEnabled = !xQueueStore.recoveryRequired && xQueueWorkspaceMatches(readSettings().workspace);
     if (!xQueueDispatchEnabled) {
       console.error(`[Electron] X queue ${xQueueStore.recoveryRequired ? 'recovery required' : 'workspace mismatch'}; preserving entries without dispatch.`);
@@ -2789,8 +2511,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('settings:save', async (_event, settings) => {
     settings = sanitizeRendererSettingsInput(settings);
     if (settings.workspace && settings.workspace !== readSettings().workspace && hasLiveXQueueEntries()) throw xQueueError('workspace_locked_by_x_queue');
-    const { hasRunningTask } = await importFromHere('../mcp/executors/antigravity.mjs');
-    if (settings.workspace && (goalRunner?.is_goal_active() || (hasRunningTask && hasRunningTask()))) {
+    if (settings.workspace && goalRunner?.is_goal_active()) {
       const current = readSettings();
       if (settings.workspace !== current.workspace) {
         throw new Error('Cannot change workspace while a goal or task is active or requires recovery');
@@ -2865,52 +2586,14 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle('local-chat:send', async (_event, request = {}) => {
     const settings = readSettings();
-    const provider = request.provider === 'external' ? 'external' : request.provider === 'local' ? 'local' : request.provider;
+    const provider = request.provider === 'local' ? 'local' : null;
     const messages = Array.isArray(request.messages) ? request.messages : [];
     if (!provider || messages.length === 0) {
       return { ok: false, provider: provider || null, error: { code: 'CONFIGURATION_ERROR', message: 'A provider and at least one message are required', status: null, retryable: false } };
     }
 
     const { createProviderSelection } = await importFromHere('../mcp/providers/selection.mjs');
-    let externalProvider = null;
-    if (provider === 'external') {
-      externalProvider = {
-        chat: async ({ messages: externalMessages }) => {
-          const settings = readSettings();
-          const permission = settings.permissions?.Antigravity ?? 'Ask';
-          if (permission === 'Blocked') {
-            return { ok: false, provider: 'external', error: { code: 'PERMISSION_BLOCKED', message: 'Antigravity permission is Blocked', status: null, retryable: false } };
-          }
-          if (permission !== 'Allow') {
-            return { ok: false, provider: 'external', error: { code: 'PERMISSION_REQUIRED', message: 'Set Antigravity permission to Allow before using External Chat', status: null, retryable: false } };
-          }
-          if (!settings.workspace) {
-            return { ok: false, provider: 'external', error: { code: 'CONFIGURATION_ERROR', message: 'No workspace configured for the external provider', status: null, retryable: false } };
-          }
-          const { startAntigravityTask } = await importFromHere('../mcp/executors/antigravity.mjs');
-          const { getProductionAntigravityClaimStore } = await importFromHere('../mcp/executors/antigravity-admission.mjs');
-          const prompt = externalMessages.map((message) => `${message.role || 'user'}: ${message.content || ''}`).join('\n');
-          const result = await startAntigravityTask({
-            workspace: settings.workspace,
-            prompt,
-            title: 'Local Chat · External Provider',
-            userApproved: true,
-            awaitCompletion: true,
-            source: 'local',
-            metadata: { experimentalLocalChat: true },
-            claimStore: getProductionAntigravityClaimStore(),
-          });
-          const completion = result.completion;
-          if (!completion || completion.status !== 'completed') {
-            return { ok: false, provider: 'external', error: { code: completion?.status === 'waiting' ? 'WAITING' : 'PROVIDER_ERROR', message: completion?.summary || 'External provider did not complete', status: null, retryable: completion?.status === 'waiting' } };
-          }
-          return { ok: true, provider: 'external', response: completion.summary || '', done: true };
-        },
-      };
-    }
-
     const selection = createProviderSelection({
-      externalProvider,
       localProviderOptions: provider === 'local' ? { model: request.model, profile: request.profile } : undefined,
     });
     const { createLocalChatCaller } = await importFromHere('../mcp/providers/local-chat.mjs');
@@ -3034,8 +2717,7 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle('workspace:choose', async () => {
     if (hasLiveXQueueEntries()) throw xQueueError('workspace_locked_by_x_queue');
-    const { hasRunningTask } = await importFromHere('../mcp/executors/antigravity.mjs');
-    if (goalRunner?.is_goal_active() || (hasRunningTask && hasRunningTask())) {
+    if (goalRunner?.is_goal_active()) {
       throw new Error('Cannot change workspace while a goal or task is active or requires recovery');
     }
     const result = await dialog.showOpenDialog(mainWindow, { title: 'Choose a workspace', properties: ['openDirectory', 'createDirectory'] });
@@ -3352,163 +3034,6 @@ app.whenReady().then(async () => {
       if (!installCommitted) updaterInstallInProgress = false;
     }
   });
-  ipcMain.handle('antigravity:status', async () => {
-    const { detectAntigravity } = await importFromHere('../mcp/executors/antigravity.mjs');
-    return detectAntigravity();
-  });
-  ipcMain.handle('antigravity:start', async (_event, { prompt, title }) => {
-    if (isStartingTask) {
-      throw new Error('Another task is already starting. Please wait.');
-    }
-    const { startAntigravityTask, hasRunningTask } = await importFromHere('../mcp/executors/antigravity.mjs');
-    const { getProductionAntigravityClaimStore } = await importFromHere('../mcp/executors/antigravity-admission.mjs');
-    if (hasRunningTask && hasRunningTask()) {
-      throw new Error('A task is already running. Please wait for it to complete or pause.');
-    }
-
-    isStartingTask = true;
-    try {
-      const settings = readSettings();
-      const currentWorkspace = settings.workspace;
-      if (!currentWorkspace) {
-        throw new Error('No workspace configured. Please select a workspace first.');
-      }
-
-      const permission = settings.permissions?.Antigravity ?? 'Ask';
-      if (permission === 'Blocked') {
-        throw new Error('Antigravity permission is Blocked. Change it to Allow or Ask in Permissions settings.');
-      }
-      if (permission === 'Ask') {
-        const approvalResult = await new Promise((resolve) => {
-          const requestId = crypto.randomUUID();
-          const timer = setTimeout(() => {
-            localApprovals.delete(requestId);
-            resolve({ allowed: false, reason: 'Approval request timed out.' });
-          }, 60000);
-          localApprovals.set(requestId, (ans) => {
-            clearTimeout(timer);
-            localApprovals.delete(requestId);
-            resolve({
-              allowed: ans === true,
-              reason: ans === true ? null : 'User denied Antigravity access for this request.',
-            });
-          });
-          sendEvent({
-            type: 'approval',
-            requestId,
-            permission: 'Antigravity',
-            action: `Start Antigravity task: ${title || (prompt || '').slice(0, 60)}`,
-          });
-        });
-        if (!approvalResult.allowed) {
-          throw new Error(approvalResult.reason || 'User denied Antigravity access for this request.');
-        }
-      }
-
-      const result = await startAntigravityTask({
-        workspace: currentWorkspace,
-        prompt,
-        title,
-        userApproved: true,
-        awaitCompletion: false,
-        claimStore: getProductionAntigravityClaimStore(),
-      });
-      void monitorTaskTransition(result.taskId);
-      return result;
-    } finally {
-      isStartingTask = false;
-    }
-  });
-  ipcMain.handle('antigravity:task', async (_event, taskId) => {
-    const { getAntigravityTask } = await importFromHere('../mcp/executors/antigravity.mjs');
-    return getAntigravityTask(taskId);
-  });
-  ipcMain.handle('antigravity:send', async (_event, { taskId, message }) => {
-    const settings = readSettings();
-    const permission = settings.permissions?.Antigravity ?? 'Ask';
-    if (permission === 'Blocked') {
-      throw new Error('Antigravity permission is Blocked. Change it to Allow or Ask in Permissions settings.');
-    }
-    if (permission === 'Ask') {
-      const allowed = await new Promise((resolve) => {
-        const requestId = crypto.randomUUID();
-        const timer = setTimeout(() => { localApprovals.delete(requestId); resolve(false); }, 60000);
-        localApprovals.set(requestId, (ans) => { clearTimeout(timer); localApprovals.delete(requestId); resolve(ans); });
-        sendEvent({ type: 'approval', requestId, permission: 'Antigravity', action: `Send follow-up message to task ${taskId}` });
-      });
-      if (!allowed) {
-        throw new Error('User denied Antigravity access for this request.');
-      }
-    }
-
-    const { sendAntigravityMessage, getAntigravityTask } = await importFromHere('../mcp/executors/antigravity.mjs');
-    const res = await sendAntigravityMessage({ taskId, message });
-    const taskObj = getAntigravityTask(taskId) || res;
-    if (taskObj.source === 'remote' && taskObj.remoteTaskId) {
-      bridgeState.activeRemoteTaskId = taskObj.remoteTaskId;
-      sendEvent({ type: 'bridge:state', state: bridgeState });
-      const { syncRemoteTaskState } = await importFromHere('../mcp/bridge/client.mjs');
-      await syncRemoteTaskState({
-        bridgeClient: bridgeClientInstance,
-        taskStore,
-        task: taskObj,
-        overrides: { status: 'running' },
-      });
-    }
-    void monitorTaskTransition(taskId);
-    return res;
-  });
-  ipcMain.handle('antigravity:resume', async (_event, taskId) => {
-    const { resumeAntigravityTask, getAntigravityTask } = await importFromHere('../mcp/executors/antigravity.mjs');
-    const { getProductionAntigravityClaimStore } = await importFromHere('../mcp/executors/antigravity-admission.mjs');
-    const res = await resumeAntigravityTask({ taskId, claimStore: getProductionAntigravityClaimStore() });
-    const taskObj = getAntigravityTask(res.taskId) || res;
-    if (taskObj.source === 'remote' && taskObj.remoteTaskId) {
-      bridgeState.activeRemoteTaskId = taskObj.remoteTaskId;
-      sendEvent({ type: 'bridge:state', state: bridgeState });
-      const { syncRemoteTaskState } = await importFromHere('../mcp/bridge/client.mjs');
-      await syncRemoteTaskState({
-        bridgeClient: bridgeClientInstance,
-        taskStore,
-        task: taskObj,
-        overrides: { status: 'running' },
-      });
-    }
-    void monitorTaskTransition(res.taskId);
-    return res;
-  });
-  ipcMain.handle('antigravity:mark-failed', async (_event, { taskId, reason }) => {
-    const { markTaskFailed } = await importFromHere('../mcp/executors/antigravity.mjs');
-    const task = markTaskFailed({ taskId, reason });
-    if (bridgeState.activeRemoteTaskId === taskId || (task && task.remoteTaskId && bridgeState.activeRemoteTaskId === task.remoteTaskId)) {
-      bridgeState.activeRemoteTaskId = null;
-      sendEvent({ type: 'bridge:state', state: bridgeState });
-    }
-    if (task.source === 'remote' && task.remoteTaskId) {
-      const { syncRemoteTaskState } = await importFromHere('../mcp/bridge/client.mjs');
-      await syncRemoteTaskState({
-        bridgeClient: bridgeClientInstance,
-        taskStore,
-        task,
-        overrides: { status: 'error', error: task.error },
-      });
-    }
-    return task;
-  });
-  ipcMain.handle('antigravity:dismiss', async (_event, taskId) => {
-    const { dismissRecoveryTask } = await importFromHere('../mcp/executors/antigravity.mjs');
-    const task = dismissRecoveryTask({ taskId });
-    if (bridgeState.activeRemoteTaskId === taskId || (task && task.remoteTaskId && bridgeState.activeRemoteTaskId === task.remoteTaskId)) {
-      bridgeState.activeRemoteTaskId = null;
-      sendEvent({ type: 'bridge:state', state: bridgeState });
-    }
-    return task;
-  });
-  ipcMain.handle('antigravity:list-tasks', async () => {
-    if (!taskStore) return [];
-    return taskStore.listTasks();
-  });
-
   // Bridge Initialization & Handlers
   try {
     const { getOrCreateDeviceId, generatePairingSecret } = await importFromHere('../mcp/bridge/identity.mjs');
@@ -3943,7 +3468,7 @@ app.whenReady().then(async () => {
      * x_enqueue transport uses -- same parseXTask, same task-workspace-
      * vs-CURRENT-settings-workspace check, same fingerprint, same
      * requestId idempotency, same permission/admission, same durable X
-     * queue receipt. taskStore/monitorTaskTransition/JobManager are never
+     * queue receipt. taskStore and legacy task monitors are never
      * touched here -- the X queue receipt + XRunStore + Result Gate are
      * this path's own durable local truth (see syncTerminalReceiptToPublicTasks
      * for how a terminal run is later synced back to this SAME row).
@@ -3991,196 +3516,7 @@ app.whenReady().then(async () => {
 
     ipcMain.handle('bridge:approve-task', async (_event, taskId) => {
       if (publicXTaskRowsById.has(taskId)) return approveRemotePublicXTask(taskId);
-      const {
-        hasRunningTask,
-        isTaskActivelyRunning,
-        startAntigravityTask,
-        getAntigravityTask,
-      } = await importFromHere('../mcp/executors/antigravity.mjs');
-      if (bridgeState.activeRemoteTaskId) {
-        if (!isTaskActivelyRunning(bridgeState.activeRemoteTaskId)) {
-          // Stale, dormant waiting, or terminal lock: clear it
-          bridgeState.activeRemoteTaskId = null;
-          sendEvent({ type: 'bridge:state', state: bridgeState });
-        } else {
-          throw new Error('Another task is currently running.');
-        }
-      }
-      if (hasRunningTask && hasRunningTask()) {
-        throw new Error('Another task is currently running.');
-      }
-      const task = bridgeState.pendingTasks.find(t => t.id === taskId);
-      if (!task) throw new Error('Task not found in pending inbox.');
-
-      // Atomic claim from database
-      if (bridgeClientInstance?.supabaseUrl) {
-        const claimResult = await bridgeClientInstance.claimTask({ taskId });
-        if (!claimResult.claimed) {
-          bridgeState.pendingTasks = bridgeState.pendingTasks.filter(t => t.id !== taskId);
-          sendEvent({ type: 'bridge:state', state: bridgeState });
-          throw new Error('Task was already claimed or cancelled.');
-        }
-      }
-
-      bridgeState.activeRemoteTaskId = taskId;
-      sendEvent({ type: 'bridge:state', state: bridgeState });
-
-      // Execute via existing Antigravity integration
-      const currentSettings = readSettings();
-      const currentWorkspace = currentSettings.workspace;
-      if (!currentWorkspace) {
-        bridgeState.activeRemoteTaskId = null;
-        sendEvent({ type: 'bridge:state', state: bridgeState });
-        throw new Error('No workspace configured. Please select a workspace first.');
-      }
-
-      const permission = currentSettings.permissions?.Antigravity ?? 'Ask';
-      if (permission === 'Blocked') {
-        bridgeState.activeRemoteTaskId = null;
-        sendEvent({ type: 'bridge:state', state: bridgeState });
-        throw new Error('Antigravity permission is Blocked. Change it to Allow or Ask in Permissions settings.');
-      }
-      if (permission === 'Ask') {
-        const allowed = await new Promise((resolve) => {
-          const requestId = crypto.randomUUID();
-          const timer = setTimeout(() => { localApprovals.delete(requestId); resolve(false); }, 60000);
-          localApprovals.set(requestId, (ans) => { clearTimeout(timer); localApprovals.delete(requestId); resolve(ans); });
-          sendEvent({ type: 'approval', requestId, permission: 'Antigravity', action: `Execute remote task: ${task.title || task.prompt.slice(0, 60)}` });
-        });
-        if (!allowed) {
-          bridgeState.activeRemoteTaskId = null;
-          sendEvent({ type: 'bridge:state', state: bridgeState });
-          throw new Error('User denied permission for this remote task.');
-        }
-      }
-
-      let hearthTaskId = null;
-      try {
-        if (taskStore) {
-          const existing = taskStore.findTaskByRemoteLink({ remoteTaskId: taskId, requestId: task.requestId });
-          if (existing && existing.status !== 'error') {
-            throw new Error(`Remote task '${taskId}' has already been processed or is active.`);
-          }
-        }
-
-        // Rule 4: Durable Remote Linkage Ordering
-        // 1. Pre-allocate local Hearth taskId and persist task record with remoteTaskId/requestId
-        hearthTaskId = crypto.randomUUID();
-        const now = new Date().toISOString();
-        const requiresDurableJob = Boolean(
-          task.metadata?.requires_hearth_owned_job === true ||
-          task.metadata?.requires_hearth_owned_job === 'true' ||
-          task.metadata?.durable_route === true
-        );
-
-        const initialTask = {
-          taskId: hearthTaskId,
-          conversationId: null,
-          workspace: currentWorkspace,
-          title: task.title || task.prompt.slice(0, 60),
-          source: 'remote',
-          remoteTaskId: taskId,
-          requestId: task.requestId || null,
-          dismissed: false,
-          status: 'starting',
-          durableRoute: requiresDurableJob,
-          metadata: task.metadata || {},
-          createdAt: now,
-          updatedAt: now,
-          lastEvent: null,
-          recentEvents: [],
-          error: null,
-          remoteSyncPending: false,
-          remoteSyncStatus: 'pending',
-        };
-        if (taskStore) {
-          taskStore.saveTask(initialTask);
-        }
-
-        // 2. Sync hearth_task_id immediately to the same Supabase row
-        const { syncRemoteTaskState } = await importFromHere('../mcp/bridge/client.mjs');
-        await syncRemoteTaskState({
-          bridgeClient: bridgeClientInstance,
-          taskStore,
-          task: initialTask,
-          overrides: { status: 'running' },
-        });
-
-        // 3. Start monitorTaskTransition immediately so early conversationId extractions are caught
-        void monitorTaskTransition(hearthTaskId);
-
-        // 4. If task requires a Hearth-owned durable job, launch it deterministically!
-        let durableJob = null;
-        if (requiresDurableJob) {
-          const { startDurableJob, createControlledWorkerSpec } = await importFromHere('../mcp/executors/antigravity.mjs');
-          const workerSpec = createControlledWorkerSpec(task.metadata, currentWorkspace);
-          durableJob = startDurableJob({
-            taskId: hearthTaskId,
-            command: workerSpec.command,
-            args: workerSpec.args,
-            cwd: workerSpec.cwd,
-            env: workerSpec.env || {},
-            metadata: task.metadata,
-          });
-          initialTask.jobId = durableJob.id;
-          initialTask.jobIds = [durableJob.id];
-          initialTask.status = 'running';
-          if (taskStore) {
-            taskStore.saveTask(initialTask);
-          }
-        }
-
-        // 5. Spawn executor using existingTaskId
-        const { startAntigravityTask } = await importFromHere('../mcp/executors/antigravity.mjs');
-        const { getProductionAntigravityClaimStore } = await importFromHere('../mcp/executors/antigravity-admission.mjs');
-        const delegatedPrompt = requiresDurableJob && durableJob
-          ? `[Hearth Durable Job Active]\nHearth has launched the authoritative background job (ID: ${durableJob.id}, PID: ${durableJob.pid}). Do NOT launch background processes or unmanaged shells via run_command. The durable job runs under Hearth ownership. Await completion or plan verification.\n\nTask Prompt:\n${task.prompt}`
-          : task.prompt;
-
-        const startRes = await startAntigravityTask({
-          existingTaskId: hearthTaskId,
-          workspace: currentWorkspace,
-          prompt: delegatedPrompt,
-          title: task.title,
-          source: 'remote',
-          remoteTaskId: taskId,
-          requestId: task.requestId || null,
-          userApproved: true,
-          durableRoute: requiresDurableJob,
-          jobId: durableJob?.id || null,
-          jobIds: durableJob ? [durableJob.id] : [],
-          metadata: task.metadata || {},
-          verificationRequirements: task.verificationRequirements || (task.artifacts ? { requiredArtifacts: task.artifacts } : null),
-          claimStore: getProductionAntigravityClaimStore(),
-        });
-
-        const taskObj = getAntigravityTask(hearthTaskId) || startRes;
-        if (taskObj && taskObj.conversationId) {
-          await syncRemoteTaskState({
-            bridgeClient: bridgeClientInstance,
-            taskStore,
-            task: taskObj,
-          });
-        }
-
-        // Remove from pending list
-        bridgeState.pendingTasks = bridgeState.pendingTasks.filter(t => t.id !== taskId);
-        sendEvent({ type: 'bridge:state', state: bridgeState });
-
-        return { success: true, taskId: hearthTaskId, conversationId: startRes.conversationId };
-      } catch (err) {
-        bridgeState.activeRemoteTaskId = null;
-        if (bridgeClientInstance?.supabaseUrl) {
-          await bridgeClientInstance.updateTaskResult({
-            taskId,
-            hearthTaskId: hearthTaskId || null,
-            status: 'error',
-            error: err.message,
-          });
-        }
-        sendEvent({ type: 'bridge:state', state: bridgeState });
-        throw err;
-      }
+      throw new Error('remote_task_route_retired');
     });
 
     ipcMain.handle('bridge:reject-task', async (_event, taskId) => {
@@ -4350,7 +3686,6 @@ app.on('before-quit', () => {
   for (const pending of pendingXApprovals.values()) pending.cancel();
   clearXQueueCapacityWakeup();
   for (const controller of localChatStreams.values()) controller.abort();
-  if (continuationRecoveryTimer) clearInterval(continuationRecoveryTimer);
   if (serverProcess) serverProcess.kill('SIGTERM');
   else if (serverState.pid) { try { process.kill(serverState.pid, 'SIGTERM'); } catch {} }
   if (bridgeClientInstance) bridgeClientInstance.stopPolling();
@@ -4370,8 +3705,5 @@ app.on('before-quit', () => {
     investMonitor.stop();
     investMonitor = null;
   }
-  for (const timer of taskMonitors.values()) clearInterval(timer);
-  taskMonitors.clear();
-  taskNotifier.setDockBadge('idle');
 });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });

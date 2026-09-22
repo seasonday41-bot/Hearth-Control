@@ -1,4 +1,4 @@
-import { redactSecrets } from '../executors/antigravity.mjs';
+import { redactSecrets } from '../security/redact-secrets.mjs';
 
 /**
  * Remote projection sync for Hearth's local Review Queue (Phase: visibility
@@ -151,7 +151,7 @@ export class ReviewItemsClient {
  * Best-effort sync of ONE local Review Queue item to its remote row.
  * NEVER throws (a caller wired as a fire-and-forget hook must never see an
  * exception), NEVER mutates the local item it was given, and never
- * touches Goal/X/Anti state -- a failure is only ever logged, to be
+ * touches Goal/X state -- a failure is only ever logged, to be
  * retried later by resyncPendingReviewItems. Returns true/false for
  * observability only; callers must not branch Goal behavior on it.
  * @param {{ client: ReviewItemsClient | null, item: object, goalId?: string, goalTitle?: string }} params

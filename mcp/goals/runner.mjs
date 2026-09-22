@@ -3,7 +3,7 @@ import fsSync from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { redactSecrets } from '../executors/antigravity.mjs';
+import { redactSecrets } from '../security/redact-secrets.mjs';
 import { getJobManager } from '../runtime/job-manager.mjs';
 import { parseXTask } from '../x/task-contract.mjs';
 import {
@@ -93,10 +93,6 @@ export class GoalRunner {
   /**
    * @param {{
    *   storage: import('./storage.mjs').GoalStorage,
-   *   antigravityExecutor?: {
-   *     startAntigravityTask: Function,
-   *     getAntigravityTask: Function,
-   *   },
    *   xExecutor?: {
    *     dispatchXTask: Function,
    *     getXTaskStatus: Function,
@@ -109,7 +105,6 @@ export class GoalRunner {
     const storage = (options && typeof options.saveGoal === 'function') ? options : options?.storage;
     if (!storage) throw new Error('storage is required for GoalRunner');
     this.storage = storage;
-    this.antigravityExecutor = options?.antigravityExecutor;
     this.xExecutor = options?.xExecutor || null;
     this.jobManager = options?.jobManager || null;
     this.claimStore = options?.claimStore || null;
@@ -216,6 +211,9 @@ export class GoalRunner {
    * Operation 1: create_goal
    */
   async create_goal({ id, title, objective, workspace, steps = [], constraints = [], remoteGoalRequest = null }) {
+    if (steps.some((step) => step?.route === 'antigravity')) {
+      throw new Error('goal_step_route_retired');
+    }
     if (!workspace || typeof workspace !== 'string') {
       throw new Error('Goal must be bound to a valid workspace path');
     }
@@ -573,6 +571,8 @@ export class GoalRunner {
    * Respects permission system, route, and completion verification.
    */
   async executeStep(goal, step, options = {}) {
+    // Historical goals remain readable, but retired routes never execute.
+    if (step.route === 'antigravity') throw new Error('goal_step_route_retired');
     // 1. Custom mock execution for unit tests
     if (options.executeStepFn) {
       return options.executeStepFn(goal, step);
@@ -580,97 +580,6 @@ export class GoalRunner {
 
     // 2. Permission enforcement
     const permissions = options.permissions || {};
-    const antigravityPerm = permissions.Antigravity || 'Ask';
-
-    if (step.route === 'antigravity') {
-      if (antigravityPerm === 'Blocked') {
-        throw new Error('Antigravity permission is Blocked in Hearth Control');
-      }
-
-      if (antigravityPerm === 'Ask') {
-        if (options.requestApproval) {
-          const allowed = await options.requestApproval({
-            permission: 'Antigravity',
-            action: `Goal Step: ${step.title}`,
-          });
-          if (!allowed) {
-            throw new Error(`User denied Antigravity approval for step '${step.title}'`);
-          }
-        } else {
-          throw new Error(`Step '${step.title}' requires permission approval`);
-        }
-      }
-
-      // Execute via Antigravity Executor
-      if (!this.antigravityExecutor?.startAntigravityTask) {
-        throw new Error('Antigravity executor is not configured');
-      }
-
-      const prompt = `Goal: ${goal.title}\nObjective: ${goal.objective}\n\nStep: ${step.title}\nInstructions:\n${step.description}`;
-      const taskRes = await this.antigravityExecutor.startAntigravityTask({
-        workspace: goal.workspace,
-        prompt,
-        title: `${goal.title} - ${step.title}`,
-        runner: options.runner,
-        customAgentApiPath: options.customAgentApiPath,
-        claimStore: this.claimStore,
-      });
-
-      // Poll until step reaches terminal state (done / waiting / error)
-      const taskId = taskRes.taskId;
-      let finalTask = null;
-      for (let i = 0; i < 60; i++) {
-        finalTask = this.antigravityExecutor.getAntigravityTask(taskId);
-        if (['done', 'waiting', 'error'].includes(finalTask.status)) {
-          break;
-        }
-        await new Promise((r) => setTimeout(r, 1000));
-      }
-
-      if (!finalTask) {
-        throw new Error(`Task ${taskId} timed out without reaching terminal state`);
-      }
-
-      // Check false-DONE and completion contract: process exit alone is not done
-      if (finalTask.status === 'done') {
-        return {
-          status: 'completed',
-          result: finalTask.lastAnswer || 'Task completed successfully',
-          evidence: {
-            taskId: finalTask.taskId,
-            conversationId: finalTask.conversationId,
-            jobId: finalTask.jobId || null,
-            completion: finalTask.completion || null,
-            durableJobEvidence: finalTask.durableJobEvidence || null,
-          },
-        };
-      }
-
-      if (finalTask.status === 'waiting') {
-        return {
-          status: 'waiting',
-          result: finalTask.lastAnswer || finalTask.completion?.reason || 'Waiting for completion contract verification',
-          evidence: {
-            taskId: finalTask.taskId,
-            conversationId: finalTask.conversationId,
-            jobId: finalTask.jobId || null,
-            completion: finalTask.completion || null,
-            durableJobEvidence: finalTask.durableJobEvidence || null,
-          },
-        };
-      }
-
-      return {
-        status: 'error',
-        error: finalTask.error || 'Antigravity task failed',
-        evidence: {
-          taskId: finalTask.taskId,
-          conversationId: finalTask.conversationId,
-          jobId: finalTask.jobId || null,
-          durableJobEvidence: finalTask.durableJobEvidence || null,
-        },
-      };
-    }
 
     if (step.route === 'x') {
       // route:'x' steps carry an already-authored, already-validated
@@ -742,7 +651,7 @@ export class GoalRunner {
       }
 
       // xStatus.result is XRunStore's persisted x-result-v1 -- a structured
-      // object, never a string (unlike Antigravity's chat-style lastAnswer).
+      // object, never a string.
       // step.result is contractually a string (model.mjs's validateStep
       // nulls out anything else), and run_goal's own redactSecrets() call
       // is string-only and silently returns '' for a non-string input -- so

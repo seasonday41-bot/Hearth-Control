@@ -56,7 +56,7 @@ test('7. no blocker preserves the existing approval/install path and required or
 
   const main = await fs.promises.readFile(new URL('../electron/main.cjs', import.meta.url), 'utf8');
   const start = main.indexOf("ipcMain.handle('updater:install'");
-  const end = main.indexOf("ipcMain.handle('antigravity:status'", start);
+  const end = main.indexOf("// Bridge Initialization & Handlers", start);
   assert.ok(start >= 0 && end > start, 'updater install IPC handler must exist');
   const handler = main.slice(start, end);
 
@@ -87,7 +87,7 @@ test('7. no blocker preserves the existing approval/install path and required or
 test('8. cancelled native approval exits before revalidation or install', async () => {
   const main = await fs.promises.readFile(new URL('../electron/main.cjs', import.meta.url), 'utf8');
   const start = main.indexOf("ipcMain.handle('updater:install'");
-  const end = main.indexOf("ipcMain.handle('antigravity:status'", start);
+  const end = main.indexOf("// Bridge Initialization & Handlers", start);
   const handler = main.slice(start, end);
 
   const approval = handler.indexOf('dialog.showMessageBox');
@@ -112,7 +112,7 @@ test('9. remote/MCP/Goal/X inputs cannot supply a preflight bypass flag', async 
 
   const main = await fs.promises.readFile(new URL('../electron/main.cjs', import.meta.url), 'utf8');
   const start = main.indexOf("ipcMain.handle('updater:install'");
-  const end = main.indexOf("ipcMain.handle('antigravity:status'", start);
+  const end = main.indexOf("// Bridge Initialization & Handlers", start);
   const handler = main.slice(start, end);
   assert.ok(handler.startsWith("ipcMain.handle('updater:install', async (event) =>"));
   const executableHandler = handler

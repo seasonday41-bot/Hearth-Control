@@ -197,7 +197,7 @@ await test('install requires explicit local user action in main process and core
 
   const main = await fs.promises.readFile(new URL('../electron/main.cjs', import.meta.url), 'utf8');
   const handlerStart = main.indexOf("ipcMain.handle('updater:install'");
-  const handlerEnd = main.indexOf("ipcMain.handle('antigravity:status'", handlerStart);
+  const handlerEnd = main.indexOf("// Bridge Initialization & Handlers", handlerStart);
   assert.ok(handlerStart >= 0 && handlerEnd > handlerStart, 'local updater IPC handler must exist');
   const handler = main.slice(handlerStart, handlerEnd);
   const confirmationIndex = handler.indexOf('dialog.showMessageBox');

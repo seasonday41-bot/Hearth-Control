@@ -9,27 +9,8 @@ type Props = {
   isGoalActive: boolean;
   isTaskRunning: boolean;
   flash: (message: string) => void;
-  formatElapsed: (created?: string, completed?: string) => string;
-  executorStatus: AntigravityStatus | null;
-  taskCenterTab: 'x' | 'antigravity' | 'remote';
-  setTaskCenterTab: Dispatch<SetStateAction<'x' | 'antigravity' | 'remote'>>;
-  taskPrompt: string;
-  setTaskPrompt: Dispatch<SetStateAction<string>>;
-  promptBytes: number;
-  taskSubmitting: boolean;
-  handleStartTask: () => Promise<void>;
-  taskData: AntigravityTaskData | null;
-  activeTaskSource: 'Local' | 'Remote';
-  showTaskProgress: boolean;
-  setShowTaskProgress: Dispatch<SetStateAction<boolean>>;
-  followUpInput: string;
-  setFollowUpInput: Dispatch<SetStateAction<string>>;
-  followUpSubmitting: boolean;
-  handleSendFollowUp: () => Promise<void>;
-  handleResumeTask: () => Promise<void>;
-  handleDismissTask: () => Promise<void>;
-  handleMarkTaskFailed: () => Promise<void>;
-  recoveryBusy: boolean;
+  taskCenterTab: 'x' | 'remote';
+  setTaskCenterTab: Dispatch<SetStateAction<'x' | 'remote'>>;
   xPerm: PermissionValue;
   xReady: boolean;
   rotateXPerm: () => void;
@@ -37,8 +18,6 @@ type Props = {
   activeXStatus: XQueueStatus | null;
   liveXRuns: XRunSummary[];
   recentXRuns: XRunSummary[];
-  antigravityPerm: PermissionValue;
-  rotateAntigravityPerm: () => void;
   bridgeState: BridgeState | null;
   bridgeBusy: boolean;
   toggleBridge: () => Promise<void>;
@@ -66,27 +45,8 @@ export default function GoalsActivityPage({
   isGoalActive,
   isTaskRunning,
   flash,
-  formatElapsed,
-  executorStatus,
   taskCenterTab,
   setTaskCenterTab,
-  taskPrompt,
-  setTaskPrompt,
-  promptBytes,
-  taskSubmitting,
-  handleStartTask,
-  taskData,
-  activeTaskSource,
-  showTaskProgress,
-  setShowTaskProgress,
-  followUpInput,
-  setFollowUpInput,
-  followUpSubmitting,
-  handleSendFollowUp,
-  handleResumeTask,
-  handleDismissTask,
-  handleMarkTaskFailed,
-  recoveryBusy,
   xPerm,
   xReady,
   rotateXPerm,
@@ -94,8 +54,6 @@ export default function GoalsActivityPage({
   activeXStatus,
   liveXRuns,
   recentXRuns,
-  antigravityPerm,
-  rotateAntigravityPerm,
   bridgeState,
   bridgeBusy,
   toggleBridge,
@@ -121,13 +79,9 @@ export default function GoalsActivityPage({
           <div className={'connection-pill ' + (xReady ? 'online' : '')}>
             <span /> X · {xPerm === 'Blocked' ? 'Blocked' : xReady ? 'Ready' : 'Unavailable'}
           </div>
-        ) : taskCenterTab === 'remote' ? (
+        ) : (
           <div className={'connection-pill ' + (bridgeState?.connected ? 'online' : '')}>
             <span /> Remote · {bridgeState?.connected ? 'Bridge connected' : 'Standing by'}
-          </div>
-        ) : (
-          <div className={'connection-pill ' + (executorStatus?.available ? 'online' : '')}>
-            <span /> Executor · {executorStatus?.available ? 'Connected' : 'Unavailable'}
           </div>
         )
       )}
@@ -182,9 +136,6 @@ export default function GoalsActivityPage({
         <button type="button" role="tab" aria-selected={taskCenterTab === 'x'} className={taskCenterTab === 'x' ? 'active' : ''} onClick={() => setTaskCenterTab('x')}>
           <span>X</span>
           {xPendingTasks.length > 0 && <em>{xPendingTasks.length}</em>}
-        </button>
-        <button type="button" role="tab" aria-selected={taskCenterTab === 'antigravity'} className={taskCenterTab === 'antigravity' ? 'active' : ''} onClick={() => setTaskCenterTab('antigravity')}>
-          <span>Antigravity</span>
         </button>
         <button type="button" role="tab" aria-selected={taskCenterTab === 'remote'} className={taskCenterTab === 'remote' ? 'active' : ''} onClick={() => setTaskCenterTab('remote')}>
           <span>Remote</span>
@@ -320,230 +271,6 @@ export default function GoalsActivityPage({
         </section>
       )}
 
-      {taskCenterTab === 'antigravity' && (
-        <>
-      <div className="task-input-box">
-        <div className="task-textarea-container">
-          <textarea
-            className="task-textarea"
-            placeholder="Describe your task for Antigravity (e.g. Inspect git diff, review package.json, check test suite...)"
-            value={taskPrompt}
-            onChange={(e) => setTaskPrompt(e.target.value)}
-            disabled={taskSubmitting || isTaskRunning}
-            rows={4}
-          />
-          {promptBytes > 60000 && (
-            <div className="task-size-warning">
-              {promptBytes.toLocaleString()} / 65,536 bytes {promptBytes > 65536 ? '⚠️ Exceeds 64 KiB limit' : ''}
-            </div>
-          )}
-        </div>
-        <div className="task-input-footer">
-          <div className="task-options-group">
-            <div className="executor-indicator">
-              <span className={`executor-status-dot ${executorStatus?.available ? 'connected' : 'unavailable'}`} />
-              <span>Executor: <em>{executorStatus?.available ? 'Ready' : 'Unavailable'}</em></span>
-            </div>
-            <button
-              className="task-perm-button"
-              onClick={rotateAntigravityPerm}
-              type="button"
-              title="Click to cycle Antigravity permission (Ask / Allow / Blocked)"
-            >
-              <i style={{
-                background: antigravityPerm === 'Allow' ? 'var(--sage)' : antigravityPerm === 'Blocked' ? 'var(--rose)' : '#9a7545'
-              }} />
-              <span>Permission: <strong>{antigravityPerm}</strong></span>
-              <Icon name="chevron" />
-            </button>
-          </div>
-          <button
-            className="run-task-button"
-            disabled={!taskPrompt.trim() || taskSubmitting || isTaskRunning || !executorStatus?.available || antigravityPerm === 'Blocked' || promptBytes > 65536}
-            onClick={handleStartTask}
-            type="button"
-          >
-            <Icon name="console" />
-            <span>{taskSubmitting ? 'Starting…' : isTaskRunning ? 'Running…' : 'Run Task'}</span>
-          </button>
-        </div>
-      </div>
-
-      {taskData ? (
-        <section className="active-task-section" aria-labelledby="active-task-heading">
-          <div className="task-header-row">
-            <div className="task-header-title">
-              <h2 id="active-task-heading">{taskData.title || `Task ${taskData.taskId}`}</h2>
-              <p>Started at {new Date(taskData.createdAt).toLocaleTimeString()}</p>
-            </div>
-            <div className={`task-status-pill ${taskData.status}`}>
-              <span />
-              {taskData.status}
-            </div>
-          </div>
-
-          <div className="task-meta-bar">
-            <div className="task-meta-item"><span>Source</span><code>{activeTaskSource}</code></div>
-            <div className="task-meta-item">
-              <span>Task ID</span>
-              <button className="task-id-copy" type="button" onClick={() => { void navigator.clipboard.writeText(taskData.taskId); flash('Task ID copied'); }}><code>{taskData.taskId.slice(0, 8)}…</code> Copy</button>
-            </div>
-            <div className="task-meta-item">
-              <span>Conversation ID</span>
-              <code>{taskData.conversationId || 'Pending…'}</code>
-            </div>
-            <div className="task-meta-item">
-              <span>Status</span>
-              <code>{taskData.status}</code>
-            </div>
-            <div className="task-meta-item">
-              <span>Elapsed</span>
-              <code>{formatElapsed(taskData.createdAt, ['done', 'error', 'waiting'].includes(taskData.status) ? taskData.updatedAt : undefined)}</code>
-            </div>
-          </div>
-
-          <div className="task-live-summary"><strong>Latest</strong><span>{taskData.lastEvent?.summary || taskData.completion?.summary || (taskData.status === 'starting' ? 'Preparing executor…' : 'No progress update yet.')}</span><button type="button" aria-expanded={showTaskProgress} onClick={() => setShowTaskProgress((visible) => !visible)}>{showTaskProgress ? 'Hide Progress' : 'View Progress'}</button></div>
-
-          {taskData.status === 'recovery_required' && (
-            <div className="task-recovery-box">
-              <div className="task-recovery-header">
-                <div className="task-recovery-title">
-                  <Icon name="terminal" />
-                  <span>INTERRUPTED TASK REQUIRES RECOVERY</span>
-                </div>
-                <span className="task-status-pill recovery_required">RECOVERY REQUIRED</span>
-              </div>
-              <p className="task-recovery-desc">
-                This task was interrupted by an application or system shutdown. Process termination is never assumed to be successful. You can resume execution with the original conversation context, mark the task failed, or dismiss it.
-              </p>
-              <div className="task-recovery-actions">
-                <button
-                  className="task-recovery-btn-resume"
-                  disabled={recoveryBusy || !executorStatus?.available || antigravityPerm === 'Blocked'}
-                  onClick={handleResumeTask}
-                  type="button"
-                >
-                  {recoveryBusy ? 'Processing…' : 'Resume Task'}
-                </button>
-                <button
-                  className="task-recovery-btn-fail"
-                  disabled={recoveryBusy}
-                  onClick={handleMarkTaskFailed}
-                  type="button"
-                >
-                  Mark Failed
-                </button>
-                <button
-                  className="task-recovery-btn-dismiss"
-                  disabled={recoveryBusy}
-                  onClick={handleDismissTask}
-                  type="button"
-                >
-                  Dismiss
-                </button>
-              </div>
-            </div>
-          )}
-
-          {taskData.error && (
-            <div className="task-error-box">
-              <div className="task-error-message">
-                <strong>Task Error:</strong> {taskData.error}
-              </div>
-            </div>
-          )}
-
-          {taskData.status === 'waiting' && taskData.completion?.interimReason && (
-            <div className="task-error-box">
-              <div className="task-error-message">
-                <strong>Waiting:</strong> {taskData.completion.interimReason}
-              </div>
-            </div>
-          )}
-
-          {taskData.lastAnswer && (
-            <div className="task-result-card">
-              <div className="task-result-header">
-                <span className="task-section-label">Executor Output</span>
-                <button
-                  className="task-copy-button"
-                  type="button"
-                  onClick={async () => {
-                    if (taskData.lastAnswer) {
-                      await navigator.clipboard.writeText(taskData.lastAnswer);
-                      flash('Result copied to clipboard');
-                    }
-                  }}
-                >
-                  <Icon name="copy" />
-                  <span>Copy Result</span>
-                </button>
-              </div>
-              <div className="task-result-content">{taskData.lastAnswer}</div>
-            </div>
-          )}
-
-          {showTaskProgress && (
-            <div className="task-progress-card">
-              <span className="task-section-label">
-                Progress Events ({taskData.recentEvents?.length ?? 0})
-              </span>
-              <div className="task-events-list">
-              {(!taskData.recentEvents || taskData.recentEvents.length === 0) ? (
-                <div style={{ color: '#718089', fontStyle: 'italic', padding: '6px 0' }}>
-                  {taskData.status === 'starting' ? 'Waiting for executor to initialize…' : 'No events recorded.'}
-                </div>
-              ) : (
-                taskData.recentEvents.map((ev, i) => (
-                  <div key={`${ev.stepIndex ?? i}-${i}`} className="task-event-row">
-                    <span className="task-event-step">#{ev.stepIndex ?? i + 1}</span>
-                    <span className="task-event-type">{ev.type || 'PROGRESS'}</span>
-                    <span className="task-event-text">{ev.summary || ''}</span>
-                  </div>
-                ))
-              )}
-              </div>
-            </div>
-          )}
-
-          {(taskData.status === 'done' || taskData.status === 'waiting') && (
-            <div className="task-followup-box">
-              <input
-                className="task-followup-input"
-                placeholder="Send follow-up instruction to this conversation…"
-                value={followUpInput}
-                onChange={(e) => setFollowUpInput(e.target.value)}
-                disabled={followUpSubmitting}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    void handleSendFollowUp();
-                  }
-                }}
-              />
-              <button
-                className="task-followup-button"
-                disabled={!followUpInput.trim() || followUpSubmitting}
-                onClick={handleSendFollowUp}
-                type="button"
-              >
-                <span>{followUpSubmitting ? 'Sending…' : 'Send'}</span>
-                <Icon name="chevron" />
-              </button>
-            </div>
-          )}
-        </section>
-      ) : (
-        <div className="task-empty-card">
-          <Icon name="console" />
-          <p>No active task</p>
-          <small>Compose an instruction above and click Run Task to dispatch work to Antigravity.</small>
-        </div>
-      )}
-
-        </>
-      )}
-
       {/* REMOTE INBOX SECTION */}
       {taskCenterTab === 'remote' && (
       <section className="remote-inbox-section" aria-labelledby="remote-inbox-heading">
@@ -668,15 +395,6 @@ export default function GoalsActivityPage({
                     onClick={() => handleRejectRemoteTask(t)}
                   >
                     Reject
-                  </button>
-                  <button
-                    className="remote-action-btn approve"
-                    type="button"
-                    disabled={t.routedTo === 'x' ? bridgeBusy : (bridgeBusy || isTaskRunning || !executorStatus?.available || antigravityPerm === 'Blocked')}
-                    onClick={() => handleApproveRemoteTask(t)}
-                    title={t.routedTo === 'x' ? 'Approve and dispatch to X' : (isTaskRunning ? 'Cannot run while another task is running' : 'Approve and dispatch to Antigravity')}
-                  >
-                    Approve & Run
                   </button>
                 </div>
               </div>

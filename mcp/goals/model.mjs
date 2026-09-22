@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { redactSecrets } from '../executors/antigravity.mjs';
+import { redactSecrets } from '../security/redact-secrets.mjs';
 import { parseXTask } from '../x/task-contract.mjs';
 import { validateSpecialistExecution, validateSpecialistResult, validateSpecialistResultDecision } from '../specialist/contract.mjs';
 
@@ -26,9 +26,9 @@ export const STEP_STATUSES = Object.freeze([
 export const STEP_ROUTES = Object.freeze([
   'auto',
   'mcp',
-  'antigravity',
   'manual',
   'x',
+  'antigravity', // Legacy persisted goals remain readable; GoalRunner rejects execution.
 ]);
 
 /**
@@ -48,8 +48,8 @@ export const validateStep = (step) => {
   const title = step.title.trim().slice(0, 200);
   const description = typeof step.description === 'string' ? step.description.trim().slice(0, 2000) : '';
 
-  const route = STEP_ROUTES.includes(step.route) ? step.route : 'antigravity';
-  const resolvedRoute = ['mcp', 'antigravity', 'manual'].includes(step.resolvedRoute) ? step.resolvedRoute : null;
+  const route = STEP_ROUTES.includes(step.route) ? step.route : 'manual';
+  const resolvedRoute = ['mcp', 'manual'].includes(step.resolvedRoute) ? step.resolvedRoute : null;
   const routeReason = typeof step.routeReason === 'string' ? redactSecrets(step.routeReason).slice(0, 300) : null;
   const status = STEP_STATUSES.includes(step.status) ? step.status : 'pending';
   const required = step.required !== false; // defaults to true
@@ -328,7 +328,7 @@ export const createGoalCheckpoint = ({
   filesChanged = [],
   checks = {},
   nextStep = null,
-  route = 'antigravity',
+  route = 'manual',
 }) => {
   if (!goalId || typeof goalId !== 'string') throw new Error('goalId is required for checkpoint');
 
@@ -352,7 +352,7 @@ export const createGoalCheckpoint = ({
     filesChanged: cleanFiles,
     checks: cleanChecks,
     nextStep: nextStep ? String(nextStep) : null,
-    route: String(route || 'antigravity'),
+    route: String(route || 'manual'),
   };
 };
 

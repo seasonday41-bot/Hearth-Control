@@ -19,7 +19,7 @@ assert.ok(start >= 0 && end > start);
 const mainIngressSource = source.slice(start, end);
 const httpSource = fs.readFileSync(new URL('../mcp/http.mjs', import.meta.url), 'utf8');
 const transportStart = httpSource.indexOf('const queueReplies = new Map();');
-const transportEnd = httpSource.indexOf('onAntigravityAdmissionReleased(() => {', transportStart);
+const transportEnd = httpSource.indexOf('const settleApproval', transportStart);
 assert.ok(transportStart >= 0 && transportEnd > transportStart);
 const httpTransportSource = httpSource.slice(transportStart, transportEnd);
 const dirs = [];
@@ -318,12 +318,7 @@ test('IPC ack loss after main commits is recovered by a fresh HTTP retry', async
   assert.equal(main.store.listPending().length, 1);
 });
 
-test('Antigravity HTTP child release sends only a content-free capacity hint', () => {
-  assert.match(httpSource, /onAntigravityAdmissionReleased\(\(\) => \{[\s\S]*?process\.send\(\{ type: 'x_capacity_released_hint' \}\)/);
-  assert.match(source, /message\?\.type === 'x_capacity_released_hint'/);
-});
-
-test('shared capacity deadline reads an Antigravity lease and ignores claim kind', () => {
+test('shared capacity deadline reads a claim and ignores task kind', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hearth-x-capacity-'));
   dirs.push(root);
   const previous = process.env.HEARTH_RUNTIME_DIR;
@@ -331,7 +326,7 @@ test('shared capacity deadline reads an Antigravity lease and ignores claim kind
   __resetProductionXRuntimeForTests();
   const claims = new XClaimStore({ storagePath: path.join(root, 'hearth-runtime.sqlite') });
   try {
-    const claim = claims.claim({ taskId: 'antigravity:task-1', ownerId: 'test-owner' });
+    const claim = claims.claim({ taskId: 'other:task-1', ownerId: 'test-owner' });
     assert.equal(getNextXQueueCapacityDeadline(), claim.leaseExpiresAt);
     claims.release({ taskId: claim.taskId, ownerId: claim.ownerId, leaseId: claim.leaseId });
     assert.equal(getNextXQueueCapacityDeadline(), null);

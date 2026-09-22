@@ -1,4 +1,4 @@
-import { redactSecrets } from '../executors/antigravity.mjs';
+import { redactSecrets } from '../security/redact-secrets.mjs';
 import { parseXTask } from '../x/task-contract.mjs';
 
 /**

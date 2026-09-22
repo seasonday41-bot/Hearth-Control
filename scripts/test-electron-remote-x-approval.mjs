@@ -318,7 +318,7 @@ test('Slice 1C: an x-task-v1 whose own workspace.root matches CURRENT settings i
 // relay, which a coordinator-internal completion never reaches. ──
 
 const wrapStart = mainSource.indexOf('    {\n      const baseOnXRunTerminal = xQueueCoordinator.onXRunTerminal.bind(xQueueCoordinator);');
-const wrapEnd = mainSource.indexOf('\n    onAntigravityAdmissionReleased(');
+const wrapEnd = mainSource.indexOf('\n    xQueueDispatchEnabled =', wrapStart);
 assert.ok(wrapStart !== -1 && wrapEnd !== -1, 'the onXRunTerminal wrapper must be found in electron/main.cjs');
 const wrapSource = mainSource.slice(wrapStart, wrapEnd);
 

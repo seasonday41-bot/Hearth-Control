@@ -18,7 +18,6 @@ test('1. startup health marker is written only after the main window is created'
 
 test('2. essential local runtime initialization completes before window creation and health marker', () => {
   const taskStoreIndex = startup.indexOf('taskStore = new TaskStore(');
-  const jobManagerIndex = startup.indexOf('jobManager = new JobManager(');
   const goalRunnerIndex = startup.indexOf('goalRunner = new GoalRunner(');
   const xRuntimeIndex = startup.indexOf('xQueueCoordinator = new XQueueCoordinator(');
   const createWindowIndex = startup.lastIndexOf('  createWindow();');
@@ -26,7 +25,6 @@ test('2. essential local runtime initialization completes before window creation
 
   for (const [name, index] of [
     ['TaskStore', taskStoreIndex],
-    ['JobManager', jobManagerIndex],
     ['GoalRunner', goalRunnerIndex],
     ['X runtime', xRuntimeIndex],
   ]) {

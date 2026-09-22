@@ -628,7 +628,7 @@ test('R1 hasNonTerminalRunForClaimLease is false for an unknown/unrelated leaseI
   store.createRun({ runId: 'run-1', taskId: 'task-1', claimLeaseId: 'lease-1' });
   store.markRunning({ runId: 'run-1', claimLeaseId: 'lease-1' });
   assert.equal(store.hasNonTerminalRunForClaimLease('some-other-lease'), false);
-  assert.equal(store.hasNonTerminalRunForClaimLease('antigravity-lease-id-unrelated'), false);
+  assert.equal(store.hasNonTerminalRunForClaimLease('other-lease-id-unrelated'), false);
 });
 
 test('R1 hasNonTerminalRunForClaimLease rejects invalid input safely (no throw, false)', () => {

@@ -88,11 +88,6 @@ const makeMockXExecutor = () => {
   };
 };
 
-const mockAntigravityExecutor = (spy) => ({
-  startAntigravityTask: async (opts) => { spy.push(opts); return { taskId: 'mock-anti-1', conversationId: 'c1' }; },
-  getAntigravityTask: () => ({ taskId: 'mock-anti-1', status: 'done', lastAnswer: 'ok', completion: { status: 'done' } }),
-});
-
 console.log('\n=== Hearth Goal Runner Review Queue Test Suite ===\n');
 
 // ── 1. COMPLETED continues eligible next authored step, zero review items ──
@@ -129,8 +124,7 @@ await test('1. COMPLETED continues to next authored step and creates zero review
 await test('2/3. NEEDS_REVIEW creates exactly one durable review item and blocks dependent continuation', async () => {
   const storage = new GoalStorage({ storagePath: freshStoragePath() });
   const xExecutor = makeMockXExecutor();
-  const antigravityCalls = [];
-  const runner = new GoalRunner({ storage, xExecutor, antigravityExecutor: mockAntigravityExecutor(antigravityCalls) });
+  const runner = new GoalRunner({ storage, xExecutor });
 
   const goal = await runner.create_goal({
     title: 'Needs Review Goal',
@@ -138,7 +132,7 @@ await test('2/3. NEEDS_REVIEW creates exactly one durable review item and blocks
     workspace: testWorkspace,
     steps: [
       { id: 's1', title: 'Step 1', description: '', route: 'x', xTask: validXTask('RQ-NR1') },
-      { id: 's2', title: 'Step 2 (never runs)', description: '', route: 'antigravity' },
+      { id: 's2', title: 'Step 2 (never runs)', description: '', route: 'manual' },
     ],
   });
 
@@ -147,12 +141,11 @@ await test('2/3. NEEDS_REVIEW creates exactly one durable review item and blocks
     result: { version: 'x-result-v1', result_id: 'result-nr-1', task_id: 'RQ-NR1', waiting_reason: 'ambiguous_evidence', reason_code: 'waiting_review' },
   });
 
-  const finished = await runner.run_goal(goal.id, { permissions: { Antigravity: 'Allow' } });
+  const finished = await runner.run_goal(goal.id);
 
   assert.equal(finished.status, 'waiting');
   assert.equal(finished.steps[0].status, 'waiting');
   assert.equal(finished.steps[1].status, 'pending', 'dependent step must never have dispatched');
-  assert.equal(antigravityCalls.length, 0);
 
   assert.equal(finished.reviewQueue.length, 1);
   const item = finished.reviewQueue[0];
@@ -173,8 +166,7 @@ await test('2/3. NEEDS_REVIEW creates exactly one durable review item and blocks
 await test('4/5. FAILED creates exactly one durable review item and blocks dependent continuation', async () => {
   const storage = new GoalStorage({ storagePath: freshStoragePath() });
   const xExecutor = makeMockXExecutor();
-  const antigravityCalls = [];
-  const runner = new GoalRunner({ storage, xExecutor, antigravityExecutor: mockAntigravityExecutor(antigravityCalls) });
+  const runner = new GoalRunner({ storage, xExecutor });
 
   const goal = await runner.create_goal({
     title: 'Failed Goal',
@@ -182,7 +174,7 @@ await test('4/5. FAILED creates exactly one durable review item and blocks depen
     workspace: testWorkspace,
     steps: [
       { id: 's1', title: 'Step 1', description: '', route: 'x', xTask: validXTask('RQ-F1'), required: true },
-      { id: 's2', title: 'Step 2 (never runs)', description: '', route: 'antigravity' },
+      { id: 's2', title: 'Step 2 (never runs)', description: '', route: 'manual' },
     ],
   });
 
@@ -191,12 +183,11 @@ await test('4/5. FAILED creates exactly one durable review item and blocks depen
     result: null,
   });
 
-  const finished = await runner.run_goal(goal.id, { permissions: { Antigravity: 'Allow' } });
+  const finished = await runner.run_goal(goal.id);
 
   assert.equal(finished.status, 'error');
   assert.equal(finished.steps[0].status, 'error');
   assert.equal(finished.steps[1].status, 'pending');
-  assert.equal(antigravityCalls.length, 0);
 
   assert.equal(finished.reviewQueue.length, 1);
   const item = finished.reviewQueue[0];
@@ -310,23 +301,24 @@ await test('11. structured x-result-v1 result remains preserved on the step even
   assert.equal(finished.reviewQueue[0].resultId, 'struct-1');
 });
 
-// ── 12. Anti is never used as fallback for NEEDS_REVIEW/FAILED ─────────────
-await test('12. Anti is never used as a fallback for NEEDS_REVIEW or FAILED X outcomes', async () => {
+// ── 12. Failed X outcome does not dispatch dependent steps ─────────────
+await test('12. failed X outcome does not dispatch dependent steps', async () => {
   const storage = new GoalStorage({ storagePath: freshStoragePath() });
   const xExecutor = makeMockXExecutor();
-  const antigravityCalls = [];
-  const runner = new GoalRunner({ storage, xExecutor, antigravityExecutor: mockAntigravityExecutor(antigravityCalls) });
+  const runner = new GoalRunner({ storage, xExecutor });
 
   const goal = await runner.create_goal({
-    title: 'No Anti Fallback Goal',
-    objective: 'Failures must never route to Antigravity',
+    title: 'No Fallback Goal',
+    objective: 'Failures must never dispatch a dependent step',
     workspace: testWorkspace,
-    steps: [{ id: 's1', title: 'Step 1', description: '', route: 'x', xTask: validXTask('RQ-NOANTI'), required: true }],
+    steps: [{ id: 's1', title: 'Step 1', description: '', route: 'x', xTask: validXTask('RQ-NOFALLBACK'), required: true }],
   });
 
   xExecutor.statuses.set(`goal:${goal.id}:step:s1`, { found: true, queue_status: 'terminal', terminal_status: 'failed', error: 'boom' });
-  await runner.run_goal(goal.id, { permissions: { Antigravity: 'Allow' } });
-  assert.equal(antigravityCalls.length, 0);
+  const finished = await runner.run_goal(goal.id);
+  assert.equal(finished.status, 'error');
+  assert.equal(xExecutor.dispatchLog.length, 1);
+  assert.equal(finished.reviewQueue.length, 1);
 });
 
 // ── list_review_queue aggregates across goals, newest first ────────────────

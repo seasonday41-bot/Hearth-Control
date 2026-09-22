@@ -42,14 +42,13 @@ const jsonOf = (result) => JSON.parse(result.content[0].text);
  * list_review_queue() -- exactly the "reuse the live instance" shape
  * production uses, just without the fork-IPC hop.
  */
-function harness({ xExecutorSpy, antigravitySpy } = {}) {
+function harness({ xExecutorSpy } = {}) {
   const root = fixture();
   const goalsPath = path.join(root, 'goals.json');
   const storage = new GoalStorage({ storagePath: goalsPath });
   const runner = new GoalRunner({
     storage,
     xExecutor: xExecutorSpy ? { dispatchXTask: async (...a) => { xExecutorSpy.push(a); return { accepted: true }; }, getXTaskStatus: async () => ({ queue_status: 'terminal', terminal_status: 'completed', result: 'ok' }) } : undefined,
-    antigravityExecutor: antigravitySpy ? { startAntigravityTask: async (...a) => { antigravitySpy.push(a); return { taskId: 't1' }; }, getAntigravityTask: () => ({ status: 'done', lastAnswer: 'ok' }) } : undefined,
   });
 
   const server = fakeServer();
@@ -179,11 +178,10 @@ await t('4. calling the tool performs no writes to goals.json or goals.json.bak'
   if (bakExistedBefore) assert.equal(fs.readFileSync(bakPath, 'utf8'), bakBefore);
 });
 
-// ── 5 & 6. No X or Anti dispatch occurs ─────────────────────────────────────
-await t('5/6. calling the tool triggers zero X dispatch and zero Antigravity dispatch', async () => {
+// ── 5 & 6. No X dispatch occurs ─────────────────────────────────────
+await t('5/6. calling the tool triggers zero X dispatch', async () => {
   const xCalls = [];
-  const antiCalls = [];
-  const h = harness({ xExecutorSpy: xCalls, antigravitySpy: antiCalls });
+  const h = harness({ xExecutorSpy: xCalls });
   const workspace = goalWithWorkspace(h.root);
   const goal = await h.runner.create_goal({ title: 'Spy Goal', objective: 'x', workspace, steps: [{ title: 'S1', description: 'x', route: 'manual' }] });
   const item = createReviewQueueItem({ idempotencyKey: 'run-spy', stepId: 's1', status: 'needs_review', reason: 'spy' });
@@ -191,7 +189,6 @@ await t('5/6. calling the tool triggers zero X dispatch and zero Antigravity dis
 
   await h.server.tools.get('review_queue_list').handler({});
   assert.equal(xCalls.length, 0, 'review_queue_list must never dispatch X');
-  assert.equal(antiCalls.length, 0, 'review_queue_list must never dispatch Antigravity');
 });
 
 // ── transport_unavailable when no reviewQueueTransport is injected ─────────

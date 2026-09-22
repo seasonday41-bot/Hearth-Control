@@ -8,8 +8,6 @@ import {
 import {
   routeHearthJob,
   adaptHearthJobToXTask,
-  buildAntigravityPrompt,
-  buildAntigravityRequestId,
   computeHearthJobFingerprint,
   hearthJobTaskId,
   hearthJobXRequestId,
@@ -90,7 +88,7 @@ test('P8.4 path traversal/absolute paths and allowed-forbidden overlap fail clos
   assert.equal(validateHearthJob(conflict).ok, false);
 });
 
-test('P8.5 deterministic router maps code jobs to X and general to Antigravity only', () => {
+test('P8.5 deterministic router maps code jobs to X and rejects general', () => {
   assert.equal(routeHearthJob(codeJob()).route, 'x');
   assert.equal(routeHearthJob(codeJob({ kind: 'code_inspect' })).route, 'x');
   const general = {
@@ -99,7 +97,7 @@ test('P8.5 deterministic router maps code jobs to X and general to Antigravity o
     kind: 'general',
     objective: 'Inspect the current situation and report a concise result.',
   };
-  assert.equal(routeHearthJob(general).route, 'antigravity');
+  assert.throws(() => routeHearthJob(general), /hearth_job_route_unavailable/);
 });
 
 test('P8.6 X adapter produces a canonical valid x-task-v1 using Hearth-owned workspace', () => {
@@ -137,26 +135,6 @@ test('P8.9 generic fingerprint and route identities are deterministic', () => {
   assert.notEqual(computeHearthJobFingerprint(input), computeHearthJobFingerprint({ ...input, objective: 'Different' }));
 });
 
-test('P8.10 Antigravity prompt is bounded and contains normalized job facts only', () => {
-  const general = {
-    version: 'hearth-job-v1',
-    job_id: 'general-1',
-    kind: 'general',
-    title: 'General work',
-    objective: 'Inspect the repository state and summarize what needs attention.',
-    known_evidence: ['No code mutation is required yet.'],
-    constraints: { preserve: ['Current workspace'], do_not: ['Do not push'] },
-    acceptance_criteria: ['Return a concise evidence-backed summary'],
-  };
-  const prompt = buildAntigravityPrompt(general);
-  assert.match(prompt, /\[Hearth Universal Job\]/);
-  assert.match(prompt, /Job ID: general-1/);
-  assert.match(prompt, /Do not:\n- Do not push/);
-  assert.doesNotMatch(prompt, /token|credential|provider:/i);
-  assert.equal(Buffer.byteLength(prompt, 'utf8') <= 64 * 1024, true);
-  assert.match(buildAntigravityRequestId(general), /^hearthjob:general-1:[0-9a-f]{64}$/);
-});
-
 test('P8.11 a general job does not require X-only scope or validation fields', () => {
   const result = validateHearthJob({
     version: 'hearth-job-v1',
@@ -181,6 +159,4 @@ test('P8.12 generic text fields redact secret-shaped content before routing', ()
   assert.doesNotMatch(serialized, /abcdefghijklmnopqrstuvwxyz123456/);
   assert.doesNotMatch(serialized, /super-secret-token-value/);
   assert.match(serialized, /REDACTED/);
-  const prompt = buildAntigravityPrompt(parsed);
-  assert.doesNotMatch(prompt, /super-secret-token-value|abcdefghijklmnopqrstuvwxyz123456/);
 });

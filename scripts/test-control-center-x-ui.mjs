@@ -7,11 +7,10 @@ const app = rendererSource();
 const preload = fs.readFileSync(new URL('../electron/preload.cjs', import.meta.url), 'utf8');
 const main = fs.readFileSync(new URL('../electron/main.cjs', import.meta.url), 'utf8');
 
-test('Control Center Tasks separates X, Antigravity, and Remote surfaces with X first', () => {
-  assert.match(app, /useState<'x' \| 'antigravity' \| 'remote'>\('x'\)/);
+test('Control Center Tasks separates X and Remote surfaces with X first', () => {
+  assert.match(app, /useState<'x' \| 'remote'>\('x'\)/);
   assert.match(app, /aria-label="Task execution surfaces"/);
   assert.match(app, />X<\/span>/);
-  assert.match(app, />Antigravity<\/span>/);
   assert.match(app, />Remote<\/span>/);
 });
 
@@ -40,7 +39,7 @@ test('Renderer X status API is read-only and projects existing durable receipt t
   assert.doesNotMatch(block, /enqueue|dispatchXTask|ingestXTask|requestXApproval/);
 });
 
-test('X approval no longer creates an Antigravity-shaped pending task', () => {
+test('X approval no longer creates an legacy executor-shaped pending task', () => {
   const start = app.indexOf('const handleApproveRemoteTask = async');
   const end = app.indexOf('const handleRejectRemoteTask = async', start);
   const block = app.slice(start, end);

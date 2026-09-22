@@ -11,11 +11,6 @@ import {
   getProductionXRuntime, __resetProductionXRuntimeForTests,
   getNextXWakeupDeadline, reconcileXRuntimeNow,
 } from '../mcp/x/production-runtime.mjs';
-import {
-  getProductionAntigravityClaimStore, __resetProductionAntigravityClaimStoreForTests,
-  acquireAntigravityAdmission, releaseAntigravityAdmission,
-} from '../mcp/executors/antigravity-admission.mjs';
-
 const dirs = [];
 const previousEnv = { HEARTH_RUNTIME_DIR: undefined, hadOwn: false };
 
@@ -30,13 +25,11 @@ function useIsolatedRuntimeDir() {
   const dir = fixtureDir();
   process.env.HEARTH_RUNTIME_DIR = dir;
   __resetProductionXRuntimeForTests();
-  __resetProductionAntigravityClaimStoreForTests();
   return path.join(dir, 'hearth-runtime.sqlite');
 }
 
 afterEach(() => {
   __resetProductionXRuntimeForTests();
-  __resetProductionAntigravityClaimStoreForTests();
   if (previousEnv.hadOwn) process.env.HEARTH_RUNTIME_DIR = previousEnv.HEARTH_RUNTIME_DIR;
   else delete process.env.HEARTH_RUNTIME_DIR;
   for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
@@ -486,30 +479,6 @@ test('W7 repeated reconcileXRuntimeNow calls create no duplicate interruption --
   assert.deepEqual(first, ['run-1']);
   const second = reconcileXRuntimeNow();
   assert.deepEqual(second, [], 'a second, later wakeup/reconciliation pass must find nothing left to interrupt');
-});
-
-test('W8 a real Antigravity-only admission (no matching nonterminal X run) must not be surfaced as an X wakeup deadline', async () => {
-  useIsolatedRuntimeDir();
-  // The REAL production Antigravity admission path, against the same
-  // shared runtime database X uses -- never a manually-constructed claim
-  // row, never an ownerId-based inference.
-  const antigravityClaimStore = getProductionAntigravityClaimStore();
-  const admitted = await acquireAntigravityAdmission({
-    claimStore: antigravityClaimStore,
-    taskId: 'agy-task-1',
-    ownerId: 'antigravity-owner',
-    leaseDurationMs: 60_000,
-    isActive: () => true,
-    onOwnershipLost: () => {},
-  });
-  assert.equal(admitted.ok, true);
-
-  try {
-    getProductionXRuntime(); // no X run created at all
-    assert.equal(getNextXWakeupDeadline(), null, 'a pure-Antigravity admission with no corresponding X run must not arm an X wakeup');
-  } finally {
-    await releaseAntigravityAdmission('agy-task-1');
-  }
 });
 
 test('W9 an active claim whose leaseId matches no nonterminal X run at all returns null', async () => {

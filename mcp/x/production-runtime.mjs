@@ -97,16 +97,13 @@ export function __resetProductionXRuntimeForTests() {
  * claim/run truth itself, it only ever receives this one timestamp.
  *
  * The shared claim table (XClaimStore) is deliberately claim-kind-agnostic
- * -- global execution admission (capacity=1) is shared with Antigravity,
- * so XClaimStore.getActiveClaim() (no taskId argument) returns whichever
- * single claim currently holds the slot, regardless of which subsystem
- * acquired it. Surfacing that claim's deadline unconditionally would arm a
- * wakeup for a pure-Antigravity admission that has no X run behind it at
- * all. The correction is to ask XRunStore -- the actual X-side source of
+ * -- global execution admission (capacity=1) can hold a claim with
+ * no corresponding X run. Surfacing that claim's deadline unconditionally
+ * would arm an unrelated X wakeup. The correction is to ask XRunStore -- the actual X-side source of
  * truth -- whether that exact leaseId is the one recorded on a still-
  * non-terminal X run (`hasNonTerminalRunForClaimLease`); only then is the
  * claim's expiry X-relevant. This never inspects task_id naming
- * conventions (e.g. Antigravity's own `antigravity:` prefix) or ownerId --
+ * conventions or ownerId --
  * it is answered entirely from X's own already-recorded claim_lease_id.
  * @returns {number|null} epoch-ms leaseExpiresAt, or null
  */

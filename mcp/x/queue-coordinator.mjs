@@ -137,8 +137,7 @@ export class XQueueCoordinator {
    * behaviorally identical to letting the normal dispatch triggers
    * (enqueue, a terminal event) run again right now. Electron integration
    * calls this when something with actual knowledge of a capacity change
-   * (e.g. Antigravity's own terminal/inactive transition) indicates the
-   * shared slot may have become free -- not part of this module.
+   * indicates the shared slot may have become free -- not part of this module.
    */
   kick() {
     this._scheduleDispatch();

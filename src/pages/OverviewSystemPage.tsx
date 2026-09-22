@@ -33,9 +33,6 @@ type Props = {
   flash: (message: string) => void;
   isGoalActive: boolean;
   isTaskRunning: boolean;
-  executorStatus: AntigravityStatus | null;
-  activeTaskId: string | null;
-  taskData: AntigravityTaskData | null;
   logs: LogEntry[];
   setLogs: Dispatch<SetStateAction<LogEntry[]>>;
   approvalEvidence: ApprovalEvidence[];
@@ -73,9 +70,6 @@ export default function OverviewSystemPage({
   flash,
   isGoalActive,
   isTaskRunning,
-  executorStatus,
-  activeTaskId,
-  taskData,
   logs,
   setLogs,
   approvalEvidence,
@@ -125,7 +119,7 @@ export default function OverviewSystemPage({
         <article><div className="metric-icon sage"><Icon name="activity" /></div><div><span>Connection</span><strong>{busy ? 'Changing' : running ? 'Healthy' : 'Idle'}</strong><small>{running ? `Process ${pid ?? 'active'} · local` : 'No active process'}</small></div></article>
         <article><div className="metric-icon sand"><Icon name="lock" /></div><div><span>Permissions</span><strong>{allowed} allowed</strong><small>{permissions.length - allowed} require attention</small></div></article>
         <article><div className="metric-icon blue"><Icon name="folder" /></div><div><span>Workspace</span><strong>{workspaceValid === null ? 'Checking…' : workspaceValid ? 'Connected' : 'Not found'}</strong><small>{workspaceValid ? 'Local filesystem' : workspace ? 'Path not accessible' : 'No workspace configured'}</small></div></article>
-        <article><div className="metric-icon purple"><Icon name="console" /></div><div><span>Executor</span><strong>{executorStatus?.available ? 'Connected' : 'Unavailable'}</strong><small>{isTaskRunning ? `Task running (${taskData?.status})` : activeTaskId ? 'Task ready' : 'Standing by'}</small></div></article>
+        <article><div className="metric-icon purple"><Icon name="console" /></div><div><span>X queue</span><strong>{isTaskRunning ? 'Running' : 'Standing by'}</strong><small>Local coding pipeline</small></div></article>
       </section>
 
       <section className="calm-shortcuts" aria-label="Workspace shortcuts">

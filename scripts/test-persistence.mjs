@@ -1,14 +1,11 @@
 /**
  * Hearth Crash & Resume Persistence Test Suite (v0.4.3)
  * Tests durable storage, atomic saves, backup fallback, startup reconciliation,
- * safe resume with original conversationId and Hearth taskId, duplicate protection,
- * workspace locking, Goal Runner checkpoint persistence, and safety invariants.
+ * startup recovery, Goal checkpoint persistence, and redaction invariants.
  *
  * SAFETY GUARANTEES:
- * - Pure in-memory mocks for process runners (NO live Antigravity CLI invocations)
  * - Temporary test directories isolated in os.tmpdir()
  * - Clean teardown of temporary files
- * - Zero modification of ~/.gemini or user directories
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -20,20 +17,6 @@ import {
   TaskStore,
   sanitizeTaskForPersistence,
 } from '../mcp/executors/task-store.mjs';
-
-import {
-  startAntigravityTask,
-  getAntigravityTask,
-  resumeAntigravityTask,
-  markTaskFailed,
-  dismissRecoveryTask,
-  setTaskStore,
-  hasRunningTask,
-  taskRegistry,
-  buildAgyPrompt,
-  classifyCompletion,
-  HEARTH_COMPLETION_INSTRUCTION,
-} from '../mcp/executors/antigravity.mjs';
 
 import {
   GoalStorage,
@@ -79,98 +62,6 @@ const createTempDir = () => {
   return dir;
 };
 
-// ── 1. Running task persisted to disk ─────────────────────────────────────────
-await test('1. Running task is persisted to disk immediately upon start', async () => {
-  const tempDir = createTempDir();
-  const filePath = path.join(tempDir, 'tasks.json');
-  const store = new TaskStore(filePath);
-  setTaskStore(store);
-
-  let finishRunner;
-  const pendingPromise = new Promise((resolve) => { finishRunner = resolve; });
-
-  const mockRunner = async () => {
-    await pendingPromise;
-    return {
-      stdout: [
-        JSON.stringify({ event: 'init', conversation_id: 'conv-init-1' }),
-        JSON.stringify({ event: 'result', result: { conversation_id: 'conv-init-1', status: 'SUCCESS', response: '```json\n{"status":"completed"}\n```' } }),
-      ].join('\n'),
-      stderr: '',
-    };
-  };
-
-  const startRes = await startAntigravityTask({
-    workspace: tempDir,
-    prompt: 'Check codebase status',
-    title: 'Check codebase status',
-    customAgyPath: process.execPath,
-    userApproved: true,
-    awaitCompletion: false,
-    runner: mockRunner,
-  });
-
-  const stored = store.getTask(startRes.taskId);
-  assert(stored, 'Task must be stored in TaskStore');
-  assert.equal(stored.taskId, startRes.taskId);
-  assert(stored.status === 'running' || stored.status === 'starting', `Status should be starting/running, got ${stored.status}`);
-
-  const rawFile = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-  assert(Array.isArray(rawFile.tasks) && rawFile.tasks.some((t) => t.taskId === startRes.taskId), 'Task must exist in tasks.json on disk');
-
-  finishRunner();
-  await new Promise((r) => setTimeout(r, 50));
-  fs.rmSync(tempDir, { recursive: true, force: true });
-});
-
-// ── 2. Waiting task persisted to disk ─────────────────────────────────────────
-await test('2. Waiting task is persisted to disk with interim reason', async () => {
-  const tempDir = createTempDir();
-  const filePath = path.join(tempDir, 'tasks.json');
-  const store = new TaskStore(filePath);
-  setTaskStore(store);
-
-  const mockRunner = async () => {
-    const contractObj = {
-      status: 'waiting',
-      summary: 'Awaiting API credentials confirmation',
-      interimReason: 'API credentials needed',
-    };
-    const contractJson = JSON.stringify(contractObj);
-    const fencedContract = `\`\`\`json\n${contractJson}\n\`\`\``;
-    return {
-      stdout: [
-        JSON.stringify({ event: 'init', conversation_id: 'conv-wait-2' }),
-        JSON.stringify({ event: 'agent_response', message: fencedContract }),
-        JSON.stringify({ event: 'result', result: { conversation_id: 'conv-wait-2', status: 'SUCCESS', response: fencedContract } }),
-      ].join('\n'),
-      stderr: '',
-    };
-  };
-
-  const startRes = await startAntigravityTask({
-    workspace: tempDir,
-    prompt: 'Setup API keys',
-    title: 'Setup API keys',
-    customAgyPath: process.execPath,
-    userApproved: true,
-    awaitCompletion: false,
-    runner: mockRunner,
-  });
-
-  await new Promise((r) => setTimeout(r, 60));
-  const task = getAntigravityTask(startRes.taskId);
-  assert.equal(task.status, 'waiting', 'Task must transition to waiting');
-
-  const stored = store.getTask(startRes.taskId);
-  assert.equal(stored.status, 'waiting');
-  assert.equal(stored.completion?.status, 'waiting');
-  assert.equal(stored.completion?.interimReason, 'API credentials needed');
-
-  fs.rmSync(tempDir, { recursive: true, force: true });
-});
-
-// ── 3. Restart restores state from disk ──────────────────────────────────────
 await test('3. Restart restores state correctly from tasks.json', async () => {
   const tempDir = createTempDir();
   const filePath = path.join(tempDir, 'tasks.json');
@@ -201,7 +92,7 @@ await test('3. Restart restores state correctly from tasks.json', async () => {
   fs.rmSync(tempDir, { recursive: true, force: true });
 });
 
-// ── 4. Running before restart -> recovery_required when unconfirmed ───────────
+
 await test('4. Interrupted running task transitions strictly to recovery_required on restart', async () => {
   const tempDir = createTempDir();
   const filePath = path.join(tempDir, 'tasks.json');
@@ -245,148 +136,7 @@ await test('4. Interrupted running task transitions strictly to recovery_require
   fs.rmSync(tempDir, { recursive: true, force: true });
 });
 
-// ── 5. Resume uses same conversationId ───────────────────────────────────────
-await test('5. Resume task re-uses original conversationId and never creates new conversation', async () => {
-  const tempDir = createTempDir();
-  const filePath = path.join(tempDir, 'tasks.json');
-  const store = new TaskStore(filePath);
-  setTaskStore(store);
 
-  const taskId = 'task-recover-conv-5';
-  const originalConvId = 'conv-original-session-12345';
-  store.saveTask({
-    taskId,
-    conversationId: originalConvId,
-    workspace: tempDir,
-    title: 'Task needing resume',
-    status: 'recovery_required',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  });
-
-  let runnerInvokedWithConv = null;
-  let runnerInvokedPrompt = null;
-
-  const mockResumeRunner = async (execPath, args, opts) => {
-    runnerInvokedWithConv = args[args.indexOf('--conversation') + 1];
-    runnerInvokedPrompt = opts.input;
-    const contract = JSON.stringify({
-      status: 'completed',
-      summary: 'Resumed task finished cleanly',
-    });
-    return {
-      stdout: JSON.stringify({ event: 'result', result: { conversation_id: originalConvId, status: 'SUCCESS', response: contract } }),
-      stderr: '',
-    };
-  };
-
-  const resumeRes = await resumeAntigravityTask({
-    taskId,
-    customAgyPath: process.execPath,
-    runner: mockResumeRunner,
-  });
-
-  assert.equal(resumeRes.taskId, taskId);
-  assert.equal(resumeRes.conversationId, originalConvId);
-  assert.equal(runnerInvokedWithConv, originalConvId, 'Runner must receive original conversationId');
-  assert(
-    (() => { try { return JSON.parse(runnerInvokedPrompt).message.content.includes(HEARTH_COMPLETION_INSTRUCTION); } catch { return runnerInvokedPrompt.includes(HEARTH_COMPLETION_INSTRUCTION); } })(),
-    'Must inject completion contract into message content'
-  );
-
-  const finishedTask = store.getTask(taskId);
-  assert.equal(finishedTask.status, 'done');
-  assert.equal(finishedTask.conversationId, originalConvId);
-
-  fs.rmSync(tempDir, { recursive: true, force: true });
-});
-
-// ── 6. Resume keeps same Hearth taskId ───────────────────────────────────────
-await test('6. Resume retains original Hearth taskId across polling and persistence', async () => {
-  const tempDir = createTempDir();
-  const filePath = path.join(tempDir, 'tasks.json');
-  const store = new TaskStore(filePath);
-  setTaskStore(store);
-
-  const originalTaskId = 'task-stable-id-443';
-  store.saveTask({
-    taskId: originalTaskId,
-    conversationId: 'conv-stable-443',
-    workspace: tempDir,
-    title: 'Stable ID task',
-    status: 'recovery_required',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  });
-
-  const mockResumeRunner = async () => ({
-    stdout: JSON.stringify({ event: 'result', result: { conversation_id: 'conv-stable-443', status: 'SUCCESS', response: '```json\n{"status":"completed"}\n```' } }),
-    stderr: '',
-  });
-
-  const res = await resumeAntigravityTask({
-    taskId: originalTaskId,
-    customAgyPath: process.execPath,
-    runner: mockResumeRunner,
-  });
-
-  assert.equal(res.taskId, originalTaskId, 'Must keep identical Hearth taskId');
-  const fetched = getAntigravityTask(originalTaskId);
-  assert.equal(fetched.taskId, originalTaskId);
-
-  fs.rmSync(tempDir, { recursive: true, force: true });
-});
-
-// ── 7. Duplicate resume blocked by mutex guard ───────────────────────────────
-await test('7. Rapid duplicate resume calls are blocked by mutex guard', async () => {
-  const tempDir = createTempDir();
-  const filePath = path.join(tempDir, 'tasks.json');
-  const store = new TaskStore(filePath);
-  setTaskStore(store);
-
-  const taskId = 'task-mutex-test-7';
-  store.saveTask({
-    taskId,
-    conversationId: 'conv-mutex-7',
-    workspace: tempDir,
-    title: 'Mutex task',
-    status: 'recovery_required',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  });
-
-  let finishSlowResume;
-  const pendingPromise = new Promise((resolve) => { finishSlowResume = resolve; });
-
-  const slowRunner = async () => {
-    await pendingPromise;
-    return {
-      stdout: JSON.stringify({ event: 'result', result: { conversation_id: 'conv-mutex-7', status: 'SUCCESS', response: '```json\n{"status":"completed","summary":"Mutex test task done"}\n```' } }),
-      stderr: '',
-    };
-  };
-
-  // p1 starts; because mutex is set synchronously (before any await), p2 is
-  // rejected immediately in the same microtask turn without needing p1 to finish.
-  const p1 = resumeAntigravityTask({ taskId, customAgyPath: process.execPath, runner: slowRunner });
-  let p2Rejected = false;
-  try {
-    // p2 must reject synchronously (mutex already locked by p1 before first await)
-    await resumeAntigravityTask({ taskId, customAgyPath: process.execPath, runner: slowRunner });
-  } catch (err) {
-    p2Rejected = true;
-    assert(err.message.includes('already in progress') || err.message.includes('already running'), `Unexpected error: ${err.message}`);
-  }
-
-  // Now unblock p1 and wait for it to finish
-  finishSlowResume();
-  await p1;
-  assert(p2Rejected, 'Second concurrent resume call must be rejected');
-
-  fs.rmSync(tempDir, { recursive: true, force: true });
-});
-
-// ── 8. Remote request not duplicated after restart (findTaskByRemoteLink) ─────
 await test('8. Remote task deduplication prevents re-processing after restart', async () => {
   const tempDir = createTempDir();
   const filePath = path.join(tempDir, 'tasks.json');
@@ -419,7 +169,7 @@ await test('8. Remote task deduplication prevents re-processing after restart', 
   fs.rmSync(tempDir, { recursive: true, force: true });
 });
 
-// ── 9. Completed/error terminal state restored correctly ─────────────────────
+
 await test('9. Completed and error terminal states are restored unchanged', async () => {
   const tempDir = createTempDir();
   const filePath = path.join(tempDir, 'tasks.json');
@@ -460,7 +210,7 @@ await test('9. Completed and error terminal states are restored unchanged', asyn
   fs.rmSync(tempDir, { recursive: true, force: true });
 });
 
-// ── 10. Corrupt state recovers safely from .bak ──────────────────────────────
+
 await test('10. Corrupt primary tasks.json safely falls back to valid .bak file', async () => {
   const tempDir = createTempDir();
   const filePath = path.join(tempDir, 'tasks.json');
@@ -493,7 +243,7 @@ await test('10. Corrupt primary tasks.json safely falls back to valid .bak file'
   fs.rmSync(tempDir, { recursive: true, force: true });
 });
 
-// ── 11. Corrupt primary + no backup fails safely to empty store ──────────────
+
 await test('11. Corrupt primary file with no backup falls back safely to empty state', async () => {
   const tempDir = createTempDir();
   const filePath = path.join(tempDir, 'tasks.json');
@@ -514,7 +264,7 @@ await test('11. Corrupt primary file with no backup falls back safely to empty s
   fs.rmSync(tempDir, { recursive: true, force: true });
 });
 
-// ── 12. Secrets/raw transcript not persisted ─────────────────────────────────
+
 await test('12. Credentials redacted and raw transcript excluded from persistent state', async () => {
   const rawSecretPrompt = 'API_KEY=AIzaSyA_SecretKey1234567890abcdefgh and Bearer ya29.a0AfH6SMDfake-token-secret-123456789';
   const testJwt = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.doNotLeakThisSignature';
@@ -544,38 +294,7 @@ await test('12. Credentials redacted and raw transcript excluded from persistent
   assert(sanitized.lastAnswer.includes('[REDACTED'), 'Redacted marker must be present');
 });
 
-// ── 13. Workspace lock survives active recovery ──────────────────────────────
-await test('13. Workspace lock blocks workspace change while recovery_required is pending', async () => {
-  const tempDir = createTempDir();
-  const filePath = path.join(tempDir, 'tasks.json');
-  const store = new TaskStore(filePath);
-  setTaskStore(store);
 
-  // Clear in-memory taskRegistry
-  for (const k of taskRegistry.keys()) taskRegistry.delete(k);
-
-  // No tasks: running task false
-  assert.equal(hasRunningTask(), false);
-
-  // Task in recovery_required (undismissed)
-  store.saveTask({
-    taskId: 'task-locking-1',
-    conversationId: 'c-lock-1',
-    workspace: tempDir,
-    status: 'recovery_required',
-    dismissed: false,
-  });
-
-  assert.equal(hasRunningTask(), true, 'hasRunningTask must return true for pending recovery_required');
-
-  // Once dismissed, workspace lock is released
-  store.dismissTask('task-locking-1');
-  assert.equal(hasRunningTask(), false, 'Dismissing recovery task releases lock');
-
-  fs.rmSync(tempDir, { recursive: true, force: true });
-});
-
-// ── 14. Goal checkpoint & currentStepId survive restart ──────────────────────
 await test('14. Goal checkpoints and currentStepId survive simulated application restart', async () => {
   const tempDir = createTempDir();
   const goalsPath = path.join(tempDir, 'goals.json');
@@ -622,7 +341,7 @@ await test('14. Goal checkpoints and currentStepId survive simulated application
   fs.rmSync(tempDir, { recursive: true, force: true });
 });
 
-// ── 15. Manual waiting goal still requires explicit sign-off after restart ───
+
 await test('15. Manual waiting goal step strictly enforces explicit sign-off after restart', async () => {
   const tempDir = createTempDir();
   const goalsPath = path.join(tempDir, 'goals.json');
@@ -634,7 +353,7 @@ await test('15. Manual waiting goal step strictly enforces explicit sign-off aft
     workspace: tempDir,
     steps: [
       { id: 'step-manual', title: 'Manual Review', route: 'manual', required: true },
-      { id: 'step-auto', title: 'Auto Execution', route: 'antigravity', required: true },
+      { id: 'step-auto', title: 'Auto Execution', route: 'manual', required: true },
     ],
   });
 
@@ -671,99 +390,6 @@ await test('15. Manual waiting goal step strictly enforces explicit sign-off aft
 
   assert.equal(signedOffGoal.steps[0].status, 'completed', 'Step completes only after explicit sign-off');
   assert.equal(signedOffGoal.currentStepId, 'step-auto', 'Advances to next step only after sign-off');
-
-  fs.rmSync(tempDir, { recursive: true, force: true });
-});
-
-// ── 16. No false-DONE after restart ──────────────────────────────────────────
-await test('16. Restart reconciliation and parser strictly preserve no false-DONE invariant', async () => {
-  const tempDir = createTempDir();
-  const filePath = path.join(tempDir, 'tasks.json');
-  const store = new TaskStore(filePath);
-
-  // Store task that had status 'running' and non-contract prose in lastAnswer
-  store.saveTask({
-    taskId: 'task-no-false-done',
-    conversationId: 'c-nfd',
-    workspace: tempDir,
-    title: 'Prose only task',
-    status: 'running',
-    lastAnswer: 'All steps done! Everything completed successfully! All good!',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  });
-
-  store.reconcileStartupState();
-  const task = store.getTask('task-no-false-done');
-  assert.equal(task.status, 'recovery_required', 'Must be recovery_required, NEVER done');
-  assert(task.status !== 'done', 'No false DONE');
-
-  // Verify classifier rejects conversational prose even with words like "done"
-  const classification = classifyCompletion(task.lastAnswer);
-  assert(classification.status !== 'completed', 'Classifier must reject ordinary prose as not completed');
-
-  fs.rmSync(tempDir, { recursive: true, force: true });
-});
-
-// ── 17. Remote terminal state sync works after recovery (markTaskFailed) ─────
-await test('17. Mark Failed transitions task and enables terminal error state', async () => {
-  const tempDir = createTempDir();
-  const filePath = path.join(tempDir, 'tasks.json');
-  const store = new TaskStore(filePath);
-  setTaskStore(store);
-
-  const taskId = 'task-remote-fail-test';
-  store.saveTask({
-    taskId,
-    conversationId: 'conv-remote-fail',
-    remoteTaskId: 'remote-777',
-    source: 'remote',
-    workspace: tempDir,
-    title: 'Remote failing task',
-    status: 'recovery_required',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  });
-
-  const updated = markTaskFailed({ taskId, reason: 'Remote device restarted unexpectedly' });
-  assert.equal(updated.status, 'error');
-  assert.equal(updated.error, 'Remote device restarted unexpectedly');
-
-  const onDisk = store.getTask(taskId);
-  assert.equal(onDisk.status, 'error');
-  assert.equal(onDisk.error, 'Remote device restarted unexpectedly');
-
-  fs.rmSync(tempDir, { recursive: true, force: true });
-});
-
-// ── 18. Dismiss removes from active view without destroying history ──────────
-await test('18. Dismiss marks dismissed=true without destroying task history or marking done', async () => {
-  const tempDir = createTempDir();
-  const filePath = path.join(tempDir, 'tasks.json');
-  const store = new TaskStore(filePath);
-  setTaskStore(store);
-
-  const taskId = 'task-dismiss-test';
-  store.saveTask({
-    taskId,
-    conversationId: 'conv-dismiss',
-    workspace: tempDir,
-    title: 'Task to dismiss',
-    status: 'recovery_required',
-    lastAnswer: 'Evidence of previous work',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  });
-
-  const dismissed = dismissRecoveryTask(taskId);
-  assert.equal(dismissed.dismissed, true);
-  assert.equal(dismissed.status, 'recovery_required', 'Dismiss must NOT change status to done');
-
-  // Still exists in store with all history intact
-  const onDisk = store.getTask(taskId);
-  assert(onDisk, 'Task must not be deleted from disk');
-  assert.equal(onDisk.dismissed, true);
-  assert.equal(onDisk.lastAnswer, 'Evidence of previous work');
 
   fs.rmSync(tempDir, { recursive: true, force: true });
 });

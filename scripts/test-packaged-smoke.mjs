@@ -1,5 +1,5 @@
 /**
- * Native smoke test for packaged Hearth Control v0.4.0 (outputs/Hearth Control.app)
+ * Native smoke test for packaged Hearth Control (release/mac-arm64/Hearth Control.app)
  * Verifies Goal Runner V1 features, manual sign-off, workspace locking, and baseline non-regression.
  */
 import assert from 'node:assert/strict';
@@ -9,10 +9,10 @@ const fs = originalFs?.promises || (await import('node:fs/promises')).default;
 import os from 'node:os';
 import { pathToFileURL } from 'node:url';
 
-console.log('\n=== Hearth Control v0.4.0 Packaged Smoke Test ===\n');
+console.log('\n=== Hearth Control Packaged Smoke Test ===\n');
 
 const repoRoot = process.cwd();
-const asarPath = path.join(repoRoot, 'outputs/Hearth Control.app/Contents/Resources/app.asar');
+const asarPath = path.join(repoRoot, 'release/mac-arm64/Hearth Control.app/Contents/Resources/app.asar');
 
 // 1. Verify app.asar and dist/index.html
 console.log('1. Checking app.asar and frontend bundle assets...');
@@ -22,13 +22,13 @@ assert.ok(stat.isFile() && stat.size > 1000000, 'app.asar must exist and be > 1M
 // Dynamically import packaged modules from app.asar
 const storageUrl = pathToFileURL(path.join(asarPath, 'mcp/goals/storage.mjs')).href;
 const runnerUrl = pathToFileURL(path.join(asarPath, 'mcp/goals/runner.mjs')).href;
-const agyUrl = pathToFileURL(path.join(asarPath, 'mcp/executors/antigravity.mjs')).href;
+const securityUrl = pathToFileURL(path.join(asarPath, 'mcp/security/redact-secrets.mjs')).href;
 const bridgeClientUrl = pathToFileURL(path.join(asarPath, 'mcp/bridge/client.mjs')).href;
 const bridgeIdentityUrl = pathToFileURL(path.join(asarPath, 'mcp/bridge/identity.mjs')).href;
 
 const { GoalStorage } = await import(storageUrl);
 const { GoalRunner } = await import(runnerUrl);
-const { redactSecrets } = await import(agyUrl);
+const { redactSecrets } = await import(securityUrl);
 const { HearthBridgeClient } = await import(bridgeClientUrl);
 const { generatePairingSecret, hashPairingSecret } = await import(bridgeIdentityUrl);
 
@@ -41,13 +41,7 @@ await fs.mkdir(testWorkspace, { recursive: true });
 const storageFile = path.join(fixtureDir, 'goals.json');
 
 const storage = new GoalStorage({ storagePath: storageFile });
-const runner = new GoalRunner({
-  storage,
-  antigravityExecutor: {
-    startAntigravityTask: async () => ({ taskId: 'smoke-task-1', conversationId: 'c1' }),
-    getAntigravityTask: () => ({ status: 'done', completion: { summary: 'Auto step finished' } }),
-  },
-});
+const runner = new GoalRunner({ storage });
 
 // 3. Create Manual Goal Fixture
 console.log('2. Creating Manual Goal fixture...');
@@ -96,6 +90,7 @@ const signedOffGoal = await runner.signoff_step(goal.id, 's1', {
   action: 'complete',
   note: 'Step approved by smoke test operator',
   autoRun: true,
+  executeStepFn: async () => ({ status: 'completed', summary: 'Packaged module callback completed' }),
 });
 assert.equal(signedOffGoal.steps[0].status, 'completed');
 assert.equal(signedOffGoal.steps[1].status, 'completed');

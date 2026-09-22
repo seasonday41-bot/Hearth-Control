@@ -88,7 +88,7 @@ function buildApprovalHarness({ withSend = true } = {}) {
 
 test('HTTP-A1 a matching approval:result settles the pending approval with reason user', async () => {
   const h = buildApprovalHarness();
-  const promise = h.requestApproval({ permission: 'Antigravity', action: 'do thing' });
+  const promise = h.requestApproval({ permission: 'X', action: 'do thing' });
   assert.equal(h.approvals.size, 1);
   const [requestId] = h.approvals.keys();
   h.triggerMessage({ type: 'approval:result', requestId, allowed: true });
@@ -104,7 +104,7 @@ test('HTTP-A1 a matching approval:result settles the pending approval with reaso
 
 test('HTTP-A2 an approval:result for an unknown requestId is a harmless no-op', () => {
   const h = buildApprovalHarness();
-  h.requestApproval({ permission: 'Antigravity', action: 'do thing' });
+  h.requestApproval({ permission: 'X', action: 'do thing' });
   assert.equal(h.approvals.size, 1);
   h.triggerMessage({ type: 'approval:result', requestId: 'not-a-real-id', allowed: true });
   assert.equal(h.approvals.size, 1, 'the real pending approval must remain untouched');
@@ -113,7 +113,7 @@ test('HTTP-A2 an approval:result for an unknown requestId is a harmless no-op', 
 
 test('HTTP-A3 the 60s timeout settles false with reason timeout and removes the pending entry', () => {
   const h = buildApprovalHarness();
-  h.requestApproval({ permission: 'Antigravity', action: 'do thing' });
+  h.requestApproval({ permission: 'X', action: 'do thing' });
   assert.equal(h.approvals.size, 1);
   const [requestId] = h.approvals.keys();
   const timeoutHandle = h.timers.scheduled.find((t) => t.delay === 60000);
@@ -129,7 +129,7 @@ test('HTTP-A3 the 60s timeout settles false with reason timeout and removes the 
 
 test('HTTP-A4 with no process.send transport, the approval settles immediately with reason aborted and leaks nothing', async () => {
   const h = buildApprovalHarness({ withSend: false });
-  const allowed = await h.requestApproval({ permission: 'Antigravity', action: 'do thing' });
+  const allowed = await h.requestApproval({ permission: 'X', action: 'do thing' });
   assert.equal(allowed, false);
   assert.equal(h.approvals.size, 0, 'no pending entry may be left behind');
   assert.equal(h.sent.length, 0, 'no process.send exists, so no notification could have been sent');
@@ -137,7 +137,7 @@ test('HTTP-A4 with no process.send transport, the approval settles immediately w
 
 test('HTTP-A5 shutdown drains every pending approval with reason shutdown', async () => {
   const h = buildApprovalHarness();
-  const first = h.requestApproval({ permission: 'Antigravity', action: 'first' });
+  const first = h.requestApproval({ permission: 'X', action: 'first' });
   const second = h.requestApproval({ permission: 'Terminal', action: 'second' });
   assert.equal(h.approvals.size, 2);
   h.shutdown();
@@ -163,7 +163,7 @@ test('HTTP-A5 shutdown drains every pending approval with reason shutdown', asyn
 
 test('HTTP-A6 a duplicate or late resolution after settlement is a harmless no-op', async () => {
   const h = buildApprovalHarness();
-  const promise = h.requestApproval({ permission: 'Antigravity', action: 'do thing' });
+  const promise = h.requestApproval({ permission: 'X', action: 'do thing' });
   const [requestId] = h.approvals.keys();
   h.triggerMessage({ type: 'approval:result', requestId, allowed: true });
   const allowed = await promise;

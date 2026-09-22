@@ -99,23 +99,10 @@ const makeMockXExecutor = () => {
   };
 };
 
-const mockAntigravityExecutor = (spy) => ({
-  startAntigravityTask: async (opts) => {
-    spy.push(opts);
-    return { taskId: 'mock-anti-1', conversationId: 'c1' };
-  },
-  getAntigravityTask: () => ({
-    taskId: 'mock-anti-1',
-    status: 'done',
-    lastAnswer: 'Antigravity step completed',
-    completion: { status: 'done' },
-  }),
-});
-
 console.log('\n=== Hearth Goal Runner -> X Test Suite ===\n');
 
 // ── 1. Legacy free-text Goal still validates unchanged ─────────────────────
-await test('1. existing free-text legacy Goal still validates unchanged', async () => {
+await test('1. free-text manual Goal remains valid', async () => {
   const storage = new GoalStorage({ storagePath: freshStoragePath() });
   const runner = new GoalRunner({ storage });
 
@@ -123,10 +110,10 @@ await test('1. existing free-text legacy Goal still validates unchanged', async 
     title: 'Legacy Goal',
     objective: 'Free-text steps only',
     workspace: testWorkspace,
-    steps: [{ id: 's1', title: 'Do a thing', description: 'Free text instructions', route: 'antigravity' }],
+    steps: [{ id: 's1', title: 'Do a thing', description: 'Free text instructions', route: 'manual' }],
   });
 
-  assert.equal(goal.steps[0].route, 'antigravity');
+  assert.equal(goal.steps[0].route, 'manual');
   assert.equal(goal.steps[0].xTask, null);
 });
 
@@ -235,12 +222,11 @@ await test('6. X step uses shared X ingress', async () => {
   assert.equal(finished.steps[0].result, 'main / abc123 / clean');
 });
 
-// ── 7. X step never calls Antigravity ───────────────────────────────────────
-await test('7. X step never calls Antigravity', async () => {
+// ── 7. X step uses its configured executor ───────────────────────────────────────
+await test('7. X step uses its configured executor', async () => {
   const storage = new GoalStorage({ storagePath: freshStoragePath() });
   const xExecutor = makeMockXExecutor();
-  const antigravityCalls = [];
-  const runner = new GoalRunner({ storage, xExecutor, antigravityExecutor: mockAntigravityExecutor(antigravityCalls) });
+  const runner = new GoalRunner({ storage, xExecutor });
 
   const goal = await runner.create_goal({
     title: 'No Anti Goal',
@@ -254,7 +240,6 @@ await test('7. X step never calls Antigravity', async () => {
 
   await runner.run_goal(goal.id);
 
-  assert.equal(antigravityCalls.length, 0, 'Antigravity must never be invoked for a route:x step');
 });
 
 // ── 8 & 9. Stable requestId + duplicate resume never duplicates X execution ─
@@ -292,36 +277,33 @@ await test('8/9. requestId is stable per goal+step, and duplicate resume does no
 await test('10. COMPLETED advances to next already-authored step', async () => {
   const storage = new GoalStorage({ storagePath: freshStoragePath() });
   const xExecutor = makeMockXExecutor();
-  const antigravityCalls = [];
-  const runner = new GoalRunner({ storage, xExecutor, antigravityExecutor: mockAntigravityExecutor(antigravityCalls) });
+  const runner = new GoalRunner({ storage, xExecutor });
 
   const goal = await runner.create_goal({
     title: 'Two Step Goal',
-    objective: 'X then Antigravity',
+    objective: 'X then manual review',
     workspace: testWorkspace,
     steps: [
       { id: 's1', title: 'X step', description: '', route: 'x', xTask: validXTask() },
-      { id: 's2', title: 'Anti step', description: 'Second step', route: 'antigravity' },
+      { id: 's2', title: 'Manual step', description: 'Second step', route: 'manual' },
     ],
   });
 
   const requestId = `goal:${goal.id}:step:s1`;
   xExecutor.statuses.set(requestId, { found: true, queue_status: 'terminal', terminal_status: 'completed', result: 'x step ok' });
 
-  const finished = await runner.run_goal(goal.id, { permissions: { Antigravity: 'Allow' } });
+  const finished = await runner.run_goal(goal.id);
 
   assert.equal(finished.steps[0].status, 'completed');
-  assert.equal(finished.steps[1].status, 'completed');
-  assert.equal(finished.status, 'completed');
-  assert.equal(antigravityCalls.length, 1, 'second (antigravity) step must have run after the first (x) step completed');
+  assert.equal(finished.steps[1].status, 'waiting');
+  assert.equal(finished.status, 'waiting');
 });
 
 // ── 11. NEEDS_REVIEW stops automatic continuation ───────────────────────────
 await test('11. NEEDS_REVIEW stops automatic continuation', async () => {
   const storage = new GoalStorage({ storagePath: freshStoragePath() });
   const xExecutor = makeMockXExecutor();
-  const antigravityCalls = [];
-  const runner = new GoalRunner({ storage, xExecutor, antigravityExecutor: mockAntigravityExecutor(antigravityCalls) });
+  const runner = new GoalRunner({ storage, xExecutor });
 
   const goal = await runner.create_goal({
     title: 'Needs Review Goal',
@@ -329,7 +311,7 @@ await test('11. NEEDS_REVIEW stops automatic continuation', async () => {
     workspace: testWorkspace,
     steps: [
       { id: 's1', title: 'X step', description: '', route: 'x', xTask: validXTask() },
-      { id: 's2', title: 'Anti step', description: 'Never runs', route: 'antigravity' },
+      { id: 's2', title: 'Manual step', description: 'Never runs', route: 'manual' },
     ],
   });
 
@@ -341,15 +323,13 @@ await test('11. NEEDS_REVIEW stops automatic continuation', async () => {
   assert.equal(finished.steps[0].status, 'waiting');
   assert.equal(finished.steps[1].status, 'pending', 'dependent step must not have been dispatched');
   assert.equal(finished.status, 'waiting');
-  assert.equal(antigravityCalls.length, 0);
 });
 
 // ── 12. FAILED stops dependent continuation ─────────────────────────────────
 await test('12. FAILED stops dependent continuation', async () => {
   const storage = new GoalStorage({ storagePath: freshStoragePath() });
   const xExecutor = makeMockXExecutor();
-  const antigravityCalls = [];
-  const runner = new GoalRunner({ storage, xExecutor, antigravityExecutor: mockAntigravityExecutor(antigravityCalls) });
+  const runner = new GoalRunner({ storage, xExecutor });
 
   const goal = await runner.create_goal({
     title: 'Failed Goal',
@@ -357,7 +337,7 @@ await test('12. FAILED stops dependent continuation', async () => {
     workspace: testWorkspace,
     steps: [
       { id: 's1', title: 'X step', description: '', route: 'x', xTask: validXTask(), required: true },
-      { id: 's2', title: 'Anti step', description: 'Never runs', route: 'antigravity' },
+      { id: 's2', title: 'Manual step', description: 'Never runs', route: 'manual' },
     ],
   });
 
@@ -370,7 +350,6 @@ await test('12. FAILED stops dependent continuation', async () => {
   assert.equal(finished.steps[1].status, 'pending');
   assert.equal(finished.status, 'error');
   assert.match(finished.error, /x execution failed/);
-  assert.equal(antigravityCalls.length, 0);
 });
 
 // ── 12b. FAILED result with no top-level error surfaces reason_code + blocker reason/detail ──
@@ -627,22 +606,14 @@ await test('16b. a running X step is demoted to paused on restart, then safely r
   assert.equal(restartedXExecutor.dispatchLog[0].requestId, requestId);
 });
 
-// ── 17. Legacy Antigravity Goal route still works ───────────────────────────
-await test('17. legacy Antigravity Goal route still works', async () => {
+// ── 17. Retired route fails closed for new goals ────────────────────────────
+await test('17. retired route cannot be added to a new Goal', async () => {
   const storage = new GoalStorage({ storagePath: freshStoragePath() });
-  const antigravityCalls = [];
-  const runner = new GoalRunner({ storage, antigravityExecutor: mockAntigravityExecutor(antigravityCalls) });
-
-  const goal = await runner.create_goal({
-    title: 'Legacy Antigravity Goal',
-    objective: 'No X involved',
-    workspace: testWorkspace,
-    steps: [{ id: 's1', title: 'Anti step', description: 'Free text', route: 'antigravity' }],
-  });
-
-  const finished = await runner.run_goal(goal.id, { permissions: { Antigravity: 'Allow' } });
-  assert.equal(finished.status, 'completed');
-  assert.equal(antigravityCalls.length, 1);
+  const runner = new GoalRunner({ storage });
+  await assert.rejects(() => runner.create_goal({
+    title: 'Retired route', objective: 'Preserve historical safety', workspace: testWorkspace,
+    steps: [{ id: 's1', title: 'Legacy step', route: 'antigravity' }],
+  }), /goal_step_route_retired/);
 });
 
 // ── Additional: X executor not configured fails closed ─────────────────────

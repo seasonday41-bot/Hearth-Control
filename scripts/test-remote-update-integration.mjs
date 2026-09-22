@@ -347,7 +347,7 @@ test('14. remote renderer payload cannot inject userApproved or trust authority'
 });
 
 test('15. remote preparation cannot bypass the authoritative runtime preflight', () => {
-  const install = mainSource.slice(mainSource.indexOf("ipcMain.handle('updater:install'"), mainSource.indexOf("ipcMain.handle('antigravity:status'"));
+  const install = mainSource.slice(mainSource.indexOf("ipcMain.handle('updater:install'"), mainSource.indexOf("// Bridge Initialization & Handlers"));
   const initial = install.indexOf('getUpdaterRuntimeBlocker()');
   const dialog = install.indexOf('dialog.showMessageBox');
   const late = install.indexOf('getUpdaterRuntimeBlocker({ ignoreUpdaterBusy: true })');
@@ -357,7 +357,7 @@ test('15. remote preparation cannot bypass the authoritative runtime preflight',
 });
 
 test('16. local native approval cancellation still prevents installation', async () => {
-  const install = mainSource.slice(mainSource.indexOf("ipcMain.handle('updater:install'"), mainSource.indexOf("ipcMain.handle('antigravity:status'"));
+  const install = mainSource.slice(mainSource.indexOf("ipcMain.handle('updater:install'"), mainSource.indexOf("// Bridge Initialization & Handlers"));
   const dialog = install.indexOf('dialog.showMessageBox');
   const cancel = install.indexOf('approval.response !== 0');
   const installer = install.indexOf('localUpdater.installUpdate(');
@@ -369,7 +369,7 @@ test('16. local native approval cancellation still prevents installation', async
 });
 
 test('17. safe runtime + explicit local approval still reaches the existing installer path', () => {
-  const install = mainSource.slice(mainSource.indexOf("ipcMain.handle('updater:install'"), mainSource.indexOf("ipcMain.handle('antigravity:status'"));
+  const install = mainSource.slice(mainSource.indexOf("ipcMain.handle('updater:install'"), mainSource.indexOf("// Bridge Initialization & Handlers"));
   assert.ok(install.includes('event.sender.id !== mainWindow.webContents.id'));
   assert.ok(install.includes('userApproved: true'));
   assert.ok(install.includes('localUpdater.readAndValidateManifest(installUpdateDirectory'));

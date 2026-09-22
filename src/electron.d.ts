@@ -172,13 +172,6 @@ interface InvestStatus {
 }
 interface ServerEvent { type: 'state' | 'log' | 'approval' | 'approval:resolved' | 'bridge:state' | 'publicTasks:state' | 'goals:updated' | 'invest:updated'; state?: ServerState | BridgeState | PublicTasksState; status?: InvestStatus; goal?: Goal; source?: string; tone?: string; message?: string; requestId?: string; permission?: string; action?: string; allowed?: boolean; reason?: 'user' | 'timeout' | 'aborted' | 'shutdown'; }
 
-interface AntigravityStatus {
-  available: boolean;
-  agentApiPath: string | null;
-  appPath: string | null;
-  reason: string | null;
-}
-
 interface XQueueStatus {
   found: boolean;
   reason?: string;
@@ -209,43 +202,6 @@ interface XRunSummary {
   result: any;
 }
 
-interface AntigravityTaskEvent {
-  stepIndex: number;
-  type: string;
-  status: string | null;
-  createdAt: string;
-  summary: string;
-}
-
-interface AntigravityCompletion {
-  status: 'done' | 'waiting' | 'error';
-  normalizedStatus: 'completed' | 'waiting' | 'error';
-  summary: string;
-  error: string | null;
-  checks: { build: 'passed' | 'failed' | 'not_run'; tests: 'passed' | 'failed' | 'not_run' };
-  artifacts: string[];
-  interimReason?: string | null;
-}
-
-interface AntigravityTaskData {
-  taskId: string;
-  conversationId: string | null;
-  status: 'pending' | 'starting' | 'running' | 'waiting' | 'paused' | 'done' | 'error' | 'recovery_required';
-  workspace: string;
-  title: string;
-  source?: string;
-  remoteTaskId?: string | null;
-  requestId?: string | null;
-  dismissed?: boolean;
-  createdAt: string;
-  updatedAt: string;
-  lastEvent: AntigravityTaskEvent | null;
-  recentEvents: AntigravityTaskEvent[];
-  lastAnswer?: string | null;
-  error?: string | null;
-  completion?: AntigravityCompletion | null;
-}
-
 interface BridgeTask {
   id: string;
   deviceId: string;
@@ -255,7 +211,7 @@ interface BridgeTask {
   status: string;
   createdAt: string;
   requestId?: string | null;
-  /** Present and 'x' only for a Project X (public.tasks) row -- routes Approve through the X queue instead of Antigravity. */
+  /** Present and 'x' only for a Project X (public.tasks) row. Other rows remain reviewable but have no execution route. */
   routedTo?: 'x';
 }
 
@@ -305,7 +261,7 @@ interface UpdateCheck extends Pick<UpdaterInfo, 'currentVersion' | 'currentBuild
 
 type GoalStatus = 'draft' | 'ready' | 'running' | 'waiting' | 'paused' | 'error' | 'completed';
 type StepStatus = 'pending' | 'running' | 'waiting' | 'paused' | 'error' | 'completed' | 'skipped';
-type StepRoute = 'mcp' | 'antigravity' | 'manual';
+type StepRoute = 'mcp' | 'manual';
 
 interface GoalStep {
   id: string;
@@ -350,7 +306,7 @@ interface Goal {
   updatedAt: string;
   finishedAt: string | null;
   error: string | null;
-  route: 'mcp' | 'antigravity' | 'hybrid';
+  route: 'mcp' | 'manual' | 'hybrid';
 }
 
 interface Window { controlApp: {
@@ -387,14 +343,6 @@ interface Window { controlApp: {
   startServer: (options: { workspace: string; port: number }) => Promise<ServerState>;
   stopServer: () => Promise<ServerState>;
   respondToApproval: (response: { requestId: string; allowed: boolean }) => Promise<boolean>;
-  antigravityStatus: () => Promise<AntigravityStatus>;
-  antigravityStart: (options: { prompt: string; title?: string }) => Promise<{ taskId: string; conversationId: string; status: string; startedAt: string; workspace: string }>;
-  antigravityTask: (taskId: string) => Promise<AntigravityTaskData>;
-  antigravitySend: (options: { taskId: string; message: string }) => Promise<{ taskId: string; conversationId: string; status: string; sentAt: string }>;
-  antigravityResume: (taskId: string) => Promise<{ taskId: string; conversationId: string; status: string; resumedAt: string; workspace: string }>;
-  antigravityMarkFailed: (options: { taskId: string; reason?: string }) => Promise<AntigravityTaskData>;
-  antigravityDismiss: (taskId: string) => Promise<AntigravityTaskData>;
-  antigravityListTasks: () => Promise<AntigravityTaskData[]>;
   xQueueStatus: (requestId: string) => Promise<XQueueStatus>;
   xListRuns: (limit?: number) => Promise<XRunSummary[]>;
   updaterGetInfo: () => Promise<UpdaterInfo>;
@@ -427,7 +375,7 @@ interface Window { controlApp: {
   claudeStatus: () => Promise<{ available: boolean }>;
   goalsClearHistory: () => Promise<{ removedIds: string[]; remaining: Goal[] }>;
   goalsGet: (goalId: string) => Promise<Goal | null>;
-  goalsCreate: (data: { title: string; objective: string; workspace?: string; steps: Partial<GoalStep>[]; constraints?: string[]; route?: 'mcp' | 'antigravity' | 'hybrid' }) => Promise<Goal>;
+  goalsCreate: (data: { title: string; objective: string; workspace?: string; steps: Partial<GoalStep>[]; constraints?: string[]; route?: 'mcp' | 'manual' | 'hybrid' }) => Promise<Goal>;
   goalsRun: (goalId: string) => Promise<Goal>;
   goalsPause: (goalId: string) => Promise<Goal>;
   goalsResume: (goalId: string) => Promise<Goal>;

@@ -1,5 +1,7 @@
 # X Executor v1 — Canonical Implementation Spec
 
+> Historical design record. Anti/Antigravity has been removed from the active 0.4.24 product; references below describe prior architecture and must not be used as current operating instructions.
+
 Status: **DESIGN FROZEN — AUDIT BEFORE IMPLEMENTATION**  
 Date: 2026-09-13  
 Repository: `seasonday41-bot/Hearth-Control`  

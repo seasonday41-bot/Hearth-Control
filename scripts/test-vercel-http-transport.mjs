@@ -27,7 +27,7 @@ test('P6 HTTP transport round-trips Vercel read request with no credential mater
       ...process.env,
       CONTROL_PORT: String(port),
       CONTROL_WORKSPACE: root,
-      CONTROL_PERMISSIONS: JSON.stringify({ Git: 'Blocked', Files: 'Allow', Terminal: 'Blocked', Browser: 'Blocked', Antigravity: 'Blocked', Vercel: 'Allow' }),
+      CONTROL_PERMISSIONS: JSON.stringify({ Git: 'Blocked', Files: 'Allow', Terminal: 'Blocked', Browser: 'Blocked', Vercel: 'Allow' }),
       HEARTH_RUNTIME_DIR: root,
     },
   });

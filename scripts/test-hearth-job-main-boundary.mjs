@@ -47,22 +47,18 @@ test('P8.14 Electron X route reuses canonical ingestXTask with no approval bypas
   assert.doesNotMatch(ingress, /runXTask\(/);
 });
 
-test('P8.15 Electron general route is TaskStore-owned and reuses Antigravity runtime', () => {
-  assert.match(ingress, /taskStore\.getTask\(taskId\)/);
-  assert.match(ingress, /await startAntigravityTask\(/);
-  assert.match(ingress, /existingTaskId: taskId/);
-  assert.match(ingress, /requestId,/);
-  assert.match(ingress, /getProductionAntigravityClaimStore/);
-  assert.match(ingress, /void monitorTaskTransition\(result\.taskId\)/);
-  assert.doesNotMatch(router, /new TaskStore|new JobManager|XQueueStore|XRunStore/);
+test('P8.15 general route is unavailable and legacy status fails closed', () => {
+  assert.match(router, /hearth_job_route_unavailable/);
+  assert.doesNotMatch(router, /general:\s*'/);
+  assert.match(ingress, /route: marketKind \? 'market' : 'unsupported'/);
+  assert.match(ingress, /reason: 'route_retired'/);
 });
 
 test('P8.16 cross-route ambiguity and same-id conflicts fail closed', () => {
   assert.match(ingress, /if \(xReceipt && storedTask\) throw hearthJobError\('ambiguous_job_state'\)/);
   assert.match(ingress, /if \(route === 'x' && storedTask\) throw hearthJobError\('job_route_conflict'\)/);
-  assert.match(ingress, /if \(route === 'antigravity' && \(xReceipt \|\| storedMarketKind\)\) throw hearthJobError\('job_route_conflict'\)/);
   assert.match(ingress, /if \(route === 'market' && \(xReceipt \|\| \(storedTask && !storedMarketKind\)\)\) throw hearthJobError\('job_route_conflict'\)/);
-  assert.match(ingress, /if \(current\.requestId !== requestId\) throw hearthJobError\('job_id_conflict'\)/);
+  assert.match(ingress, /if \(current\.requestId !== marketRequestId\) throw hearthJobError\('job_id_conflict'\)/);
   assert.match(ingress, /existingInflight\.fingerprint !== fingerprint/);
 });
 
@@ -75,23 +71,21 @@ test('P8.17 universal workspace is transport/Electron-owned and three-way checke
   assert.match(ingress, /childRoot !== reportedRoot \|\| childRoot !== settingsRoot/);
 });
 
-test('P8.18 Antigravity permission and approval liveness stay authoritative', () => {
-  assert.match(ingress, /readSettings\(\)\.permissions\?\.Antigravity \?\? 'Ask'/);
+test('P8.18 market permission and approval liveness remain authoritative', () => {
+  assert.match(ingress, /readSettings\(\)\.permissions\?\.MarketResearch \?\? 'Ask'/);
   assert.match(ingress, /permission === 'Blocked'/);
   assert.match(ingress, /requestHearthJobPermissionApproval/);
-  assert.match(ingress, /'Antigravity'/);
   assert.match(ingress, /shared\.abort\.signal\.aborted/);
   assert.match(ingress, /shared\.waiters\.size === 0/);
   assert.match(ingress, /serverProcess !== child/);
   assert.match(ingress, /shared\.committed = true/);
-  assert.match(ingress, /type: 'approval:resolved'/);
 });
 
 test('P8.19 cancellation removes generic waiters and aborts only uncommitted orphaned work', () => {
   assert.match(ingress, /waiter\.xInflight\.waiters\.delete\(transportId\)/);
   assert.match(ingress, /!waiter\.xInflight\.committed && waiter\.xInflight\.waiters\.size === 0/);
-  assert.match(ingress, /waiter\.generalInflight\.waiters\.delete\(transportId\)/);
-  assert.match(ingress, /!waiter\.generalInflight\.committed && waiter\.generalInflight\.waiters\.size === 0/);
+  assert.match(ingress, /waiter\.marketInflight\.waiters\.delete\(transportId\)/);
+  assert.match(ingress, /!waiter\.marketInflight\.committed && waiter\.marketInflight\.waiters\.size === 0/);
   assert.match(handler, /hearth_job_request_cancel/);
   assert.match(main, /cancelHearthJobChild\(child\)/);
   assert.match(main, /for \(const transportId of hearthJobRequests\.keys\(\)\) cancelHearthJobRequest\(transportId\)/);

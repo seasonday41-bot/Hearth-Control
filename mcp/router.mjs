@@ -1,9 +1,8 @@
-import { redactSecrets } from './executors/antigravity.mjs';
+import { redactSecrets } from './security/redact-secrets.mjs';
 
 export const ROUTE_TYPES = Object.freeze({
   AUTO: 'auto',
   MCP: 'mcp',
-  ANTIGRAVITY: 'antigravity',
   MANUAL: 'manual',
 });
 
@@ -109,11 +108,11 @@ export const checkDestructiveOrBlocked = (prompt) => {
 };
 
 /**
- * Checks if prompt matches Antigravity patterns (code editing, refactoring, build/test, etc.).
+ * Checks if prompt requires execution outside read-only MCP tools (code editing, refactoring, build/test, etc.).
  * @param {string} prompt
  * @returns {{ matches: boolean, reason: string | null }}
  */
-export const checkAntigravityPreferred = (prompt) => {
+export const checkExecutionRequired = (prompt) => {
   const lower = prompt.toLowerCase();
 
   // Code modifications / refactor / implementation
@@ -129,7 +128,7 @@ export const checkAntigravityPreferred = (prompt) => {
 
   for (const p of editPatterns) {
     if (p.test(lower)) {
-      return { matches: true, reason: 'Antigravity · multi-step code change' };
+      return { matches: true, reason: 'Manual · code change requires an explicit executor' };
     }
   }
 
@@ -145,13 +144,13 @@ export const checkAntigravityPreferred = (prompt) => {
 
   for (const p of buildTestPatterns) {
     if (p.test(lower)) {
-      return { matches: true, reason: 'Antigravity · build/test workflow' };
+      return { matches: true, reason: 'Manual · build or test requires an explicit executor' };
     }
   }
 
   // Multi-step complex reasoning (numbered lists, sequential clauses)
   if (/(?:1\.\s+.*\n2\.\s+|first\b.*\bthen\b.*\bfinally\b)/i.test(prompt)) {
-    return { matches: true, reason: 'Antigravity · multi-step engineering work' };
+    return { matches: true, reason: 'Manual · multi-step work requires an explicit executor' };
   }
 
   return { matches: false, reason: null };
@@ -239,7 +238,7 @@ export const checkMcpPreferred = (prompt) => {
  *
  * @param {object} options
  * @param {string} options.prompt - Natural language task instruction.
- * @param {string} [options.requestedRoute='auto'] - User route selection: 'auto' | 'mcp' | 'antigravity' | 'manual'.
+ * @param {string} [options.requestedRoute='auto'] - User route selection: 'auto' | 'mcp' | 'manual'.
  * @param {Record<string, string>} [options.permissions={}] - Hearth permissions.
  * @param {string} [options.workspace=''] - Workspace root path.
  * @returns {{
@@ -259,20 +258,9 @@ export const classifyTask = ({
   workspace = '',
 }) => {
   const cleanPrompt = typeof prompt === 'string' ? prompt.trim() : '';
-  const cleanRequested = ['auto', 'mcp', 'antigravity', 'manual'].includes(requestedRoute)
+  const cleanRequested = ['auto', 'mcp', 'manual'].includes(requestedRoute)
     ? requestedRoute
     : 'auto';
-
-  // 1. Manual override: Antigravity
-  if (cleanRequested === 'antigravity') {
-    return {
-      requestedRoute: 'antigravity',
-      resolvedRoute: 'antigravity',
-      routeReason: 'Antigravity · manual override',
-      toolHint: null,
-      params: {},
-    };
-  }
 
   // 2. Manual override: Manual / Ask
   if (cleanRequested === 'manual') {
@@ -289,7 +277,7 @@ export const classifyTask = ({
   if (cleanRequested === 'mcp') {
     // Check if task is valid for MCP or unsupported
     const destructive = checkDestructiveOrBlocked(cleanPrompt);
-    const agy = checkAntigravityPreferred(cleanPrompt);
+    const execution = checkExecutionRequired(cleanPrompt);
     const mcp = checkMcpPreferred(cleanPrompt);
 
     if (destructive.isDestructive) {
@@ -304,7 +292,7 @@ export const classifyTask = ({
       };
     }
 
-    if (agy.matches && !mcp.matches) {
+    if (execution.matches && !mcp.matches) {
       return {
         requestedRoute: 'mcp',
         resolvedRoute: 'mcp',
@@ -339,13 +327,13 @@ export const classifyTask = ({
     };
   }
 
-  // B. Check if task clearly prefers Antigravity (code edits, refactor, build, test orchestration)
-  const agyCheck = checkAntigravityPreferred(cleanPrompt);
-  if (agyCheck.matches) {
+  // B. Code changes and orchestration require an explicit executor.
+  const executionCheck = checkExecutionRequired(cleanPrompt);
+  if (executionCheck.matches) {
     return {
       requestedRoute: 'auto',
-      resolvedRoute: 'antigravity',
-      routeReason: sanitizeRouteReason(agyCheck.reason),
+      resolvedRoute: 'manual',
+      routeReason: sanitizeRouteReason(executionCheck.reason),
       toolHint: null,
       params: {},
     };
@@ -363,12 +351,11 @@ export const classifyTask = ({
     };
   }
 
-  // D. Safe Fallback: when Router is not confident, route to Antigravity per policy
-  // "7. ถ้า Router ไม่มั่นใจ ให้เลือก safe fallback = Antigravity หรือ Manual/Ask ตาม policy ห้ามเดา execution ที่เสี่ยง"
+  // D. Unknown requests require human review; never infer an executor.
   return {
     requestedRoute: 'auto',
-    resolvedRoute: 'antigravity',
-    routeReason: 'Antigravity · ambiguous multi-step engineering work',
+    resolvedRoute: 'manual',
+    routeReason: 'Manual · route unavailable',
     toolHint: null,
     params: {},
   };

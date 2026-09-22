@@ -18,7 +18,6 @@ export const TEST_PROFILES = Object.freeze({
   'provider-selection': profile('provider-selection', 'Provider Selection tests', ['scripts/test-provider-selection.mjs']),
   'local-skills': profile('local-skills', 'Local Skills tests', ['scripts/test-local-skills.mjs', 'scripts/test-local-skills-loop.mjs', 'scripts/test-grounding-gate.mjs']),
   'storage-audit': profile('storage-audit', 'Storage Audit tests', ['scripts/test-storage-audit.mjs']),
-  'antigravity-regression': profile('antigravity-regression', 'Antigravity regression tests', ['scripts/test-antigravity.mjs'], 120_000),
 });
 
 export const TEST_RUN_TOOL = Object.freeze({ type: 'function', function: {

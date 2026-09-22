@@ -78,7 +78,7 @@ function buildWakeupHarness({ xGetNextWakeupDeadline, xReconcileRuntimeNow, xQue
 
 // ── static: ordering and shape of the real committed source ────────────────
 
-test('W-E1 armXWakeup is defined before onAntigravityAdmissionReleased/X startup wiring uses it', () => {
+test('W-E1 armXWakeup is defined before X startup wiring uses it', () => {
   const defIdx = mainSource.indexOf('const armXWakeup = () => {');
   const usedInConstructorIdx = mainSource.indexOf('onAdmissionAccepted: () => armXWakeup()');
   assert.ok(defIdx !== -1 && usedInConstructorIdx !== -1);

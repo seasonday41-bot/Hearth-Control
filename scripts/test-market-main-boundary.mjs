@@ -7,7 +7,7 @@ const preload = fs.readFileSync(new URL('../electron/preload.cjs', import.meta.u
 const tools = fs.readFileSync(new URL('../mcp/tools.mjs', import.meta.url), 'utf8');
 
 const start = main.indexOf("if (route === 'market')");
-const end = main.indexOf("\n  const fingerprint = computeHearthJobFingerprint(job);", start + 1);
+const end = main.indexOf('\n};\n\n// Fast-restart X liveness:', start + 1);
 assert.ok(start >= 0 && end > start, 'market route block must exist');
 const market = main.slice(start, end);
 

@@ -276,27 +276,25 @@ await t('10. no public.tasks row is ever created or modified by review-queue-syn
   for (const call of transport.calls) assert.ok(!call.url.includes('/tasks'), `request must never target /tasks: ${call.url}`);
 });
 
-// ── 11. No X -> Anti fallback ───────────────────────────────────────────────
-await t('11. review-queue-sync never triggers an Antigravity dispatch', async () => {
+// ── 11. Review Queue sync has no execution side effect ────────────────────────
+await t('11. review-queue-sync never dispatches an X task', async () => {
   const transport = createMockReviewItemsTransport();
   const client = clientFor(transport);
   const storage = new GoalStorage({ storagePath: path.join(fixture(), 'goals.json') });
   const xExecutor = makeMockXExecutor();
-  const antigravityCalls = [];
   const runner = new GoalRunner({
     storage, xExecutor,
-    antigravityExecutor: { startAntigravityTask: async (...a) => { antigravityCalls.push(a); return { taskId: 't1' }; }, getAntigravityTask: () => ({ status: 'done' }) },
     onReviewItemPersisted: (item, goal) => { void syncReviewItemToRemote({ client, item, goalId: goal.id, goalTitle: goal.title }); },
   });
   const workspace = fixture();
   const goal = await runner.create_goal({
-    title: 'No Anti Goal', objective: 'x', workspace,
-    steps: [{ id: 's1', title: 'S1', description: '', route: 'x', xTask: xTaskFor(workspace, 'TASK-NOANTI'), required: true }],
+    title: 'Review Goal', objective: 'x', workspace,
+    steps: [{ id: 's1', title: 'S1', description: '', route: 'x', xTask: xTaskFor(workspace, 'TASK-REVIEW'), required: true }],
   });
-  xExecutor.statuses.set(`goal:${goal.id}:step:s1`, { found: true, queue_status: 'terminal', terminal_status: 'needs_review', run_id: 'run-noanti', result: { version: 'x-result-v1', result_id: 'r1', task_id: 'TASK-NOANTI', waiting_reason: 'x', reason_code: 'y' } });
-  await runner.run_goal(goal.id, { permissions: { Antigravity: 'Allow' } });
+  xExecutor.statuses.set(`goal:${goal.id}:step:s1`, { found: true, queue_status: 'terminal', terminal_status: 'needs_review', run_id: 'run-review', result: { version: 'x-result-v1', result_id: 'r1', task_id: 'TASK-REVIEW', waiting_reason: 'x', reason_code: 'y' } });
+  await runner.run_goal(goal.id);
   await new Promise((r) => setTimeout(r, 20));
-  assert.equal(antigravityCalls.length, 0);
+  assert.equal(xExecutor.dispatchLog.length, 1);
 });
 
 // ── additional: user_id is stamped from the session, never trusted from payload
