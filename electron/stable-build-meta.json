@@ -1,9 +1,9 @@
 {
   "version": "0.4.23",
-  "buildId": "0.4.23-6753df8-dirty",
-  "builtAt": "2026-09-22T07:38:38+07:00",
-  "commit": "6753df825237dbeca3fefa57c08f82e20f652d21",
-  "dirty": true,
+  "buildId": "0.4.23-3271c66",
+  "builtAt": "2026-09-22T07:41:52+07:00",
+  "commit": "3271c6687157b646318309e5916948dc5baa112c",
+  "dirty": false,
   "platform": "darwin",
   "arch": "arm64"
 }

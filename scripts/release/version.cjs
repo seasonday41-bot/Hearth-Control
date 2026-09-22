@@ -106,7 +106,11 @@ const buildMetadataFor = ({ version = currentVersion(), git: state = gitState(),
  * build, so preparing a release no longer depends on remembering to copy it.
  */
 const stableMetadataFor = ({ version = currentVersion(), git: state = gitState() } = {}) =>
-  buildMetadataFor({ version, git: state, builtAt: state.committedAt ?? new Date().toISOString() });
+  // A checkpoint describes a COMMIT, so it is never dirty -- and it must not be,
+  // or it stops being idempotent: writing the checkpoint modifies a tracked
+  // file, which would make the next derivation see a dirty tree and produce a
+  // different identity for the same commit.
+  buildMetadataFor({ version, git: { ...state, dirty: false }, builtAt: state.committedAt ?? new Date().toISOString() });
 
 /**
  * Every mismatch between the canonical version and something derived from it.
@@ -182,8 +186,10 @@ const setVersion = (version) => {
   // build-meta.json describes the last build. Keep it in step so a stale one
   // cannot make the app report a version its source no longer has; a real build
   // overwrites it with its own builtAt.
+  // Matches the checkpoint until a real build overwrites it with the true state
+  // of the tree it was built from.
   const existingBuild = fs.existsSync(BUILD_META) ? readJson(BUILD_META) : null;
-  const build = buildMetadataFor({ version, git: state, builtAt: stable.builtAt });
+  const build = { ...stable };
   if (JSON.stringify(existingBuild) !== JSON.stringify(build)) {
     writeJson(BUILD_META, build);
     changed.push('electron/build-meta.json');

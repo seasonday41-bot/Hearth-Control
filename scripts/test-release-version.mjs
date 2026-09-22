@@ -132,6 +132,23 @@ test('VER10 setting the same version twice changes nothing the second time', () 
   }
 });
 
+test('VER10b writing the checkpoint does not change the next derivation', () => {
+  // The checkpoint is a tracked file, so writing it dirties the tree. If that
+  // fed back into its own identity, set-version would never settle.
+  const touched = [version.PACKAGE_JSON, version.PACKAGE_LOCK, version.BUILD_META, version.STABLE_META];
+  const snapshot = touched.map((file) => [file, fs.readFileSync(file, 'utf8')]);
+  try {
+    const current = version.currentVersion();
+    version.setVersion(current);
+    const afterWrite = version.stableMetadataFor({ version: current });
+    assert.ok(!afterWrite.buildId.endsWith('-dirty'), `checkpoint identity must not absorb its own write: ${afterWrite.buildId}`);
+    assert.equal(afterWrite.dirty, false);
+    assert.equal(version.readJson(version.STABLE_META).buildId, afterWrite.buildId);
+  } finally {
+    for (const [file, content] of snapshot) fs.writeFileSync(file, content);
+  }
+});
+
 test('VER11 an invalid version is refused before anything is written', () => {
   const before = fs.readFileSync(version.PACKAGE_JSON, 'utf8');
   for (const bad of ['', 'v1.2.3', '1.2', 'latest']) {
