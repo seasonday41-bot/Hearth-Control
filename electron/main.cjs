@@ -2134,6 +2134,29 @@ app.whenReady().then(async () => {
     console.error('[Connections] Failed to initialize secure connection infrastructure:', err.message);
   }
 
+  // In a packaged build, this stages the running app's own mcp/x-coder-service
+  // runtime into a stable, per-version directory under Application Support and
+  // (re)installs the user LaunchAgent to point at it -- never at the app
+  // bundle/asar, which a later update or app replacement can invalidate. It is
+  // a no-op in dev mode (app.isPackaged === false) and skips a reinstall when
+  // the current version's LaunchAgent is already installed and healthy, so an
+  // ordinary relaunch never restarts an in-flight X Coder run.
+  try {
+    const { ensureXCoderServiceInstalled } = await importFromHere('../mcp/x-coder-service/packaged-lifecycle.mjs');
+    const xCoderLifecycle = await ensureXCoderServiceInstalled({
+      isPackaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+      appVersion: app.getVersion(),
+    });
+    if (!xCoderLifecycle.ok) {
+      console.error('[XCoderService] Packaged LaunchAgent install/update did not succeed:', xCoderLifecycle);
+    } else if (!xCoderLifecycle.skipped) {
+      console.info(`[XCoderService] LaunchAgent staged and healthy at ${xCoderLifecycle.stagedRuntimeRoot}.`);
+    }
+  } catch (err) {
+    console.error('[XCoderService] Failed to ensure the packaged LaunchAgent lifecycle:', err?.message || err);
+  }
+
   try {
     const { TaskStore } = await importFromHere('../mcp/executors/task-store.mjs');
     const tasksPath = path.join(app.getPath('userData'), 'tasks.json');

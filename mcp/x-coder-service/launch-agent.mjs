@@ -16,6 +16,18 @@ const DEFAULT_SERVICE_PATH = path.join(SERVICE_DIR, 'server.mjs');
 const DEFAULT_WORKING_DIRECTORY = path.resolve(SERVICE_DIR, '..', '..');
 const SAFE_VERSION = /^[0-9A-Za-z._+-]+$/;
 
+/**
+ * A packaged app's `mcp/` tree ships inside app.asar (electron-builder
+ * asar:true), which system Node cannot treat as an ordinary directory for
+ * recursive filesystem operations like fs.cpSync. The build config
+ * (package.json build.asarUnpack) unpacks mcp/** alongside the archive at
+ * app.asar.unpacked, so this is the one place that source-of-truth path gets
+ * computed -- from Electron's own process.resourcesPath, never the asar path
+ * itself and never the source repo.
+ */
+export const resolvePackagedAppResourcesDir = (resourcesPath) =>
+  path.join(requireAbsolute('resourcesPath', resourcesPath), 'app.asar.unpacked');
+
 const xmlEscape = (value) => String(value)
   .replaceAll('&', '&amp;')
   .replaceAll('<', '&lt;')

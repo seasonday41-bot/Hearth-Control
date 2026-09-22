@@ -7,6 +7,7 @@ import test, { afterEach } from 'node:test';
 import {
   X_CODER_LAUNCH_AGENT_LABEL,
   buildXCoderLaunchAgentPlist,
+  resolvePackagedAppResourcesDir,
   resolveXCoderLaunchAgentPaths,
   stageXCoderServiceRuntime,
 } from './launch-agent.mjs';
@@ -74,11 +75,12 @@ test('S9-3 relative executable or service paths fail closed before a plist can b
 
 test('S11-1 a packaged install resolves a stable, per-version path under Application Support, never the app bundle/asar', () => {
   const devRepoServicePath = '/Users/dev/Documents/Codex/some-workspace/mcp/x-coder-service/server.mjs';
+  const resourcesPath = '/Applications/Hearth Control.app/Contents/Resources';
   const resolved = resolveXCoderLaunchAgentPaths({
     homeDir: '/Users/qa',
     nodePath: '/Applications/Hearth Control.app/Contents/MacOS/Hearth Control',
     packaged: true,
-    appResourcesDir: '/Applications/Hearth Control.app/Contents/Resources/app.asar',
+    appResourcesDir: resolvePackagedAppResourcesDir(resourcesPath),
     appVersion: '0.4.24',
   });
 
@@ -93,7 +95,20 @@ test('S11-1 a packaged install resolves a stable, per-version path under Applica
   assert.doesNotMatch(resolved.servicePath, /app\.asar/);
   assert.doesNotMatch(resolved.servicePath, /Documents\/Codex/);
   assert.notEqual(resolved.servicePath, devRepoServicePath);
-  assert.equal(resolved.sourceMcpDir, '/Applications/Hearth Control.app/Contents/Resources/app.asar/mcp');
+  assert.equal(
+    resolved.sourceMcpDir,
+    '/Applications/Hearth Control.app/Contents/Resources/app.asar.unpacked/mcp',
+  );
+});
+
+test('S11-1b resolvePackagedAppResourcesDir always points at the unpacked resource tree, never the asar archive itself', () => {
+  const resourcesPath = '/Applications/Hearth Control.app/Contents/Resources';
+  const resourcesDir = resolvePackagedAppResourcesDir(resourcesPath);
+
+  assert.equal(resourcesDir, '/Applications/Hearth Control.app/Contents/Resources/app.asar.unpacked');
+  assert.match(resourcesDir, /app\.asar\.unpacked$/);
+  assert.doesNotMatch(resourcesDir, /app\.asar$/);
+  assert.throws(() => resolvePackagedAppResourcesDir('Resources'), /resourcesPath must be an absolute path/);
 });
 
 test('S11-2 a packaged install still fails closed on relative/missing inputs', () => {

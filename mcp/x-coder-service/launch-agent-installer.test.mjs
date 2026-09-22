@@ -61,6 +61,31 @@ test('T1 successful upgrade: previous plist is overwritten and no rollback occur
   assert.equal(fs.readFileSync(plistPath, 'utf8'), '<new-plist/>');
 });
 
+test('T1b an unexpected pre-install bootout failure aborts before touching the plist or attempting bootstrap', async () => {
+  const plistPath = tmpPlistPath();
+  fs.writeFileSync(plistPath, '<old-plist/>', 'utf8');
+
+  const runLaunchctl = launchctlSequence([
+    { status: 1, stdout: '', stderr: 'Operation not permitted' }, // pre-install bootout: genuinely unexpected
+  ]);
+
+  const result = await installXCoderLaunchAgent({
+    plistPath,
+    plistContent: '<candidate-plist/>',
+    domain: 'gui/501',
+    serviceTarget: 'gui/501/label',
+    runLaunchctl,
+    waitForHealth: okHealth,
+    sleep: sleep0,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.stage, 'pre_install_bootout');
+  assert.equal(result.preInstallBootout.stderr, 'Operation not permitted');
+  assert.equal(fs.readFileSync(plistPath, 'utf8'), '<old-plist/>', 'the existing plist must be untouched');
+  assert.equal(runLaunchctl.calls.length, 1, 'bootstrap must never be attempted once the pre-install bootout is unexplained');
+});
+
 test('T2 bootstrap failure rolls back to the previous plist and service', async () => {
   const plistPath = tmpPlistPath();
   fs.writeFileSync(plistPath, '<old-plist/>', 'utf8');
@@ -149,6 +174,30 @@ test('T4 first install failure leaves no plist and no loaded service behind', as
   assert.equal(result.hadPrevious, false);
   assert.equal(result.rollback.attempted, false);
   assert.equal(fs.existsSync(plistPath), false);
+});
+
+test('T4b an unexpected pre-install bootout failure on a first install leaves no plist behind either', async () => {
+  const plistPath = tmpPlistPath();
+  assert.equal(fs.existsSync(plistPath), false);
+
+  const runLaunchctl = launchctlSequence([
+    { status: 1, stdout: '', stderr: 'Operation not permitted' },
+  ]);
+
+  const result = await installXCoderLaunchAgent({
+    plistPath,
+    plistContent: '<candidate-plist/>',
+    domain: 'gui/501',
+    serviceTarget: 'gui/501/label',
+    runLaunchctl,
+    waitForHealth: okHealth,
+    sleep: sleep0,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.stage, 'pre_install_bootout');
+  assert.equal(fs.existsSync(plistPath), false);
+  assert.equal(runLaunchctl.calls.length, 1);
 });
 
 test('T5 uninstall success removes the plist when bootout succeeds', () => {

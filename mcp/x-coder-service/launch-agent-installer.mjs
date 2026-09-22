@@ -56,8 +56,24 @@ export async function installXCoderLaunchAgent({
     return { attempted: true, restored: bootstrapResult?.status === 0, bootstrap: bootstrapResult };
   };
 
-  // Stop whatever is currently loaded under this label before installing the candidate.
-  runLaunchctl(['bootout', serviceTarget], { allowFailure: true });
+  // Stop whatever is currently loaded under this label before installing the
+  // candidate. An unexpected failure here (permissions, a launchd fault --
+  // anything other than "was already not loaded") means we do not actually
+  // know the current service's state, so we must not touch the plist or
+  // attempt a bootstrap: the existing service/plist is left exactly as-is.
+  const preInstallBootout = runLaunchctl(['bootout', serviceTarget], { allowFailure: true });
+  if (!isBenignBootoutFailure(preInstallBootout)) {
+    return {
+      ok: false,
+      stage: 'pre_install_bootout',
+      hadPrevious,
+      rollback: { attempted: false, restored: false, bootstrap: null },
+      bootstrap: null,
+      health: null,
+      preInstallBootout,
+    };
+  }
+
   writePlistFile(plistPath, plistContent);
 
   let bootstrapped = false;
