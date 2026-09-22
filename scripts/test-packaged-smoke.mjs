@@ -99,8 +99,9 @@ assert.equal(signedOffGoal.status, 'completed');
 assert.ok(signedOffGoal.checkpoints.length >= 1);
 
 // Verify sanitized checkpoint
-const lastCheckpoint = signedOffGoal.checkpoints[signedOffGoal.checkpoints.length - 1];
-assert.equal(lastCheckpoint.route, 'manual');
+const manualCheckpoint = signedOffGoal.checkpoints.find((checkpoint) => checkpoint.stepId === 's1');
+assert.ok(manualCheckpoint, 'manual sign-off checkpoint must be preserved after auto-run');
+assert.equal(manualCheckpoint.route, 'manual');
 console.log('  PASS: Step 1 completed, checkpoint recorded, Step 2 advanced & completed');
 
 // 8. Test Fail Step
