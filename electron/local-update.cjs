@@ -89,7 +89,12 @@ async function buildAndStageLocalUpdate({ manifest, archivePath, stagingRoot, ex
     const packageJson = JSON.parse(await fs.promises.readFile(path.join(repoRoot, 'package.json'), 'utf8'));
     if (packageJson.version !== manifest.version) throw new Error('LOCAL_UPDATE source version does not match manifest.');
     await execFileFn('npm', ['ci'], { cwd: repoRoot, shell: false, timeout: 15 * 60 * 1000 });
-    await execFileFn('npm', ['run', 'dist:mac'], { cwd: repoRoot, shell: false, timeout: 30 * 60 * 1000 });
+    await execFileFn('npm', ['run', 'dist:mac'], {
+      cwd: repoRoot,
+      shell: false,
+      timeout: 30 * 60 * 1000,
+      env: { ...process.env, HEARTH_BUILD_SOURCE_COMMIT: source.commit },
+    });
     const meta = JSON.parse(await fs.promises.readFile(path.join(repoRoot, 'electron', 'build-meta.json'), 'utf8').catch(() => '{}'));
     if (meta.version !== manifest.version || meta.buildId !== manifest.buildId || meta.commit !== source.commit || meta.dirty === true) {
       throw new Error('LOCAL_UPDATE generated build metadata does not match the signed source identity.');

@@ -171,6 +171,37 @@ test('VER12 git state distinguishes "no repository" from "dirty repository"', ()
   }
 });
 
+test('VER12a archive builds can derive identity from an explicitly trusted source commit when .git is absent', () => {
+  const box = sandbox();
+  try {
+    fs.mkdirSync(path.join(box.dir, 'scripts', 'release'), { recursive: true });
+    fs.mkdirSync(path.join(box.dir, 'electron'), { recursive: true });
+    fs.copyFileSync(new URL('../scripts/release/version.cjs', import.meta.url), path.join(box.dir, 'scripts', 'release', 'version.cjs'));
+    fs.copyFileSync(new URL('../scripts/generate-build-meta.cjs', import.meta.url), path.join(box.dir, 'scripts', 'generate-build-meta.cjs'));
+    fs.writeFileSync(path.join(box.dir, 'package.json'), JSON.stringify({ version: version.currentVersion() }));
+    const commit = 'a'.repeat(40);
+    execFileSync(process.execPath, ['scripts/generate-build-meta.cjs'], {
+      cwd: box.dir,
+      env: { ...process.env, HEARTH_BUILD_SOURCE_COMMIT: commit },
+      stdio: 'pipe',
+    });
+    const meta = JSON.parse(fs.readFileSync(path.join(box.dir, 'electron', 'build-meta.json'), 'utf8'));
+    assert.equal(meta.commit, commit);
+    assert.equal(meta.buildId, version.currentVersion() + '-' + commit.slice(0, 7));
+    assert.equal(meta.dirty, false);
+  } finally {
+    box.cleanup();
+  }
+});
+
+test('VER12aa source commit override fails closed when it disagrees with a real checkout HEAD', () => {
+  assert.throws(() => execFileSync(process.execPath, ['scripts/generate-build-meta.cjs'], {
+    cwd: version.ROOT,
+    env: { ...process.env, HEARTH_BUILD_SOURCE_COMMIT: '0'.repeat(40) },
+    stdio: 'pipe',
+  }));
+});
+
 test('VER12b generated build metadata is outside tracked source and remains available', () => {
   assert.ok(fs.existsSync(version.BUILD_META));
   assert.throws(() => execFileSync('git', ['ls-files', '--error-unmatch', 'electron/build-meta.json'], { cwd: version.ROOT, stdio: 'ignore' }));

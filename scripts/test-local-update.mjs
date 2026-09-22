@@ -51,7 +51,7 @@ test('LOCAL_UPDATE build failure leaves no staged candidate', async () => {
 test('LOCAL_UPDATE successful fixture stages a hashed app and invokes ad-hoc signing checks', async () => {
   const calls = [];
   const result = await buildAndStageLocalUpdate({ manifest, archivePath: archive, stagingRoot: path.join(root, 'updates-ok'), expectedRepository: manifest.source.repository, execFileFn: async (file, args, options) => {
-    calls.push([file, args]);
+    calls.push([file, args, options]);
     if (file === '/usr/bin/tar') return exec(file, args, options);
     if (file === 'npm' && args[0] === 'ci') return {};
     if (file === 'npm' && args[1] === 'dist:mac') return {};
@@ -62,4 +62,6 @@ test('LOCAL_UPDATE successful fixture stages a hashed app and invokes ad-hoc sig
   assert.equal((await fs.stat(result.stagedAppPath)).isDirectory(), true);
   assert.ok(calls.some(([file, args]) => file === '/usr/bin/codesign' && args.includes('-')));
   assert.ok(calls.some(([file, args]) => file === '/usr/bin/codesign' && args.includes('--verify')));
+  const distCall = calls.find(([file, args]) => file === 'npm' && args[0] === 'run' && args[1] === 'dist:mac');
+  assert.equal(distCall?.[2]?.env?.HEARTH_BUILD_SOURCE_COMMIT, manifest.source.commit, 'archive build must receive the signed source commit identity');
 });
