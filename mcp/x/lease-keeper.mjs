@@ -3,13 +3,17 @@
  * fencing and reclaim; this keeper neither claims nor releases a lease.
  */
 export class XLeaseKeeper {
-  constructor({ claimStore, claim } = {}) {
+  constructor({ claimStore, claim, onRenewed } = {}) {
     if (typeof claimStore?.renew !== 'function' || typeof claimStore?.isOwner !== 'function' ||
         typeof claimStore?.getActiveClaim !== 'function') {
       throw new TypeError('XLeaseKeeper requires a claim store with renew(), isOwner(), and getActiveClaim().');
     }
+    if (onRenewed !== undefined && typeof onRenewed !== 'function') {
+      throw new TypeError('XLeaseKeeper onRenewed must be a function when provided.');
+    }
     this.store = claimStore;
     this.claim = claim;
+    this.onRenewed = onRenewed ?? null;
     this.state = 'idle';
     this.error = null;
     this.timer = null;
@@ -81,6 +85,14 @@ export class XLeaseKeeper {
         return;
       }
       this.claim = renewed;
+      if (this.onRenewed) {
+        try {
+          const hookResult = this.onRenewed(renewed);
+          if (hookResult && typeof hookResult.catch === 'function') hookResult.catch(() => {});
+        } catch {
+          // Observer failures must never alter lease renewal or fencing semantics.
+        }
+      }
       if (this.state === 'active') this.schedule();
     } catch (error) {
       this.finish('error', error);
