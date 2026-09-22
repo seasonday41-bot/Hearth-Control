@@ -4,29 +4,97 @@ A local macOS desktop control center, built with Electron, React, TypeScript, an
 
 ## 🚨 READ FIRST — Canonical continuation path
 
-**Last updated: 2026-09-20**
+**Last updated: 2026-09-22**
 
 This section is the project handoff/source of truth for any new ChatGPT/Codex/AI session. **Do not start a fresh architecture plan, choose a different next feature, or rediscover the roadmap from scratch.** Read this section first, verify Git state, and continue only the canonical next action below.
 
 ## CURRENT STATUS
 
 ```text
-PHASE = MARKET_SPECIALISTS_V1 — COMPLETE / PRODUCTION VALIDATED
-CURRENT_BRANCH = main
-VALIDATED_MAIN_COMMIT = 82e96c31ea615c52227de437ebe7c8e262665b9f
-RELEASE_VERSION = 0.4.10
-RELEASE_BUILD = 0.4.10-20260920162505-dfdcdf
-RELEASE_TAG = v0.4.10-20260920162505-dfdcdf
-FINAL_GATE = MAIN_0.4.10_PRODUCTION_E2E_PASS
-STATUS = MARKET_SPECIALISTS_V1_COMPLETE_AND_UPDATER_0.4.10_PRODUCTION_VALIDATED
-BLOCKED_BY = none
-LAST_COMPLETED_STEP = Market Specialists V1 merged to main and One-Click Updater production E2E validated: 0.4.9 -> 0.4.10, download/verify/stage/install/restart/UP_TO_DATE all PASS
-NEXT_PHASE = INVEST_OUTCOME_TRACKING_V1
-NEXT_EXACT_ACTION = add deterministic WIN/LOSS/NEUTRAL outcome tracking on top of the existing Signal Journal before any demo trade executor
-DO_NOT_MODIFY_FROZEN = X v0.1, P2 updater core, P3-P9 validated behavior, Market Specialists V1 validated behavior unless an actual regression/security issue or explicitly approved work requires a targeted change
+PHASE = POST_P9_CONSOLIDATION — UI, Invest, and release-pipeline work finished ON A BRANCH; NOT MERGED
+CURRENT_BRANCH = chore/system-ui-consolidation
+BRANCH_HEAD = 39a69ec  (13 commits ahead of local main a7e41c8)
+LOCAL_MAIN = a7e41c8   (0.4.20)
+ORIGIN_MAIN = d280cc3  (0.4.23, "feat(goal): expose Goal to X MCP lifecycle") — DIVERGED from this branch
+INSTALLED_APP = 0.4.23, build 0.4.23-39a69ec (built from BRANCH_HEAD; this build is NOT the 0.4.23 on origin/main)
+LAST_VALIDATED_PRODUCTION_RELEASE = 0.4.10 (updater E2E PASS 0.4.9 -> 0.4.10); 0.4.11 - 0.4.23 have NO production updater E2E
+BLOCKED_BY = branch has not been reconciled with origin/main (see NEXT_EXACT_ACTION)
+NEXT_EXACT_ACTION = reconcile chore/system-ui-consolidation with origin/main d280cc3, then (only with owner approval) fast-forward main
+DO_NOT_MODIFY_FROZEN = X v0.1 (X v0.2 candidate freeze + approved exceptions), P2 updater core, P3-P9 validated behavior, Market Specialists V1 validated behavior unless an actual regression/security issue or explicitly approved work requires a targeted change
 ```
 
-**Continuation rule:** Git/source is authoritative over chat history. Verify branch, HEAD, tag, and worktree before editing. Do not modify frozen X/P2/P3/P4/P5/P6/P7/P8 behavior unless a regression/security issue or the approved current phase requires a targeted extension. Continue only `NEXT_EXACT_ACTION`.
+**Continuation rule:** Git/source is authoritative over chat history. Verify branch, HEAD, tag, and worktree before editing. `origin/main` moved independently of this branch; check `git log --oneline main..origin/main` before doing anything.
+
+### Reconciling with origin/main (the one open blocker)
+
+`origin/main` d280cc3 carries the same Goal-lifecycle MCP work as branch commit 6753df8, cut independently as "0.4.23". Comparison (2026-09-22):
+
+```text
+mcp/tools.mjs                             IDENTICAL on both sides
+mcp/http.mjs                              IDENTICAL on both sides
+scripts/test-goal-lifecycle-mcp-tool.mjs  IDENTICAL on both sides
+electron/main.cjs                         differs by exactly one hunk (currentCommit / builtFromDirtyTree in getUpdaterInfo)
+```
+
+So the code is not in conflict. The real collision is the **version metadata**: both sides call themselves 0.4.23 with different build IDs (`0.4.23-20260921165817-c1c08c` on origin, `0.4.23-39a69ec` here), and origin/main still uses the old random-suffix build-ID scheme and the hand-edited version regexes that this branch replaced. No `v0.4.2x` tag exists on the remote, so the origin 0.4.23 has not been published by tag. Resolve by keeping the branch's release tooling, taking origin's goal commit as the base, and re-running `npm run set-version` rather than hand-merging metadata.
+
+### Work completed on the branch since 0.4.10 (all unmerged, all local)
+
+```text
+Invest V2         live coordinator, demo auto execution pipeline, waiting-for-entry policy anchored to the FIRST READY
+                  observation and judged in market time (bar time), never the machine clock
+UI                12 destinations -> 6 (Overview, Goals, Chat, Invest | Connections, System); Console page removed;
+                  App.tsx 3,349 -> 2,118 lines with per-destination pages in src/pages
+Invest UI         setup checklist, plain-language status, MT5 feed freshness measured against the Risk Gate's 15 s bound
+Goal MCP          goal_create / goal_run / goal_resume relay tools (see reconciliation above)
+Release pipeline  single canonical version, commit-derived build IDs, provenance + SHA-256, set-version /
+                  release:status / release:prepare / release:provenance (docs/RELEASE_PROCESS.md)
+Tests             three source-scan suites rewritten to assert behaviour; renderer-source helper so UI assertions
+                  survive files moving; test-job-runtime no longer hangs (142 s -> 10 s)
+X freeze          re-frozen twice with recorded, owner-approved exceptions (mcp/x/run-store.mjs listRecentRuns;
+                  test-x-console-visibility now reads the whole renderer tree). Exceptions live in
+                  scripts/x-eval/x-v02-candidate.json
+```
+
+### Validation evidence — branch HEAD 39a69ec, 2026-09-22
+
+```text
+RAN   133 test files (excluding test-electron-*, test-packaged-smoke, test-antigravity*)      PASS 133 / FAIL 0
+RAN   tsc -p tsconfig.app.json and tsconfig.node.json                                        PASS
+RAN   vite build / npm run dist:mac                                                          PASS
+RAN   X candidate freeze verify                                                              PASS
+RAN   git diff --check                                                                       PASS
+RAN   shasum -c release/SHA256SUMS.txt for Hearth Control-0.4.23-arm64.dmg                   OK
+NOT RUN  test-electron-*, packaged smoke, antigravity, real-Codex smoke
+NOT RUN  production updater E2E for 0.4.11 - 0.4.23
+NOT DONE push, tag, GitHub Release, deployment
+```
+
+Two suites only pass on a machine where the user has started the local MCP server: `test-server-lifecycle` SLC-1 and SLC-4 skip with a reason when nothing listens on 3001. The server is user-controlled by design; do not make it auto-start without an explicit decision.
+
+### Invest measurements (offline replay, 2026-08-22 to 2026-09-21, 5,381 M5 cycles)
+
+```text
+SMC_IDM          10 unique READY signals (0.48 per trading day); 54 READY cycles
+HARMONIC_PRZ     0 READY signals in 30 days (73% of cycles stuck at waiting_for_d_confirmation)
+Entry zone       10 of 10 first-READY cycles had price OUTSIDE the zone (60 - 1,589 points away)
+As-coded         circuit breaker latches on the first executor error -> 0 trades in 30 days
+Waiting policy   2 trades (1 win, 1 loss), -0.32 R; the sample is far too small to say anything about win rate
+```
+
+These numbers assume MT5 per-bar spread, entry at the forming bar open, exits exactly at SL/TP, SL winning same-bar ties, and an assumed 100,000 USD demo account. Historical bar times are raw MT5 server time (UTC+3 at export); the live bridge from `HearthXauDemoExecutorV3` is UTC-normalised. The replay is offline and changes nothing in `mcp/market/`.
+
+**No order placed by Hearth has ever been recorded** (no `demo-executions.json`, no `HRT8_` tag in MT5 logs). DEMO_AUTO always falls back to MONITOR after a restart; that is enforced in code and pinned by tests, not a setting.
+
+### Open decisions (owner, not agent)
+
+```text
+1. Strategy accuracy: measure with 2-3 years of history before changing any rule (the exporter and replay exist; nothing has been changed)
+2. "Ready on open": DEMO_AUTO may not be a startup mode by design; a one-click arm plus a status bar is the proposed alternative
+3. Bid/ask do not reach the renderer, so "price vs zone" cannot be shown without touching mcp/market/mt5-bridge-server.mjs
+4. scripts/replay-30d.mjs and scripts/HearthHistoryExport.mq5 are still untracked: commit them, or keep them outside the repo
+5. Whether to merge to main and cut a real release with the new pipeline
+```
 
 ### Current validated/stable direction
 

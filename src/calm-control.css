@@ -75,6 +75,7 @@
 .invest-mode-explanation p,.invest-safety-row p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
 .invest-status-dot { width: 7px; height: 7px; flex: none; margin-top: 0; border-radius: 50%; background: var(--faint); }
 .invest-status-dot.ready { background: var(--sage-deep); box-shadow: 0 0 0 3px color-mix(in srgb,var(--sage) 22%,transparent); }
+.invest-status-dot.warn { background: #b07d2b; box-shadow: 0 0 0 3px color-mix(in srgb,#b07d2b 20%,transparent); }
 .invest-controller { display: grid; grid-template-columns: minmax(280px,1fr) auto auto; align-items: center; gap: 10px; padding: 11px 12px; }
 .invest-controller .panel-title { display: none; }
 .invest-mode-buttons { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 4px; padding: 3px; background: var(--well); border: 1px solid var(--line); border-radius: 8px; }
@@ -125,6 +126,17 @@
 .invest-direction.direction-down { color: #a54b4b; background: color-mix(in srgb,#c96c6c 14%,transparent); }
 .invest-direction.direction-neutral { color: var(--muted); background: var(--well); }
 .invest-signal-levels { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 8px; }
+.invest-signal-levels em { color: var(--muted); display: block; font-size: 10px; font-style: normal; margin-top: 2px; }
+.invest-setup-steps { display: flex; flex-wrap: wrap; gap: 4px 10px; list-style: none; margin: 10px 0 0; padding: 0; }
+.invest-setup-steps li { align-items: center; color: var(--muted); display: flex; font-size: 11px; gap: 5px; }
+.invest-setup-steps li span { font-size: 11px; width: 10px; }
+.invest-setup-steps li.step-done { color: var(--sage-deep); }
+.invest-setup-steps li.step-waiting { color: var(--text); font-weight: 600; }
+.invest-setup-steps li.step-failed { color: #a34b4b; }
+.invest-waiting-entry { background: var(--panel-soft); border: 1px solid var(--highlight); border-radius: 12px; margin-top: 14px; padding: 12px 14px; }
+.invest-waiting-entry small { color: var(--muted); display: block; margin-top: 8px; }
+.invest-waiting-row { align-items: baseline; display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 5px 0; }
+.invest-waiting-row span { color: var(--muted); font-size: 12px; }
 .invest-signal-levels span { display: grid; gap: 2px; color: var(--faint); font-size: 9px; }
 .invest-signal-levels strong { color: var(--text); font-size: 11px; }
 .invest-signal-list p,.invest-journal-empty p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.5; }

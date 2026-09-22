@@ -82,6 +82,9 @@ if (isMain) {
       base_head: gitRepo(['rev-parse', 'HEAD']).trim(), committed: false,
       gold_fingerprint: lockFingerprint(), ...xCandidateIdentity(),
       verification: previous?.verification ?? null,
+      // Approved departures from the previous freeze, carried forward so the
+      // reason a frozen file changed survives every later re-freeze.
+      exceptions: previous?.exceptions ?? [],
     };
     fs.writeFileSync(MANIFEST_PATH, `${JSON.stringify(manifest, null, 2)}\n`);
     console.error(`froze ${manifest.x_file_count} X files (${manifest.x_sha256.slice(0, 16)}…) and ${manifest.test_file_count} X test files -> ${rel(MANIFEST_PATH)}`);

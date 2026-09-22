@@ -1,43 +1,27 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import StorageAudit from './StorageAudit';
+import Icon, { type IconName } from './Icon';
+import { PAGE_INTRO } from './page-intro';
+import { GOALS_TABS, SYSTEM_TABS, type NavItem, type GoalsTab, type SystemTab } from './nav';
+import type { ApprovalRequest, ApprovalEvidence, ApprovalEvidenceState } from './approval-types';
+import InvestPage from './pages/InvestPage';
+import OverviewSystemPage from './pages/OverviewSystemPage';
+import ConnectionsPage from './pages/ConnectionsPage';
+import GoalsPage from './pages/GoalsPage';
+import GoalsActivityPage from './pages/GoalsActivityPage';
+import ChatPage, { type ChatActivityItem, type ChatTestApproval } from './pages/ChatPage';
 import './calm-control.css';
 import AIConnectorPanel, { type AIConnectorItem } from './components/AIConnectorPanel';
 import GitHubConnectionCard from './components/GitHubConnectionCard';
 import { getV2CoordinatorDisplay } from './invest-coordinator-status';
 
 type Permission = 'Allow' | 'Ask' | 'Blocked';
-type NavItem = 'Overview' | 'Console' | 'Local Chat' | 'Invest' | 'Storage Audit' | 'Task Console' | 'Goals' | 'Workspace' | 'Permissions' | 'Logs' | 'AI Connectors' | 'Updates';
-type IconName = 'grid' | 'folder' | 'lock' | 'terminal' | 'moon' | 'sun' | 'chevron' | 'activity' | 'copy' | 'server' | 'console' | 'radio' | 'flag' | 'check' | 'plus';
+// Six destinations, each one thing the operator actually does. Anything that is
+// a mechanism rather than a destination -- X runs, the queue, pending tasks,
+// runIds -- is detail inside Goals or evidence inside System, never navigation.
 
-const Icon = ({ name }: { name: IconName }) => {
-  const paths: Record<IconName, ReactNode> = {
-    grid: <><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></>,
-    folder: <path d="M3.5 6.5h6l2-2h9a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-17a2 2 0 0 1-2-2v-10a2 2 0 0 1 2-2Z"/>,
-    lock: <><rect x="4" y="10" width="16" height="11" rx="3"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></>,
-    terminal: <><path d="m5 8 4 4-4 4"/><path d="M12 17h6"/></>,
-    moon: <path d="M20.5 15.6A8.6 8.6 0 0 1 8.4 3.5 8.7 8.7 0 1 0 20.5 15.6Z"/>,
-    sun: <><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></>,
-    chevron: <path d="m9 18 6-6-6-6"/>,
-    activity: <path d="M3 12h4l2.2-7 4.3 14 2.3-7H21"/>,
-    copy: <><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></>,
-    server: <><rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/><path d="M7 7h.01M7 17h.01"/></>,
-    console: <><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></>,
-    radio: <><path d="M4.93 19.07A10 10 0 0 1 2 12a10 10 0 0 1 2.93-7.07"/><path d="M19.07 4.93A10 10 0 0 1 22 12a10 10 0 0 1-2.93 7.07"/><path d="M7.76 16.24A6 6 0 0 1 6 12a6 6 0 0 1 1.76-4.24"/><path d="M16.24 7.76A6 6 0 0 1 18 12a6 6 0 0 1-1.76 4.24"/><circle cx="12" cy="12" r="2"/></>,
-    flag: <><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></>,
-    check: <polyline points="20 6 9 17 4 12"/>,
-    plus: <><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></>,
-  };
-  return <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">{paths[name]}</svg>;
-};
 
 type LogEntry = { time: string; source: string; message: string; tone: string };
-type ApprovalRequest = { requestId: string; permission: string; action: string };
-type ApprovalEvidenceState = 'pending' | 'allowed' | 'denied' | 'timeout' | 'aborted' | 'shutdown';
-type ApprovalEvidence = ApprovalRequest & {
-  state: ApprovalEvidenceState;
-  time: string;
-  reason: 'user' | 'timeout' | 'aborted' | 'shutdown' | null;
-};
 
 const APPROVAL_EVIDENCE_LIMIT = 40;
 
@@ -102,33 +86,24 @@ const initialPermissions: Array<{ name: string; detail: string; value: Permissio
 
 const navGroups: Array<{ label: string; items: Array<{ name: NavItem; icon: IconName; label?: string }> }> = [
   {
-    label: 'OPERATE',
+    label: 'WORK',
     items: [
       { name: 'Overview', icon: 'grid' },
-      { name: 'Console', icon: 'activity' },
-      { name: 'Task Console', icon: 'console', label: 'Control Center' },
-    ],
-  },
-  {
-    label: 'AI',
-    items: [
-      { name: 'Local Chat', icon: 'radio' },
+      { name: 'Goals', icon: 'flag' },
+      { name: 'Chat', icon: 'radio' },
       { name: 'Invest', icon: 'activity' },
     ],
   },
   {
-    label: 'SYSTEM',
+    label: 'SETUP',
     items: [
-      { name: 'Workspace', icon: 'folder' },
-      { name: 'Permissions', icon: 'lock' },
-      { name: 'Logs', icon: 'terminal' },
-      { name: 'Storage Audit', icon: 'folder' },
-      { name: 'Updates', icon: 'server' },
+      { name: 'Connections', icon: 'console' },
+      { name: 'System', icon: 'lock' },
     ],
   },
 ];
 
-const CONTROL_CENTER_PAGES: NavItem[] = ['Task Console', 'Goals', 'AI Connectors'];
+
 
 const LocalChatResponse = ({ text, onExpand }: { text: string; onExpand: (code: string, language: string) => void }) => {
   const parts: ReactNode[] = [];
@@ -157,6 +132,8 @@ export default function App() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [permissions, setPermissions] = useState(initialPermissions);
   const [activeNav, setActiveNav] = useState<NavItem>('Overview');
+  const [goalsTab, setGoalsTab] = useState<GoalsTab>('Goals');
+  const [systemTab, setSystemTab] = useState<SystemTab>('Workspace');
   const [dark, setDark] = useState(() => localStorage.getItem('control-theme') === 'dark');
   const [notice, setNotice] = useState('');
   const [approvalQueue, setApprovalQueue] = useState<ApprovalRequest[]>([]);
@@ -216,7 +193,7 @@ export default function App() {
   const [publicXPassword, setPublicXPassword] = useState('');
   const [publicXAuthMode, setPublicXAuthMode] = useState<'sign-in' | 'sign-up'>('sign-in');
 
-  // Task Console states
+  // Goals / Activity states
   const [taskCenterTab, setTaskCenterTab] = useState<'x' | 'antigravity' | 'remote'>('x');
   const [activeXRequestId, setActiveXRequestId] = useState<string | null>(null);
   const [activeXStatus, setActiveXStatus] = useState<XQueueStatus | null>(null);
@@ -236,7 +213,7 @@ export default function App() {
   const [pollTrigger, setPollTrigger] = useState(0);
   const [, setNowTick] = useState(Date.now());
 
-  // Experimental Local Chat states; isolated from Task Console lifecycle.
+  // Experimental Chat states; isolated from the Goals / Activity lifecycle.
   const [chatProvider, setChatProvider] = useState<'local' | 'external'>('local');
   const [chatModel, setChatModel] = useState('qwen3.5:9b-hermes');
   const [chatProfile, setChatProfile] = useState<'fast' | 'normal' | 'deep'>('normal');
@@ -252,8 +229,8 @@ export default function App() {
   const [chatElapsedMs, setChatElapsedMs] = useState(0);
   const [chatFollowOutput, setChatFollowOutput] = useState(true);
   const [chatExpandedCode, setChatExpandedCode] = useState<{ code: string; language: string } | null>(null);
-  const [chatActivity, setChatActivity] = useState<Array<{ type: string; skill: string; elapsedMs?: number; resultCount?: number; stage?: string; relativePath?: string; profile?: string; label?: string; timeoutMs?: number; pid?: number | null; status?: string; exitCode?: number | null; passedCount?: number; testCount?: number; outputTruncated?: boolean; processStillRunning?: boolean }>>([]);
-  const [chatTestApproval, setChatTestApproval] = useState<{ requestId: string; profile: string; label: string; timeoutMs: number } | null>(null);
+  const [chatActivity, setChatActivity] = useState<ChatActivityItem[]>([]);
+  const [chatTestApproval, setChatTestApproval] = useState<ChatTestApproval | null>(null);
   const [showChatContext, setShowChatContext] = useState(false);
   const [chatContext, setChatContext] = useState<any>(null);
   const [chatContextLoading, setChatContextLoading] = useState(false);
@@ -436,7 +413,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (activeNav !== 'Local Chat' || chatProvider !== 'local') return;
+    if (activeNav !== 'Chat' || chatProvider !== 'local') return;
     let active = true;
     void window.controlApp.localChatStatus().then((status) => {
       if (!active) return;
@@ -480,7 +457,7 @@ export default function App() {
   }, [investStatus?.risk_config.config, demoRiskDirty]);
 
   useEffect(() => {
-    if (activeNav !== 'Local Chat') return;
+    if (activeNav !== 'Chat') return;
     void window.controlApp.localChatContext({ model: chatModel, profile: chatProfile, longResponse: chatLongResponse, ollamaAvailable: chatHealth?.ok }).then(setChatContext).catch(() => setChatContext(null));
   }, [activeNav, chatModel, chatProfile, chatLongResponse, chatHealth?.ok]);
 
@@ -1617,32 +1594,33 @@ export default function App() {
 
   const v2CoordinatorDisplay = getV2CoordinatorDisplay(investStatus?.v2);
 
-  const isControlCenterPage = CONTROL_CENTER_PAGES.includes(activeNav);
-  const controlCenterTabLabel = activeNav === 'Goals' ? 'Goals' : activeNav === 'AI Connectors' ? 'Connections' : 'Tasks';
-  const renderControlCenterHeader = (status?: ReactNode) => (
+  // Goals is one destination with two faces: the Goals themselves, and the
+  // machinery that carried them out. The machinery is a tab, never a nav item.
+  const renderGoalsHeader = (status?: ReactNode) => (
     <header className="control-center-header">
       <div className="control-center-title-row">
         <div>
           <p className="kicker">HEARTH WORK CONTROL</p>
-          <h1>Control Center.</h1>
-          <p className="intro">Tasks, multi-step Goals, remote work, and agent connections in one place.</p>
+          <h1>Goals.</h1>
+          <p className="intro">{PAGE_INTRO.Goals}</p>
         </div>
         {status}
       </div>
-      <div className="control-center-tabs" role="tablist" aria-label="Control Center sections">
-        <button type="button" role="tab" aria-selected={activeNav === 'Task Console'} className={activeNav === 'Task Console' ? 'active' : ''} onClick={() => navigate('Task Console')}>
-          <Icon name="console" />
-          <span>Tasks</span>
-        </button>
-        <button type="button" role="tab" aria-selected={activeNav === 'Goals'} className={activeNav === 'Goals' ? 'active' : ''} onClick={() => navigate('Goals')}>
-          <Icon name="flag" />
-          <span>Goals</span>
-          {!!bridgeState?.pendingGoalRequests?.length && <em>{bridgeState.pendingGoalRequests.length}</em>}
-        </button>
-        <button type="button" role="tab" aria-selected={activeNav === 'AI Connectors'} className={activeNav === 'AI Connectors' ? 'active' : ''} onClick={() => navigate('AI Connectors')}>
-          <Icon name="activity" />
-          <span>Connections</span>
-        </button>
+      <div className="control-center-tabs" role="tablist" aria-label="Goals sections">
+        {GOALS_TABS.map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            role="tab"
+            aria-selected={goalsTab === tab}
+            className={goalsTab === tab ? 'active' : ''}
+            onClick={() => setGoalsTab(tab)}
+          >
+            <Icon name={tab === 'Goals' ? 'flag' : 'console'} />
+            <span>{tab === 'Goals' ? 'Goals' : 'Activity'}</span>
+            {tab === 'Goals' && !!bridgeState?.pendingGoalRequests?.length && <em>{bridgeState.pendingGoalRequests.length}</em>}
+          </button>
+        ))}
       </div>
     </header>
   );
@@ -1660,7 +1638,7 @@ export default function App() {
               <p className="nav-label">{group.label}</p>
               <div className="nav-group-items">
                 {group.items.map((item) => {
-                  const itemActive = item.name === 'Task Console' ? isControlCenterPage : activeNav === item.name;
+                  const itemActive = activeNav === item.name;
                   const itemLabel = item.label ?? item.name;
                   return (
                     <button key={item.name} aria-label={itemLabel} aria-current={itemActive ? 'page' : undefined} title={itemLabel} className={itemActive ? 'active' : ''} onClick={() => navigate(item.name)}>
@@ -1682,1409 +1660,224 @@ export default function App() {
       </aside>
 
       <main className="main-content">
-        <div className="calm-topbar"><span>Hearth Control <span aria-hidden="true">/</span> <strong>{isControlCenterPage ? `Control Center / ${controlCenterTabLabel}` : activeNav}</strong></span><span className="calm-server-state"><i className={running ? 'online' : ''} />{running ? 'Local server online' : 'Local server offline'}</span></div>
-        {activeNav === 'Storage Audit' ? <StorageAudit /> : activeNav === 'Local Chat' ? (
-          <div className="local-chat-view">
-            <header className="page-header">
-              <div>
-                <p className="kicker">EXPERIMENTAL LOCAL CHAT</p>
-                <h1>Local Chat.</h1>
-                <p className="intro">Choose a provider explicitly for this request. No task or durable job is created by Local Chat.</p>
-              </div>
-              <div className="local-chat-header-actions"><button type="button" className="context-button" aria-expanded={showChatContext} onClick={() => void toggleChatContext()}>Context</button><div className={`connection-pill ${chatProvider === 'local' && chatHealth?.ok ? 'online' : ''}`}><span /> {chatProvider === 'local' ? `Ollama · ${chatHealth?.ok ? 'Available' : 'Unavailable'}` : 'External provider'}</div></div>
-            </header>
-
-            <section className="local-chat-panel">
-              <div className="local-chat-controls">
-                <div className="local-chat-field">
-                  <label>Provider</label>
-                  <div className="local-chat-toggle" role="group" aria-label="Chat provider">
-                    <button type="button" className={chatProvider === 'local' ? 'selected' : ''} onClick={() => handleChatProviderChange('local')}>Local</button>
-                    <button type="button" className={chatProvider === 'external' ? 'selected' : ''} onClick={() => handleChatProviderChange('external')}>External</button>
-                  </div>
-                </div>
-                {chatProvider === 'local' ? (
-                  <>
-                    <div className="local-chat-field">
-                      <label htmlFor="local-chat-model">Model</label>
-                      <select id="local-chat-model" value={chatModel} onChange={(event) => setChatModel(event.target.value)} disabled={!chatHealth?.ok || chatModels.length === 0}>
-                        {chatModels.length === 0 ? <option value={chatModel}>{chatHealth?.ok ? 'No local models found' : 'Ollama unavailable'}</option> : chatModels.map((model) => <option key={model} value={model}>{model}</option>)}
-                      </select>
-                    </div>
-                    <div className="local-chat-field">
-                      <label htmlFor="local-chat-profile">Profile</label>
-                      <select id="local-chat-profile" value={chatProfile} onChange={(event) => setChatProfile(event.target.value as 'fast' | 'normal' | 'deep')}>
-                        <option value="fast">FAST</option>
-                        <option value="normal">NORMAL</option>
-                        <option value="deep">DEEP</option>
-                      </select>
-                    </div>
-                  </>
-                ) : <p className="local-chat-external-note">External uses the existing provider path and its configured permission.</p>}
-              </div>
-
-              <div className="local-chat-field">
-                <label htmlFor="local-chat-prompt">Prompt</label>
-                <textarea id="local-chat-prompt" rows={6} value={chatPrompt} onChange={(event) => setChatPrompt(event.target.value)} placeholder="Write a message for the selected provider…" />
-              </div>
-              <div className="local-chat-actions">
-                <span className={`local-chat-status ${chatProvider === 'local' && chatHealth?.ok ? 'available' : ''}`}>{chatProvider === 'local' ? (chatHealth?.ok ? 'Ollama available' : 'Ollama unavailable') : 'External selected'}</span>
-                {chatStreaming ? <button type="button" className="local-chat-stop-button" onClick={handleLocalChatStop}>Stop</button> : <button type="button" className="run-task-button" disabled={chatBusy || !chatPrompt.trim() || (chatProvider === 'local' && !chatHealth?.ok)} onClick={() => void handleLocalChatSend()}>{chatBusy ? 'Sending…' : 'Send'}</button>}
-              </div>
-              {chatProvider === 'local' && <label className="local-chat-long-response"><input type="checkbox" checked={chatLongResponse} onChange={(event) => setChatLongResponse(event.target.checked)} /> Long response</label>}
-              {chatStreaming && <div className="local-chat-generating" aria-live="polite">{chatTestApproval ? 'Waiting for test approval' : chatActivity.some((item) => item.type === 'test_running') ? 'Running test' : 'Generating…'} · {Math.round(chatElapsedMs / 1000)}s</div>}
-              {chatTestApproval && <section className="local-chat-test-confirmation" aria-label="Run test confirmation"><div><strong>Run test?</strong><p>{chatTestApproval.label}</p><small>Profile: {chatTestApproval.profile} · Timeout: {Math.round(chatTestApproval.timeoutMs / 1000)}s</small></div><div className="local-chat-test-confirmation-actions"><button type="button" onClick={() => { window.controlApp.localChatTestApproval(chatTestApproval.requestId, false); setChatTestApproval(null); }}>Cancel</button><button type="button" onClick={() => { window.controlApp.localChatTestApproval(chatTestApproval.requestId, true); setChatTestApproval(null); }}>Run Test</button></div></section>}
-              {chatActivity.length > 0 && <section className="local-chat-activity" aria-label="Local AI activity"><strong>{chatStreaming ? 'Working' : 'Activity'}</strong>{chatActivity.map((item, index) => <div key={`${item.skill}-${index}`} className="local-chat-activity-row"><span>{item.type === 'skill_completed' || item.type === 'evidence_complete' || item.type === 'test_finished' && item.status === 'passed' ? '✓' : item.type === 'skill_failed' || item.type === 'evidence_incomplete' || item.type === 'test_finished' && item.status !== 'passed' ? '!' : '●'}</span><span>{item.type === 'evidence_complete' ? 'Evidence trace complete' : item.type === 'evidence_incomplete' ? 'Evidence trace incomplete' : item.type === 'evidence_progress' ? `${item.stage || 'SOURCE'} · ${item.relativePath || item.skill}` : item.type === 'test_approval_requested' ? `Waiting for approval · ${item.label} · ${Math.round((item.elapsedMs || 0) / 1000)}s` : item.type === 'test_approval_cancelled' ? `Test not run · ${item.label}` : item.type === 'test_running' ? `Running ${item.label} · PID ${item.pid ?? 'pending'} · ${Math.round((item.elapsedMs || 0) / 1000)}s` : item.type === 'test_finished' ? `${item.label} ${item.status}${item.passedCount === undefined || item.testCount === undefined ? '' : ` · ${item.passedCount}/${item.testCount}`}${['cancelled', 'timed_out'].includes(item.status || '') || item.exitCode === null || item.exitCode === undefined ? '' : ` · exit ${item.exitCode}`}${item.processStillRunning ? ' · manual review required' : ''}` : item.type === 'skill_started' ? `Running ${item.skill}` : `${item.skill}${item.resultCount === undefined ? '' : ` · ${item.resultCount} results`}`}</span></div>)}</section>}
-              {chatError && <div className="local-chat-error" role="alert">{chatError}</div>}
-              {(chatStreamText || chatResult) && <section className="local-chat-result" aria-live="polite"><div className="local-chat-result-meta"><span>{chatResult?.provider || 'ollama'}</span><span>{chatResult?.model || chatModel}</span><span>{chatProvider === 'local' ? chatProfile.toUpperCase() : 'EXTERNAL'}</span><span>{chatStreaming ? `${Math.round(chatElapsedMs / 1000)}s` : `${chatResult?.elapsedMs || chatElapsedMs} ms`}</span></div><div ref={chatResponseRef} className="local-chat-response-viewer" onScroll={handleChatResponseScroll}><LocalChatResponse text={chatStreamText || chatResult?.response || ''} onExpand={(code, language) => setChatExpandedCode({ code, language })} /></div>{!chatFollowOutput && chatStreaming && <button type="button" className="local-chat-bottom-button" onClick={() => { setChatFollowOutput(true); if (chatResponseRef.current) chatResponseRef.current.scrollTop = chatResponseRef.current.scrollHeight; }}>↓ Bottom</button>}{chatResult?.doneReason === 'length' && <small className="local-chat-output-warning">Response reached the output limit.</small>}</section>}
-              {showChatContext && <section className="local-chat-context-inspector" aria-label="Local AI context"><header><strong>Context supplied to Local AI</strong><button type="button" onClick={() => setShowChatContext(false)}>Close</button></header>{chatContextLoading ? <p>Loading current context…</p> : chatContextError ? <p role="alert">{chatContextError}</p> : chatContext && <div><h3>Runtime</h3><pre>{chatContext.runtime}</pre><h3>Capabilities</h3><p><strong>Available:</strong> {chatContext.capabilities.available.join('; ')}</p><p><strong>Not available:</strong> {chatContext.capabilities.unavailable.join('; ')}</p><h3>Project</h3><pre>{chatContext.project}</pre><h3>Safety</h3><p>{chatContext.safety}</p><h3>Response Style</h3><p>{chatContext.responseStyle}</p></div>}</section>}
-              {chatExpandedCode && <div className="local-chat-code-modal" role="dialog" aria-modal="true"><div className="local-chat-code-modal-header"><span>{chatExpandedCode.language || 'code'}</span><button type="button" onClick={() => setChatExpandedCode(null)}>Close</button></div><pre><code>{chatExpandedCode.code}</code></pre></div>}
-            </section>
-          </div>
+        <div className="calm-topbar"><span>Hearth Control <span aria-hidden="true">/</span> <strong>{activeNav === 'Goals' ? `Goals / ${goalsTab}` : activeNav === 'System' ? `System / ${systemTab}` : activeNav}</strong></span><span className="calm-server-state"><i className={running ? 'online' : ''} />{running ? 'Local server online' : 'Local server offline'}</span></div>
+        {activeNav === 'Chat' ? (
+          <ChatPage
+            chatProvider={chatProvider}
+            chatModel={chatModel}
+            chatModels={chatModels}
+            chatProfile={chatProfile}
+            chatPrompt={chatPrompt}
+            chatBusy={chatBusy}
+            chatError={chatError}
+            chatResult={chatResult}
+            chatStreaming={chatStreaming}
+            chatStreamText={chatStreamText}
+            chatElapsedMs={chatElapsedMs}
+            chatLongResponse={chatLongResponse}
+            chatFollowOutput={chatFollowOutput}
+            chatHealth={chatHealth}
+            chatActivity={chatActivity}
+            chatTestApproval={chatTestApproval}
+            chatExpandedCode={chatExpandedCode}
+            chatContext={chatContext}
+            chatContextLoading={chatContextLoading}
+            chatContextError={chatContextError}
+            showChatContext={showChatContext}
+            chatResponseRef={chatResponseRef}
+            setChatModel={setChatModel}
+            setChatProfile={setChatProfile}
+            setChatPrompt={setChatPrompt}
+            setChatLongResponse={setChatLongResponse}
+            setChatFollowOutput={setChatFollowOutput}
+            setChatExpandedCode={setChatExpandedCode}
+            setChatTestApproval={setChatTestApproval}
+            setShowChatContext={setShowChatContext}
+            handleChatProviderChange={handleChatProviderChange}
+            handleChatResponseScroll={handleChatResponseScroll}
+            handleLocalChatSend={handleLocalChatSend}
+            handleLocalChatStop={handleLocalChatStop}
+            toggleChatContext={toggleChatContext}
+            LocalChatResponse={LocalChatResponse}
+          />
         ) : activeNav === 'Invest' ? (
-          <div className="invest-view">
-            <header className="page-header">
-              <div>
-                <p className="kicker">XAU/USD INVEST</p>
-                <h1>Invest control.</h1>
-                <p className="intro">Monitor XAU/USD, keep evidence, and control the demo-only execution boundary. Live-account execution is blocked.</p>
-              </div>
-              <div className={`connection-pill ${investStatus?.mode.mode !== 'OFF' ? 'online' : ''}`}><span /> {investStatus?.mode.mode.replace('_', ' ') || 'Loading'}</div>
-            </header>
-
-            <section className="invest-status-grid" aria-label="Invest services">
-              <article><span className={`invest-status-dot ${investStatus?.mt5_bridge.snapshots.length ? 'ready' : ''}`} /><div><small>MT5 BRIDGE</small><strong>{investStatus?.mt5_bridge.snapshots.length ? 'Connected' : investStatus?.mt5_bridge.running ? 'Waiting for price' : 'Offline'}</strong><p>{investStatus?.mt5_bridge.snapshots.length ? `${investStatus.mt5_bridge.snapshots[0].broker_symbol} · ${investStatus.mt5_bridge.snapshots.map((item) => item.timeframe).join(', ')}` : 'Open the MT5 EA to stream XAUUSD data.'}</p></div></article>
-              <article><span className={`invest-status-dot ${investStatus?.search_ai.ready ? 'ready' : ''}`} /><div><small>SEARCH AI</small><strong>{investStatus?.search_ai.ready ? investStatus.search_ai.approval_required ? 'Ask before research' : 'Ready' : 'Blocked'}</strong><p>Uses fixed-origin market sources. It does not require Browser automation.</p></div></article>
-              <article><span className={`invest-status-dot ${investStatus?.invest_ai.ready ? 'ready' : ''}`} /><div><small>INVEST AI</small><strong>{investStatus?.monitor.state === 'analyzing' ? 'Analyzing' : investStatus?.invest_ai.ready ? 'Ready' : 'Unavailable'}</strong><p>AI narrative cannot change direction, confidence, entry, stop loss, or take profit.</p></div></article>
-              <article><span className={`invest-status-dot ${investStatus?.execution.transport_ready && investStatus?.execution.enabled && investStatus?.execution.executor_account_type === 'demo' ? 'ready' : ''}`} /><div><small>DEMO EXECUTOR</small><strong>{investStatus?.execution.enabled ? investStatus.execution.transport_ready ? investStatus.execution.executor_account_type === 'demo' ? 'Armed' : 'Blocked: live account' : 'Waiting for V3 EA' : 'Inactive'}</strong><p>Only internal READY + Risk-approved V2 signals may use the demo command channel. No renderer order button exists.</p></div></article>
-            </section>
-
-            <section className="soft-panel invest-controller" aria-labelledby="invest-mode-title">
-              <div className="panel-title"><div><p className="section-kicker">MODE CONTROLLER</p><h2 id="invest-mode-title">Operating mode</h2></div><span className="invest-session-label">Startup: {investStatus?.mode.startup_mode || 'OFF'}</span></div>
-              <div className="invest-mode-buttons" role="group" aria-label="Invest operating mode">
-                {(['OFF', 'MONITOR', 'DEMO_AUTO'] as InvestModeName[]).map((mode) => <button type="button" key={mode} className={investStatus?.mode.mode === mode ? 'selected' : ''} aria-pressed={investStatus?.mode.mode === mode} disabled={investBusy || !investStatus} onClick={() => void setInvestMode(mode)}>{mode === 'DEMO_AUTO' ? 'DEMO AUTO' : mode}</button>)}
-              </div>
-              <div className="invest-mode-explanation">
-                <strong>{investStatus?.mode.mode === 'MONITOR' ? 'Monitor selected' : investStatus?.mode.mode === 'DEMO_AUTO' ? 'Demo Auto selected for this session' : 'Invest is off'}</strong>
-                <p>{investStatus?.mode.mode === 'MONITOR' ? `Watching ${investStatus.monitor.timeframe} for a new MT5 bar. ${investStatus.monitor.state === 'waiting_for_permission' ? 'Waiting for Market Research approval.' : investStatus.monitor.state === 'permission_denied' ? 'Research was denied for this bar.' : investStatus.monitor.state === 'permission_blocked' ? 'Market Research is blocked.' : investStatus.monitor.state === 'waiting_for_price' ? 'Waiting for MT5 price data.' : investStatus.monitor.state === 'analyzing' ? 'Search AI and Invest AI are analyzing now.' : 'A Mac notification will appear after a new signal is saved.'}` : investStatus?.mode.mode === 'DEMO_AUTO' ? 'The demo execution latch is enabled only for this session. V2 watches confirmed H1/M15/M5 bars and only a READY setup may continue to Risk and the demo-only executor.' : 'Market data may still arrive, but Invest will not start analysis or trading.'}</p>
-              </div>
-
-              <div className="invest-permission-control">
-                <div><strong>Market Research permission</strong><small>Separate from the unavailable Browser automation tool.</small></div>
-                <div role="group" aria-label="Market Research permission">
-                  {(['Allow', 'Ask', 'Blocked'] as Permission[]).map((value) => <button type="button" key={value} className={investStatus?.search_ai.permission === value ? 'selected' : ''} aria-pressed={investStatus?.search_ai.permission === value} onClick={() => setMarketResearchPermission(value)}>{value}</button>)}
-                </div>
-              </div>
-
-              <div className="invest-safety-row">
-                <div><strong>Startup safety is active</strong><p>DEMO AUTO always falls back to OFF after restart. KILL SWITCH blocks new demo orders but does not close an already-open position. Live accounts are rejected.</p></div>
-                <button type="button" className="invest-kill-switch" disabled={investBusy || investStatus?.mode.mode === 'OFF'} onClick={() => void useInvestKillSwitch()}>KILL SWITCH</button>
-              </div>
-              {investError && <p className="invest-error" role="alert">{investError}</p>}
-            </section>
-
-            <section className="soft-panel invest-journal" aria-labelledby="invest-v2-title">
-              <div className="panel-title"><div><p className="section-kicker">V2 TECHNICAL SETUPS</p><h2 id="invest-v2-title">H1 context · M15 setup · M5 trigger</h2></div><span className="invest-session-label">{investStatus?.v2.last_closed_m5 ? `M5 ${new Date(investStatus.v2.last_closed_m5).toLocaleTimeString()}` : 'Waiting for M5'}</span></div>
-              <div className="invest-v2-grid">
-                {(['SMC_IDM', 'HARMONIC_PRZ'] as const).map((key) => {
-                  const setup = investStatus?.v2.strategies[key];
-                  return <article key={key} className="invest-v2-card">
-                    <div className="invest-signal-heading"><span className={`invest-v2-state state-${(setup?.state || 'NO_SETUP').toLowerCase()}`}>{setup?.state || 'NO SETUP'}</span><strong>{key === 'SMC_IDM' ? 'SMC + IDM' : 'Harmonic PRZ'}</strong><span className={`invest-direction direction-${setup?.direction === 'BUY' ? 'up' : setup?.direction === 'SELL' ? 'down' : 'neutral'}`}>{setup?.direction || '—'}</span></div>
-                    <div className="invest-signal-levels"><span>Entry <strong>{setup?.entry_zone ? setup.entry_zone.join('–') : '—'}</strong></span><span>SL <strong>{setup?.invalidation ?? '—'}</strong></span><span>TP1 <strong>{setup?.targets[0] ?? '—'}</strong></span><span>Signal <strong>{setup?.signal_id ? setup.signal_id.slice(-8) : '—'}</strong></span></div>
-                    <small>{setup?.reason_codes.length ? setup.reason_codes.join(' · ') : setup?.state === 'READY' ? 'Technical setup confirmed.' : 'Waiting for a valid setup.'}</small>
-                  </article>;
-                })}
-              </div>
-              <div className="invest-v2-risk-summary">
-                <div><small>V2 COORDINATOR</small><strong className={`invest-v2-coordinator-status status-${v2CoordinatorDisplay.tone}`}>{v2CoordinatorDisplay.label}</strong><p>{investStatus?.v2.execution_blocked_reason ? `Execution: ${investStatus.v2.execution_blocked_reason.replaceAll('_', ' ')}` : 'Execution path has no active blocker.'}</p></div>
-                <div><small>RISK DECISION</small><strong>{investStatus?.v2.risk.decision || (investStatus?.risk_config.configured ? 'Waiting for READY' : 'Not configured')}</strong><p>{investStatus?.v2.risk.approved_volume != null ? `Approved volume: ${investStatus.v2.risk.approved_volume}` : 'No lot size is selected unless Risk approves a READY setup.'}</p></div>
-              </div>
-            </section>
-
-            <section className="soft-panel invest-journal" aria-labelledby="invest-risk-title">
-              <div className="panel-title"><div><p className="section-kicker">DEMO RISK RULES</p><h2 id="invest-risk-title">Explicit execution limits</h2></div><span className="invest-session-label">{investStatus?.risk_config.configured ? 'CONFIGURED' : 'EXECUTION BLOCKED'}</span></div>
-              <p className="invest-risk-help">These values are yours. Hearth does not create hidden risk defaults. Until every required field is saved, V2 can analyze setups but cannot submit a demo order.</p>
-              <div className="invest-risk-grid">
-                {[
-                  ['riskPerTradePct', 'Risk / trade (%)'],
-                  ['maxDailyLossPct', 'Max daily loss (%)'],
-                  ['maxDrawdownPct', 'Max drawdown (%)'],
-                  ['maxOpenRiskPct', 'Max total open risk (%)'],
-                  ['maxPositions', 'Max positions'],
-                  ['maxSpreadPoints', 'Max spread (points)'],
-                  ['maxSlippagePoints', 'Max slippage (points)'],
-                  ['minStopPoints', 'Min stop (points)'],
-                  ['maxStopPoints', 'Max stop (points)'],
-                  ['requestedVolume', 'Requested volume (optional)'],
-                ].map(([field, label]) => <label key={field}><span>{label}</span><input type="number" min="0" step="any" value={demoRiskForm[field as keyof typeof demoRiskForm]} placeholder={field === 'requestedVolume' ? 'Calculated by Risk' : 'Required'} onChange={(event) => { setDemoRiskDirty(true); setDemoRiskForm((current) => ({ ...current, [field]: event.target.value })); }} /></label>)}
-              </div>
-              <div className="invest-risk-actions"><span>{investStatus?.risk_config.error ? `Stored config error: ${investStatus.risk_config.error}` : investStatus?.risk_config.configured ? 'Saved risk rules are active for DEMO_AUTO only.' : 'No demo risk rules saved yet.'}</span><button type="button" className="subtle-action" disabled={investBusy} onClick={() => void saveDemoRiskConfig()}>Save Demo Risk Rules</button></div>
-            </section>
-
-            <section className="soft-panel invest-journal" aria-labelledby="invest-journal-title">
-              <div className="panel-title"><div><p className="section-kicker">V1 ANALYSIS · INFORMATION ONLY</p><h2 id="invest-journal-title">Latest analysis</h2></div><div className="invest-journal-actions"><span className="invest-session-label">{investStatus?.signals.length || 0} saved</span>{(investStatus?.signals.length || 0) > 1 && <button type="button" className="subtle-action" onClick={() => setShowV1History((value) => !value)}>{showV1History ? 'Hide history' : `History (${(investStatus?.signals.length || 0) - 1})`}</button>}</div></div>
-              {investStatus?.signals.length ? <div className="invest-signal-list">{(showV1History ? investStatus.signals : investStatus.signals.slice(0, 1)).map((signal) => <article key={signal.id}>
-                <div className="invest-signal-heading"><span className={`invest-direction direction-${signal.direction.toLowerCase()}`}>{signal.direction}</span><strong>{signal.confidence}%</strong><time>{new Date(signal.created_at).toLocaleString()}</time></div>
-                <div className="invest-signal-levels"><span>Entry <strong>{signal.entry_zone.length ? signal.entry_zone.join('–') : '—'}</strong></span><span>SL <strong>{signal.stop_loss ?? '—'}</strong></span><span>TP <strong>{signal.targets[0] ?? '—'}</strong></span><span>Risk <strong>{signal.risk_level}</strong></span></div>
-                {signal.summary && <p>{signal.summary}</p>}
-                {signal.risks[0] && <small>Risk: {signal.risks[0]}</small>}
-              </article>)}</div> : <div className="invest-journal-empty"><strong>No signals yet</strong><p>Set Market Research to Allow or approve the request, select MONITOR, and keep the MT5 EA streaming XAUUSD H1 data.</p></div>}
-            </section>
-
-            <section className="soft-panel invest-journal" aria-labelledby="invest-execution-title">
-              <div className="panel-title"><div><p className="section-kicker">EXECUTION JOURNAL</p><h2 id="invest-execution-title">Demo execution evidence</h2></div><span className="invest-session-label">{investStatus?.executions.length || 0} saved</span></div>
-              {investStatus?.executions.length ? <div className="invest-signal-list">{investStatus.executions.map((execution) => <article key={execution.request_id}>
-                <div className="invest-signal-heading"><span className={`invest-direction direction-${execution.side === 'BUY' ? 'up' : 'down'}`}>{execution.side}</span><strong>{execution.state}</strong><time>{new Date(execution.updated_at).toLocaleString()}</time></div>
-                <div className="invest-signal-levels"><span>Strategy <strong>{execution.strategy}</strong></span><span>Volume <strong>{execution.request.volume}</strong></span><span>SL <strong>{execution.request.stop_loss}</strong></span><span>TP <strong>{execution.request.take_profit}</strong></span></div>
-                <small>{execution.receipt?.reason || execution.error || execution.request_id}</small>
-              </article>)}</div> : <div className="invest-journal-empty"><strong>No demo executions yet</strong><p>Execution evidence appears here only after the internal V2 coordinator submits a READY, Risk-approved signal to the demo-only executor.</p></div>}
-            </section>
-          </div>
-        ) : activeNav === 'Console' ? (
-          <div className="operations-console-view">
-            <header className="page-header" id="console">
-              <div>
-                <p className="kicker">OPERATIONAL CONSOLE</p>
-                <h1>Console.</h1>
-                <p className="intro">Read-only operational state for connections, approvals, and evidence.</p>
-              </div>
-              <div className={`connection-pill ${attentionConnections === 0 && healthyConnections > 0 ? 'online' : ''}`}>
-                <span /> {healthyConnections}/{connections.length} connections healthy
-              </div>
-            </header>
-
-            <section className="metrics console-metrics" aria-label="Operational overview">
-              <article><div className="metric-icon sage"><Icon name="activity" /></div><div><span>Connections</span><strong>{healthyConnections} healthy</strong><small>{attentionConnections > 0 ? `${attentionConnections} require attention` : 'No provider errors reported'}</small></div></article>
-              <article><div className="metric-icon sand"><Icon name="lock" /></div><div><span>Approvals</span><strong>{approvalQueue.length} pending</strong><small>Decisions remain in the existing approval dialog</small></div></article>
-              <article><div className="metric-icon blue"><Icon name="terminal" /></div><div><span>X runtime</span><strong>{liveXRuns.length} active</strong><small>{recentXRuns.length ? `${recentXRuns.length} recent run(s)` : 'No X run history yet'}</small></div></article>
-              <article><div className="metric-icon purple"><Icon name="flag" /></div><div><span>Durable evidence</span><strong>{durableGoalEvidence.length} checkpoints</strong><small>Latest persisted Goal checkpoints</small></div></article>
-            </section>
-
-            <div className="console-grid">
-              <section className="soft-panel console-x-panel" aria-labelledby="console-x-title">
-                <div className="panel-title">
-                  <div><p className="section-kicker">X RUNTIME</p><h2 id="console-x-title">Live & recent runs</h2></div>
-                  <span className="panel-meta">{liveXRuns.length ? `${liveXRuns.length} active` : 'Idle'}</span>
-                </div>
-                {recentXRuns.length === 0 ? (
-                  <div className="console-empty"><Icon name="terminal" /><p>No X runs recorded</p><small>Direct and queued X work will appear here automatically.</small></div>
-                ) : (
-                  <div className="console-x-run-list">
-                    {recentXRuns.slice(0, 8).map((run) => {
-                      const detail = run.error || run.result?.blockers?.[0]?.detail || run.result?.reason_code || run.hearthOutcome || 'No additional detail';
-                      return (
-                        <article key={run.runId} className="console-x-run-row">
-                          <div className="console-x-run-main">
-                            <div>
-                              <strong>{run.taskId}</strong>
-                              <code>{run.runId}</code>
-                            </div>
-                            <span className={'task-status-pill ' + run.status}>{run.status}</span>
-                          </div>
-                          <p>{detail}</p>
-                          <small>{new Date(run.updatedAt).toLocaleString()} · {run.gateStatus || 'No gate result yet'}</small>
-                        </article>
-                      );
-                    })}
-                  </div>
-                )}
-                <p className="console-boundary-note">Read-only projection from XRunStore. Console never starts, retries, approves, or cancels X work.</p>
-              </section>
-
-              <section className="soft-panel console-connections-panel" aria-labelledby="console-connections-title">
-                <div className="panel-title">
-                  <div><p className="section-kicker">CONNECTIONS</p><h2 id="console-connections-title">Health</h2></div>
-                  <button type="button" className="subtle-action" disabled={connectionsBusy} onClick={() => void refreshConnections()}>
-                    {connectionsBusy ? 'Refreshing…' : 'Refresh all'}
-                  </button>
-                </div>
-                {connectionsError && <p className="console-error" role="alert">{connectionsError}</p>}
-                <div className="console-connection-list">
-                  {connections.length === 0 ? (
-                    <div className="console-empty"><Icon name="activity" /><p>No connection metadata available</p><small>Connection credentials are never shown here.</small></div>
-                  ) : connections.map((connection) => (
-                    <article className="console-connection-row" key={connection.alias}>
-                      <div className="console-connection-main">
-                        <div>
-                          <strong>{connection.label}</strong>
-                          <code>{connection.alias}</code>
-                        </div>
-                        <span className={`console-status status-${connection.status.toLowerCase()}`}>{connection.status}</span>
-                      </div>
-                      {connection.provider === 'github' ? (
-                        <GitHubConnectionCard
-                          connection={connection}
-                          repositories={githubRepositories[connection.alias] || []}
-                          repositoryBusy={githubRepoBusy === connection.alias}
-                          repositoryError={githubRepoErrors[connection.alias] || ''}
-                          setupOpen={githubSetupOpen[connection.alias] === true}
-                          actionBusy={connectionActionBusy === connection.alias}
-                          connectionsBusy={connectionsBusy}
-                          tokenValue={connectionTokenInputs[connection.alias] || ''}
-                          allowPullRequestCreate={githubPrCreateInputs[connection.alias] === true}
-                          onOpenSetup={() => setGithubSetupOpen((current) => ({ ...current, [connection.alias]: true }))}
-                          onCloseSetup={() => setGithubSetupOpen((current) => ({ ...current, [connection.alias]: false }))}
-                          onTokenChange={(value) => setConnectionTokenInputs((current) => ({ ...current, [connection.alias]: value }))}
-                          onAllowPullRequestCreateChange={(value) => setGithubPrCreateInputs((current) => ({ ...current, [connection.alias]: value }))}
-                          onConnect={() => void connectManagedConnection(connection)}
-                          onDisconnect={() => void disconnectManagedConnection(connection)}
-                          onRefreshHealth={() => void refreshConnections(connection.alias)}
-                          onRefreshRepositories={() => void loadGitHubRepositories(connection.alias as 'github:personal' | 'github:work', true)}
-                          onSelectRepository={(fullName) => void selectGitHubRepository(connection, fullName)}
-                        />
-                      ) : (
-                        <>
-                      <dl className="console-facts">
-                        <div><dt>Provider</dt><dd>{connection.provider}</dd></div>
-                        <div><dt>Account</dt><dd>{connection.account || '—'}</dd></div>
-                        <div><dt>Last checked</dt><dd>{connection.lastCheckedAt ? new Date(connection.lastCheckedAt).toLocaleString() : 'Not checked'}</dd></div>
-                        <div><dt>Capabilities</dt><dd>{connection.capabilities.length ? connection.capabilities.join(', ') : 'None granted'}</dd></div>
-                      </dl>
-                      {connection.lastError && <p className="console-inline-error">Last error: {connection.lastError}</p>}
-                      {connection.provider === 'vercel' && (
-                        <div className="console-connection-management">
-                          {connection.status !== 'CONNECTED' && (
-                            <div className="console-connect-form">
-                              <label>
-                                <span>Personal access token</span>
-                                <input
-                                  type="password"
-                                  autoComplete="new-password"
-                                  spellCheck={false}
-                                  value={connectionTokenInputs[connection.alias] || ''}
-                                  onChange={(event) => setConnectionTokenInputs((current) => ({ ...current, [connection.alias]: event.target.value }))}
-                                  placeholder="Enter token locally"
-                                />
-                              </label>
-                              {connection.provider === 'vercel' && (
-                                <label>
-                                  <span>Team ID (optional)</span>
-                                  <input
-                                    type="text"
-                                    autoComplete="off"
-                                    spellCheck={false}
-                                    value={vercelTeamIdInput}
-                                    onChange={(event) => setVercelTeamIdInput(event.target.value)}
-                                    placeholder="team_..."
-                                  />
-                                </label>
-                              )}
-                              <button
-                                type="button"
-                                className="subtle-action"
-                                disabled={connectionActionBusy === connection.alias || !(connectionTokenInputs[connection.alias] || '').trim()}
-                                onClick={() => void connectManagedConnection(connection)}
-                              >
-                                {connectionActionBusy === connection.alias ? 'Connecting…' : connection.status === 'DISCONNECTED' ? 'Connect' : 'Reconnect'}
-                              </button>
-                            </div>
-                          )}
-                          {connection.status !== 'DISCONNECTED' && (
-                            <button
-                              type="button"
-                              className="text-action console-disconnect"
-                              disabled={connectionActionBusy === connection.alias}
-                              onClick={() => void disconnectManagedConnection(connection)}
-                            >
-                              Disconnect
-                            </button>
-                          )}
-                        </div>
-                      )}
-                      {connection.provider === 'supabase' && <p className="console-boundary-note">Authentication remains in the existing Remote Bridge / Project X surfaces; P7 does not create a second Supabase login path.</p>}
-                      <button type="button" className="text-action" disabled={connectionsBusy || connectionActionBusy === connection.alias} onClick={() => void refreshConnections(connection.alias)}>Refresh health</button>
-                        </>
-                      )}
-                    </article>
-                  ))}
-                </div>
-                <p className="console-boundary-note">Renderer-safe summaries only. Stored provider targets, credentials, tokens, and ciphertext are never read back or rendered.</p>
-              </section>
-
-              <section className="soft-panel console-approvals-panel" aria-labelledby="console-approvals-title">
-                <div className="panel-title">
-                  <div><p className="section-kicker">APPROVALS</p><h2 id="console-approvals-title">Pending requests</h2></div>
-                  <span className="panel-meta">Status only</span>
-                </div>
-                {approvalQueue.length === 0 ? (
-                  <div className="console-empty"><Icon name="lock" /><p>No pending approvals</p><small>New requests still open the existing one-time approval dialog.</small></div>
-                ) : (
-                  <div className="console-approval-list">
-                    {approvalQueue.map((item, index) => (
-                      <article className="console-approval-row" key={item.requestId}>
-                        <span>{index === 0 ? 'Waiting now' : `Queued ${index + 1}`}</span>
-                        <strong>{item.permission}</strong>
-                        <p>{item.action}</p>
-                      </article>
-                    ))}
-                  </div>
-                )}
-                <p className="console-boundary-note">The Console cannot allow or deny requests. Decisions remain owned by the existing approval lifecycle.</p>
-              </section>
-
-              <section className="soft-panel console-evidence-panel" aria-labelledby="console-evidence-title">
-                <div className="panel-title">
-                  <div><p className="section-kicker">EVIDENCE</p><h2 id="console-evidence-title">Operational evidence</h2></div>
-                  <span className="panel-meta">Read only</span>
-                </div>
-                <div className="console-evidence-grid">
-                  <div>
-                    <h3>Current session</h3>
-                    <p className="console-evidence-caption">System logs and approval lifecycle events are retained only for this open app session.</p>
-                    <div className="console-evidence-list">
-                      {[...approvalEvidence].reverse().slice(0, 6).map((item) => (
-                        <article key={item.requestId}>
-                          <time>{item.time}</time>
-                          <strong>{item.permission} · {item.state}</strong>
-                          <p>{item.action}</p>
-                        </article>
-                      ))}
-                      {[...logs].reverse().slice(0, 6).map((log, index) => (
-                        <article key={`${log.time}-${log.source}-${index}`}>
-                          <time>{log.time}</time>
-                          <strong>{log.source}</strong>
-                          <p>{log.message}</p>
-                        </article>
-                      ))}
-                      {approvalEvidence.length === 0 && logs.length === 0 && <div className="console-empty compact"><p>No session evidence yet</p></div>}
-                    </div>
-                  </div>
-                  <div>
-                    <h3>Durable Goal checkpoints</h3>
-                    <p className="console-evidence-caption">These summaries come from Goal Runner checkpoint evidence already persisted by Hearth.</p>
-                    <div className="console-evidence-list">
-                      {durableGoalEvidence.map((item) => (
-                        <article key={item.checkpointId}>
-                          <time>{new Date(item.timestamp).toLocaleString()}</time>
-                          <strong>{item.goalTitle}</strong>
-                          <p>{item.summary || 'Checkpoint recorded'}</p>
-                          <small>{item.filesChanged.length ? `${item.filesChanged.length} file(s) changed` : 'No changed files recorded'} · {Object.keys(item.checks || {}).length} check(s)</small>
-                        </article>
-                      ))}
-                      {durableGoalEvidence.length === 0 && <div className="console-empty compact"><p>No durable Goal checkpoints yet</p></div>}
-                    </div>
-                  </div>
-                </div>
-              </section>
-            </div>
-          </div>
-        ) : activeNav === 'Task Console' ? (
-          <div className="task-console-view">
-            {renderControlCenterHeader(
-              taskCenterTab === 'x' ? (
-                <div className={'connection-pill ' + (xReady ? 'online' : '')}>
-                  <span /> X · {xPerm === 'Blocked' ? 'Blocked' : xReady ? 'Ready' : 'Unavailable'}
-                </div>
-              ) : taskCenterTab === 'remote' ? (
-                <div className={'connection-pill ' + (bridgeState?.connected ? 'online' : '')}>
-                  <span /> Remote · {bridgeState?.connected ? 'Bridge connected' : 'Standing by'}
-                </div>
-              ) : (
-                <div className={'connection-pill ' + (executorStatus?.available ? 'online' : '')}>
-                  <span /> Executor · {executorStatus?.available ? 'Connected' : 'Unavailable'}
-                </div>
-              )
-            )}
-
-            <div className="task-workspace-bar">
-              <div className="task-workspace-info">
-                <Icon name="folder" />
-                <span>Workspace</span>
-                <code>{workspace || 'No workspace selected'}</code>
-              </div>
-              <button
-                className="task-workspace-change"
-                disabled={isTaskRunning || isGoalActive}
-                onClick={chooseWorkspace}
-                title={isGoalActive ? 'Cannot switch workspace while a goal is active' : isTaskRunning ? 'Cannot switch workspace while task is running' : 'Choose different folder'}
-              >
-                Change folder
-              </button>
-            </div>
-
-            <div className="task-center-tabs" role="tablist" aria-label="Task execution surfaces">
-              <button type="button" role="tab" aria-selected={taskCenterTab === 'x'} className={taskCenterTab === 'x' ? 'active' : ''} onClick={() => setTaskCenterTab('x')}>
-                <span>X</span>
-                {xPendingTasks.length > 0 && <em>{xPendingTasks.length}</em>}
-              </button>
-              <button type="button" role="tab" aria-selected={taskCenterTab === 'antigravity'} className={taskCenterTab === 'antigravity' ? 'active' : ''} onClick={() => setTaskCenterTab('antigravity')}>
-                <span>Antigravity</span>
-              </button>
-              <button type="button" role="tab" aria-selected={taskCenterTab === 'remote'} className={taskCenterTab === 'remote' ? 'active' : ''} onClick={() => setTaskCenterTab('remote')}>
-                <span>Remote</span>
-                {remotePendingTasks.length > 0 && <em>{remotePendingTasks.length}</em>}
-              </button>
-            </div>
-
-            {taskCenterTab === 'x' && (
-              <section className="x-task-surface" aria-labelledby="x-task-heading">
-                <div className="x-task-overview">
-                  <div>
-                    <p className="kicker">LOCAL CODER</p>
-                    <h2 id="x-task-heading">X Tasks</h2>
-                    <p>Review Project X requests here, then dispatch them through Hearth's existing X approval and queue path.</p>
-                  </div>
-                  <button className="task-perm-button" type="button" onClick={rotateXPerm} title="Cycle X permission: Allow / Ask / Blocked">
-                    <i style={{ background: xPerm === 'Allow' ? 'var(--sage)' : xPerm === 'Blocked' ? 'var(--rose)' : '#9a7545' }} />
-                    <span>Permission: <strong>{xPerm}</strong></span>
-                    <Icon name="chevron" />
-                  </button>
-                </div>
-
-                <div className={'x-permission-note ' + (xPerm === 'Blocked' ? 'blocked' : xPerm === 'Ask' ? 'ask' : 'allow')}>
-                  <strong>{xPerm === 'Ask' ? 'Approval required' : xPerm === 'Allow' ? 'Automatic X admission enabled' : 'X is blocked'}</strong>
-                  <span>{xPerm === 'Ask' ? 'After you press Approve & Run, Hearth will show the existing “Allow X access?” dialog before queue admission.' : xPerm === 'Allow' ? 'Approved requests enter X without a second permission dialog. Switch to Ask if you want to press Allow once for every request.' : 'Change X permission before approving new work.'}</span>
-                </div>
-
-                {activeXStatus && (
-                  <div className="x-run-card">
-                    <div className="x-run-card-header">
-                      <div>
-                        <p className="section-kicker">CURRENT X RUN</p>
-                        <strong>{activeXStatus.task_id || activeXStatus.request_id || 'X task'}</strong>
-                      </div>
-                      <span className={'task-status-pill ' + (activeXStatus.terminal_status || activeXStatus.queue_status || 'pending')}>
-                        {activeXStatus.terminal_status || activeXStatus.queue_status || 'pending'}
-                      </span>
-                    </div>
-                    <dl className="x-run-meta">
-                      <div><dt>Request</dt><dd>{activeXStatus.request_id || '—'}</dd></div>
-                      <div><dt>Queue</dt><dd>{activeXStatus.queue_id || '—'}</dd></div>
-                      <div><dt>Run</dt><dd>{activeXStatus.run_id || 'Waiting for dispatch'}</dd></div>
-                      <div><dt>Gate</dt><dd>{activeXStatus.gate_status || '—'}</dd></div>
-                    </dl>
-                    {activeXStatus.error && <div className="task-error-box"><div className="task-error-message"><strong>X Error:</strong> {activeXStatus.error}</div></div>}
-                    {activeXStatus.result && (
-                      <div className="x-run-result">
-                        <strong>{activeXStatus.result.gate_status || activeXStatus.terminal_status || 'Result'}</strong>
-                        <span>{Array.isArray(activeXStatus.result.files_changed) ? activeXStatus.result.files_changed.length : 0} file(s) changed · {Array.isArray(activeXStatus.result.validation) ? activeXStatus.result.validation.filter((item: any) => item.status === 'passed').length : 0} validation check(s) passed</span>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                <div className="x-runs-section">
-                  <div className="remote-inbox-header x-inbox-header">
-                    <div>
-                      <p className="kicker">X RUNTIME</p>
-                      <h2>Current & recent X runs</h2>
-                    </div>
-                    <span className="panel-meta">{liveXRuns.length ? `${liveXRuns.length} active` : 'Idle'}</span>
-                  </div>
-                  {recentXRuns.length === 0 ? (
-                    <div className="remote-inbox-empty compact">
-                      <Icon name="terminal" />
-                      <p>No X runs recorded</p>
-                      <small>Direct X work and approved Project X requests will appear here.</small>
-                    </div>
-                  ) : (
-                    <div className="x-run-list">
-                      {recentXRuns.slice(0, 6).map((run) => {
-                        const detail = run.error || run.result?.blockers?.[0]?.detail || run.result?.reason_code || run.hearthOutcome || 'No additional detail';
-                        return (
-                          <article className="x-run-row" key={run.runId}>
-                            <div className="x-run-row-head">
-                              <div><strong>{run.taskId}</strong><code>{run.runId}</code></div>
-                              <span className={'task-status-pill ' + run.status}>{run.status}</span>
-                            </div>
-                            <p>{detail}</p>
-                            <small>{new Date(run.updatedAt).toLocaleString()} · {run.gateStatus || 'No gate result yet'}</small>
-                          </article>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-
-                <div className="remote-inbox-header x-inbox-header">
-                  <div>
-                    <p className="kicker">PROJECT X</p>
-                    <h2>Pending X Requests</h2>
-                  </div>
-                  <div className={'connection-pill ' + (publicXState?.signedIn ? 'online' : '')}>
-                    <span /> Project X · {publicXState?.signedIn ? 'Connected' : 'Not connected'}
-                  </div>
-                </div>
-
-                {!publicXState?.signedIn ? (
-                  <div className="remote-inbox-empty">
-                    <Icon name="radio" />
-                    <p>Project X is not connected</p>
-                    <small>Open Connections and sign in to receive X requests for local review.</small>
-                  </div>
-                ) : xPendingTasks.length === 0 ? (
-                  <div className="remote-inbox-empty">
-                    <Icon name="console" />
-                    <p>No pending X requests</p>
-                    <small>New Project X coding requests will appear here before they are admitted to the X queue.</small>
-                  </div>
-                ) : (
-                  <div className="remote-tasks-list">
-                    {xPendingTasks.map((t) => (
-                      <div key={t.id} className="remote-task-card x-request-card">
-                        <div className="remote-task-main">
-                          <div className="remote-task-meta">
-                            <span className="remote-source-tag">X</span>
-                            <strong className="remote-task-title">{t.title || 'X Task'}</strong>
-                            <span className="remote-task-time">{new Date(t.createdAt).toLocaleTimeString()}</span>
-                          </div>
-                          <p className="remote-task-preview">{t.prompt.slice(0, 180)}{t.prompt.length > 180 ? '…' : ''}</p>
-                        </div>
-                        <div className="remote-task-actions">
-                          <button className="remote-action-btn review" type="button" onClick={() => setReviewTask(t)}>Review</button>
-                          <button className="remote-action-btn reject" type="button" disabled={bridgeBusy} onClick={() => handleRejectRemoteTask(t)}>Reject</button>
-                          <button className="remote-action-btn approve" type="button" disabled={bridgeBusy || xPerm === 'Blocked' || !xReady} onClick={() => handleApproveRemoteTask(t)} title={xPerm === 'Ask' ? 'Approve request, then confirm X access in the one-time approval dialog' : 'Approve and dispatch to X'}>
-                            {xPerm === 'Ask' ? 'Approve & Request Access' : 'Approve & Run'}
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </section>
-            )}
-
-            {taskCenterTab === 'antigravity' && (
-              <>
-            <div className="task-input-box">
-              <div className="task-textarea-container">
-                <textarea
-                  className="task-textarea"
-                  placeholder="Describe your task for Antigravity (e.g. Inspect git diff, review package.json, check test suite...)"
-                  value={taskPrompt}
-                  onChange={(e) => setTaskPrompt(e.target.value)}
-                  disabled={taskSubmitting || isTaskRunning}
-                  rows={4}
-                />
-                {promptBytes > 60000 && (
-                  <div className="task-size-warning">
-                    {promptBytes.toLocaleString()} / 65,536 bytes {promptBytes > 65536 ? '⚠️ Exceeds 64 KiB limit' : ''}
-                  </div>
-                )}
-              </div>
-              <div className="task-input-footer">
-                <div className="task-options-group">
-                  <div className="executor-indicator">
-                    <span className={`executor-status-dot ${executorStatus?.available ? 'connected' : 'unavailable'}`} />
-                    <span>Executor: <em>{executorStatus?.available ? 'Ready' : 'Unavailable'}</em></span>
-                  </div>
-                  <button
-                    className="task-perm-button"
-                    onClick={rotateAntigravityPerm}
-                    type="button"
-                    title="Click to cycle Antigravity permission (Ask / Allow / Blocked)"
-                  >
-                    <i style={{
-                      background: antigravityPerm === 'Allow' ? 'var(--sage)' : antigravityPerm === 'Blocked' ? 'var(--rose)' : '#9a7545'
-                    }} />
-                    <span>Permission: <strong>{antigravityPerm}</strong></span>
-                    <Icon name="chevron" />
-                  </button>
-                </div>
-                <button
-                  className="run-task-button"
-                  disabled={!taskPrompt.trim() || taskSubmitting || isTaskRunning || !executorStatus?.available || antigravityPerm === 'Blocked' || promptBytes > 65536}
-                  onClick={handleStartTask}
-                  type="button"
-                >
-                  <Icon name="console" />
-                  <span>{taskSubmitting ? 'Starting…' : isTaskRunning ? 'Running…' : 'Run Task'}</span>
-                </button>
-              </div>
-            </div>
-
-            {taskData ? (
-              <section className="active-task-section" aria-labelledby="active-task-heading">
-                <div className="task-header-row">
-                  <div className="task-header-title">
-                    <h2 id="active-task-heading">{taskData.title || `Task ${taskData.taskId}`}</h2>
-                    <p>Started at {new Date(taskData.createdAt).toLocaleTimeString()}</p>
-                  </div>
-                  <div className={`task-status-pill ${taskData.status}`}>
-                    <span />
-                    {taskData.status}
-                  </div>
-                </div>
-
-                <div className="task-meta-bar">
-                  <div className="task-meta-item"><span>Source</span><code>{activeTaskSource}</code></div>
-                  <div className="task-meta-item">
-                    <span>Task ID</span>
-                    <button className="task-id-copy" type="button" onClick={() => { void navigator.clipboard.writeText(taskData.taskId); flash('Task ID copied'); }}><code>{taskData.taskId.slice(0, 8)}…</code> Copy</button>
-                  </div>
-                  <div className="task-meta-item">
-                    <span>Conversation ID</span>
-                    <code>{taskData.conversationId || 'Pending…'}</code>
-                  </div>
-                  <div className="task-meta-item">
-                    <span>Status</span>
-                    <code>{taskData.status}</code>
-                  </div>
-                  <div className="task-meta-item">
-                    <span>Elapsed</span>
-                    <code>{formatElapsed(taskData.createdAt, ['done', 'error', 'waiting'].includes(taskData.status) ? taskData.updatedAt : undefined)}</code>
-                  </div>
-                </div>
-
-                <div className="task-live-summary"><strong>Latest</strong><span>{taskData.lastEvent?.summary || taskData.completion?.summary || (taskData.status === 'starting' ? 'Preparing executor…' : 'No progress update yet.')}</span><button type="button" aria-expanded={showTaskProgress} onClick={() => setShowTaskProgress((visible) => !visible)}>{showTaskProgress ? 'Hide Progress' : 'View Progress'}</button></div>
-
-                {taskData.status === 'recovery_required' && (
-                  <div className="task-recovery-box">
-                    <div className="task-recovery-header">
-                      <div className="task-recovery-title">
-                        <Icon name="terminal" />
-                        <span>INTERRUPTED TASK REQUIRES RECOVERY</span>
-                      </div>
-                      <span className="task-status-pill recovery_required">RECOVERY REQUIRED</span>
-                    </div>
-                    <p className="task-recovery-desc">
-                      This task was interrupted by an application or system shutdown. Process termination is never assumed to be successful. You can resume execution with the original conversation context, mark the task failed, or dismiss it.
-                    </p>
-                    <div className="task-recovery-actions">
-                      <button
-                        className="task-recovery-btn-resume"
-                        disabled={recoveryBusy || !executorStatus?.available || antigravityPerm === 'Blocked'}
-                        onClick={handleResumeTask}
-                        type="button"
-                      >
-                        {recoveryBusy ? 'Processing…' : 'Resume Task'}
-                      </button>
-                      <button
-                        className="task-recovery-btn-fail"
-                        disabled={recoveryBusy}
-                        onClick={handleMarkTaskFailed}
-                        type="button"
-                      >
-                        Mark Failed
-                      </button>
-                      <button
-                        className="task-recovery-btn-dismiss"
-                        disabled={recoveryBusy}
-                        onClick={handleDismissTask}
-                        type="button"
-                      >
-                        Dismiss
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {taskData.error && (
-                  <div className="task-error-box">
-                    <div className="task-error-message">
-                      <strong>Task Error:</strong> {taskData.error}
-                    </div>
-                  </div>
-                )}
-
-                {taskData.status === 'waiting' && taskData.completion?.interimReason && (
-                  <div className="task-error-box">
-                    <div className="task-error-message">
-                      <strong>Waiting:</strong> {taskData.completion.interimReason}
-                    </div>
-                  </div>
-                )}
-
-                {taskData.lastAnswer && (
-                  <div className="task-result-card">
-                    <div className="task-result-header">
-                      <span className="task-section-label">Executor Output</span>
-                      <button
-                        className="task-copy-button"
-                        type="button"
-                        onClick={async () => {
-                          if (taskData.lastAnswer) {
-                            await navigator.clipboard.writeText(taskData.lastAnswer);
-                            flash('Result copied to clipboard');
-                          }
-                        }}
-                      >
-                        <Icon name="copy" />
-                        <span>Copy Result</span>
-                      </button>
-                    </div>
-                    <div className="task-result-content">{taskData.lastAnswer}</div>
-                  </div>
-                )}
-
-                {showTaskProgress && (
-                  <div className="task-progress-card">
-                    <span className="task-section-label">
-                      Progress Events ({taskData.recentEvents?.length ?? 0})
-                    </span>
-                    <div className="task-events-list">
-                    {(!taskData.recentEvents || taskData.recentEvents.length === 0) ? (
-                      <div style={{ color: '#718089', fontStyle: 'italic', padding: '6px 0' }}>
-                        {taskData.status === 'starting' ? 'Waiting for executor to initialize…' : 'No events recorded.'}
-                      </div>
-                    ) : (
-                      taskData.recentEvents.map((ev, i) => (
-                        <div key={`${ev.stepIndex ?? i}-${i}`} className="task-event-row">
-                          <span className="task-event-step">#{ev.stepIndex ?? i + 1}</span>
-                          <span className="task-event-type">{ev.type || 'PROGRESS'}</span>
-                          <span className="task-event-text">{ev.summary || ''}</span>
-                        </div>
-                      ))
-                    )}
-                    </div>
-                  </div>
-                )}
-
-                {(taskData.status === 'done' || taskData.status === 'waiting') && (
-                  <div className="task-followup-box">
-                    <input
-                      className="task-followup-input"
-                      placeholder="Send follow-up instruction to this conversation…"
-                      value={followUpInput}
-                      onChange={(e) => setFollowUpInput(e.target.value)}
-                      disabled={followUpSubmitting}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
-                          e.preventDefault();
-                          void handleSendFollowUp();
-                        }
-                      }}
-                    />
-                    <button
-                      className="task-followup-button"
-                      disabled={!followUpInput.trim() || followUpSubmitting}
-                      onClick={handleSendFollowUp}
-                      type="button"
-                    >
-                      <span>{followUpSubmitting ? 'Sending…' : 'Send'}</span>
-                      <Icon name="chevron" />
-                    </button>
-                  </div>
-                )}
-              </section>
-            ) : (
-              <div className="task-empty-card">
-                <Icon name="console" />
-                <p>No active task</p>
-                <small>Compose an instruction above and click Run Task to dispatch work to Antigravity.</small>
-              </div>
-            )}
-
-              </>
-            )}
-
-            {/* REMOTE INBOX SECTION */}
-            {taskCenterTab === 'remote' && (
-            <section className="remote-inbox-section" aria-labelledby="remote-inbox-heading">
-              <div className="remote-inbox-header">
-                <div>
-                  <p className="kicker">TASK QUEUE</p>
-                  <h2 id="remote-inbox-heading">Remote Inbox</h2>
-                </div>
-                <div className="remote-inbox-controls">
-                  <div className={`connection-pill ${bridgeState?.enabled ? (bridgeState?.connected ? 'online' : 'sand') : ''}`}>
-                    <span /> Bridge · {bridgeState?.enabled ? (bridgeState?.connected ? 'Connected' : 'Disconnected') : 'Disabled'}
-                  </div>
-                  {bridgeState?.deviceId && (
-                    <button
-                      className="device-id-chip"
-                      type="button"
-                      title="Click to copy full device UUID"
-                      onClick={async () => {
-                        await navigator.clipboard.writeText(bridgeState.deviceId);
-                        flash('Device ID copied to clipboard');
-                      }}
-                    >
-                      <Icon name="copy" />
-                      <span>Device: <code>{bridgeState.deviceId.slice(0, 8)}…</code></span>
-                    </button>
-                  )}
-                  {bridgeState?.signedIn && (
-                    <>
-                      <button className="device-id-chip" type="button" onClick={copyPairingSecret}>
-                        <Icon name="copy" />
-                        <span>Copy pairing secret</span>
-                      </button>
-                      <button className="bridge-signout-btn" type="button" disabled={bridgeBusy} onClick={handleBridgeSignOut}>
-                        Sign out
-                      </button>
-                    </>
-                  )}
-                  <button
-                    className={`bridge-toggle-btn ${bridgeState?.enabled ? 'enabled' : 'disabled'}`}
-                    type="button"
-                    disabled={bridgeBusy || !bridgeState?.signedIn}
-                    onClick={toggleBridge}
-                  >
-                    <span>Remote Bridge: <strong>{bridgeState?.enabled ? 'Enabled' : 'Disabled'}</strong></span>
-                  </button>
-                </div>
-              </div>
-
-              {!bridgeState?.signedIn ? (
-                <div className="bridge-auth-panel">
-                  <div className="bridge-auth-copy">
-                    <strong>Connect this Mac</strong>
-                    <span>Sign in with a dedicated Hearth account. Your session is protected by macOS Keychain.</span>
-                  </div>
-                  <div className="bridge-auth-fields">
-                    <input
-                      autoComplete="email"
-                      type="email"
-                      value={bridgeEmail}
-                      onChange={(event) => setBridgeEmail(event.target.value)}
-                      placeholder="Email"
-                    />
-                    <input
-                      autoComplete={bridgeAuthMode === 'sign-in' ? 'current-password' : 'new-password'}
-                      type="password"
-                      minLength={8}
-                      value={bridgePassword}
-                      onChange={(event) => setBridgePassword(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter') void handleBridgeAuth();
-                      }}
-                      placeholder="Password (8+ characters)"
-                    />
-                    <button type="button" disabled={bridgeBusy || !bridgeEmail.trim() || bridgePassword.length < 8} onClick={handleBridgeAuth}>
-                      {bridgeBusy ? 'Connecting…' : bridgeAuthMode === 'sign-in' ? 'Sign in' : 'Create account'}
-                    </button>
-                  </div>
-                  <button
-                    className="bridge-auth-switch"
-                    type="button"
-                    onClick={() => setBridgeAuthMode((current) => current === 'sign-in' ? 'sign-up' : 'sign-in')}
-                  >
-                    {bridgeAuthMode === 'sign-in' ? 'Create a Hearth account' : 'I already have an account'}
-                  </button>
-                </div>
-              ) : !bridgeState.enabled ? (
-                <div className="remote-inbox-empty">
-                  <Icon name="radio" />
-                  <p>Remote Bridge is Disabled</p>
-                  <small>Signed in as {bridgeState.accountEmail}. Enable the bridge when you want Hearth to poll for tasks.</small>
-                </div>
-              ) : remotePendingTasks.length === 0 ? (
-                <div className="remote-inbox-empty">
-                  <Icon name="radio" />
-                  <p>No pending remote tasks</p>
-                  <small>Incoming tasks from connected clients will appear here for your review and approval.</small>
-                </div>
-              ) : (
-                <div className="remote-tasks-list">
-                  {remotePendingTasks.map((t) => (
-                    <div key={t.id} className="remote-task-card">
-                      <div className="remote-task-main">
-                        <div className="remote-task-meta">
-                          <span className="remote-source-tag">{t.source || 'chatgpt'}</span>
-                          <strong className="remote-task-title">{t.title || 'Remote Task'}</strong>
-                          <span className="remote-task-time">{new Date(t.createdAt).toLocaleTimeString()}</span>
-                        </div>
-                        <p className="remote-task-preview">{t.prompt.slice(0, 140)}{t.prompt.length > 140 ? '…' : ''}</p>
-                      </div>
-                      <div className="remote-task-actions">
-                        <button
-                          className="remote-action-btn review"
-                          type="button"
-                          onClick={() => setReviewTask(t)}
-                        >
-                          Review
-                        </button>
-                        <button
-                          className="remote-action-btn reject"
-                          type="button"
-                          disabled={bridgeBusy}
-                          onClick={() => handleRejectRemoteTask(t)}
-                        >
-                          Reject
-                        </button>
-                        <button
-                          className="remote-action-btn approve"
-                          type="button"
-                          disabled={t.routedTo === 'x' ? bridgeBusy : (bridgeBusy || isTaskRunning || !executorStatus?.available || antigravityPerm === 'Blocked')}
-                          onClick={() => handleApproveRemoteTask(t)}
-                          title={t.routedTo === 'x' ? 'Approve and dispatch to X' : (isTaskRunning ? 'Cannot run while another task is running' : 'Approve and dispatch to Antigravity')}
-                        >
-                          Approve & Run
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              <div className="remote-routing-note">
-                <div>
-                  <strong>Project X routing</strong>
-                  <span>{publicXState?.signedIn ? 'Connected · X-routed requests are shown in the X tab.' : 'Project X is not connected. Configure it from Connections.'}</span>
-                </div>
-                <button className="task-workspace-change" type="button" onClick={() => navigate('AI Connectors')}>
-                  Open Connections
-                </button>
-              </div>
-            </section>
-            )}
-          </div>
+          <InvestPage
+            investStatus={investStatus}
+            investBusy={investBusy}
+            investError={investError}
+            demoRiskForm={demoRiskForm}
+            setDemoRiskForm={setDemoRiskForm}
+            setDemoRiskDirty={setDemoRiskDirty}
+            showV1History={showV1History}
+            setShowV1History={setShowV1History}
+            saveDemoRiskConfig={saveDemoRiskConfig}
+            setInvestMode={setInvestMode}
+            setMarketResearchPermission={setMarketResearchPermission}
+            useInvestKillSwitch={useInvestKillSwitch}
+            v2CoordinatorDisplay={v2CoordinatorDisplay}
+          />
+        ) : activeNav === 'Goals' && goalsTab === 'Activity' ? (
+          <GoalsActivityPage
+            renderGoalsHeader={renderGoalsHeader}
+            navigate={navigate}
+            workspace={workspace}
+            chooseWorkspace={chooseWorkspace}
+            isGoalActive={isGoalActive}
+            isTaskRunning={isTaskRunning}
+            flash={flash}
+            formatElapsed={formatElapsed}
+            executorStatus={executorStatus}
+            taskCenterTab={taskCenterTab}
+            setTaskCenterTab={setTaskCenterTab}
+            taskPrompt={taskPrompt}
+            setTaskPrompt={setTaskPrompt}
+            promptBytes={promptBytes}
+            taskSubmitting={taskSubmitting}
+            handleStartTask={handleStartTask}
+            taskData={taskData}
+            activeTaskSource={activeTaskSource}
+            showTaskProgress={showTaskProgress}
+            setShowTaskProgress={setShowTaskProgress}
+            followUpInput={followUpInput}
+            setFollowUpInput={setFollowUpInput}
+            followUpSubmitting={followUpSubmitting}
+            handleSendFollowUp={handleSendFollowUp}
+            handleResumeTask={handleResumeTask}
+            handleDismissTask={handleDismissTask}
+            handleMarkTaskFailed={handleMarkTaskFailed}
+            recoveryBusy={recoveryBusy}
+            xPerm={xPerm}
+            xReady={xReady}
+            rotateXPerm={rotateXPerm}
+            xPendingTasks={xPendingTasks}
+            activeXStatus={activeXStatus}
+            liveXRuns={liveXRuns}
+            recentXRuns={recentXRuns}
+            antigravityPerm={antigravityPerm}
+            rotateAntigravityPerm={rotateAntigravityPerm}
+            bridgeState={bridgeState}
+            bridgeBusy={bridgeBusy}
+            toggleBridge={toggleBridge}
+            bridgeAuthMode={bridgeAuthMode}
+            setBridgeAuthMode={setBridgeAuthMode}
+            bridgeEmail={bridgeEmail}
+            setBridgeEmail={setBridgeEmail}
+            bridgePassword={bridgePassword}
+            setBridgePassword={setBridgePassword}
+            handleBridgeAuth={handleBridgeAuth}
+            handleBridgeSignOut={handleBridgeSignOut}
+            copyPairingSecret={copyPairingSecret}
+            publicXState={publicXState}
+            remotePendingTasks={remotePendingTasks}
+            handleApproveRemoteTask={handleApproveRemoteTask}
+            handleRejectRemoteTask={handleRejectRemoteTask}
+            setReviewTask={setReviewTask}
+          />
         ) : activeNav === 'Goals' ? (
-          <div className="goals-view">
-            {renderControlCenterHeader(
-              <div className={`connection-pill ${isGoalActive ? 'online' : ''}`}>
-                <span /> Goal Runner · {isGoalActive ? 'Active' : 'Standing by'}
-              </div>
-            )}
-
-            <div className="goals-workspace-bar">
-              <div className="goals-workspace-info">
-                <Icon name="folder" />
-                <span>Workspace:</span>
-                <code>{workspace || 'No workspace selected'}</code>
-                {isGoalActive && (
-                  <span className="workspace-lock-badge" title="Workspace is locked while any goal is running, waiting, or paused">
-                    🔒 Locked
-                  </span>
-                )}
-              </div>
-              <div className="goals-action-buttons">
-                <button
-                  className="clear-goal-history-btn"
-                  type="button"
-                  disabled={terminalGoalCount === 0 || goalActionBusy}
-                  onClick={() => setShowClearGoalsConfirm(true)}
-                  title={terminalGoalCount === 0 ? 'No completed/error Goals to clear' : `Clear ${terminalGoalCount} completed/error Goal(s)`}
-                >
-                  Clear history{terminalGoalCount > 0 ? ` (${terminalGoalCount})` : ''}
-                </button>
-                <button
-                  className="task-workspace-change"
-                  disabled={isTaskRunning || isGoalActive}
-                  onClick={chooseWorkspace}
-                  title={isGoalActive ? 'Workspace is locked while goal is active' : 'Choose different folder'}
-                >
-                  Change folder
-                </button>
-                <button
-                  className="new-goal-btn"
-                  type="button"
-                  onClick={() => setShowNewGoalModal(true)}
-                >
-                  <Icon name="plus" />
-                  <span>New Goal</span>
-                </button>
-              </div>
-            </div>
-
-            <section className="remote-inbox-section control-center-remote-goals" aria-label="Remote Goals">
-              {/* PROJECT X REMOTE GOALS -- a dedicated, distinct transport from
-                  the single-task Remote Tasks above. Importing only creates
-                  the Goal locally (status 'ready'); it never runs anything and
-                  never grants X approval -- open Goals, press Run, and the
-                  existing Goal-level X approval prompt is still required. */}
-              {publicXState?.signedIn ? (
-                <>
-                  <div className="remote-inbox-header">
-                    <div>
-                      <p className="kicker">PROJECT X</p>
-                      <h2>Project X Remote Goals</h2>
-                    </div>
-                  </div>
-                  {!bridgeState?.pendingGoalRequests?.length ? (
-                    <div className="remote-inbox-empty">
-                      <Icon name="flag" />
-                      <p>No pending remote Goals</p>
-                      <small>A complete, pre-authored multi-step Goal queued by Chat/Main Brain will appear here for your review and import.</small>
-                    </div>
-                  ) : (
-                    <div className="remote-tasks-list">
-                      {bridgeState.pendingGoalRequests.map((g) => (
-                        <div key={g.id} className="remote-task-card">
-                          <div className="remote-task-main">
-                            <div className="remote-task-meta">
-                              <span className="remote-source-tag">goal</span>
-                              <strong className="remote-task-title">{g.title}</strong>
-                              <span className="remote-task-time">{new Date(g.createdAt).toLocaleTimeString()}</span>
-                            </div>
-                            <p className="remote-task-preview">{g.objective.slice(0, 140)}{g.objective.length > 140 ? '…' : ''}</p>
-                            <small>{g.stepCount} step{g.stepCount === 1 ? '' : 's'} · {g.xStepCount} X step{g.xStepCount === 1 ? '' : 's'} · <code>{g.workspace}</code></small>
-                          </div>
-                          <div className="remote-task-actions">
-                            <button className="remote-action-btn review" type="button" onClick={() => setReviewGoalRequest(g)}>Review</button>
-                            <button className="remote-action-btn reject" type="button" disabled={goalRequestBusy} onClick={() => handleRejectRemoteGoalRequest(g)}>Reject</button>
-                            <button className="remote-action-btn approve" type="button" disabled={goalRequestBusy} onClick={() => handleImportRemoteGoalRequest(g)} title="Import into Goals -- does not run or approve X">
-                              Import
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </>
-              ) : (
-                <div className="remote-inbox-empty">
-                  <Icon name="flag" />
-                  <p>Remote Goals are not connected</p>
-                  <small>Connect Project X from the Connections tab to receive remote multi-step Goals.</small>
-                </div>
-              )}
-            </section>
-
-            <div className="goals-layout">
-              {/* Left Column: Goals List */}
-              <div className="goals-list-panel">
-                <div className="goals-list-header">
-                  <div>
-                    <h3>Goals</h3>
-                    <small>Active work + local history</small>
-                  </div>
-                  <span className="goals-count-badge">{goals.length}</span>
-                </div>
-                {goals.length === 0 ? (
-                  <div className="task-empty-card" style={{ padding: '24px 12px' }}>
-                    <Icon name="flag" />
-                    <p>No goals created yet</p>
-                    <small>Click "New Goal" above to create your first multi-step goal.</small>
-                  </div>
-                ) : (
-                  goals.map((g) => {
-                    const completedSteps = g.steps.filter((s) => s.status === 'completed').length;
-                    return (
-                      <div
-                        key={g.id}
-                        className={`goal-card-item ${selectedGoal?.id === g.id ? 'active' : ''}`}
-                        onClick={() => setSelectedGoalId(g.id)}
-                      >
-                        <div className="goal-card-header">
-                          <strong className="goal-card-title">{g.title}</strong>
-                          <span className={`goal-status-pill ${g.status}`}>{g.status}</span>
-                        </div>
-                        <div className="goal-card-meta">
-                          <span>{completedSteps}/{g.steps.length} steps</span>
-                          <span>{new Date(g.createdAt).toLocaleDateString()}</span>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-
-              {/* Right Column: Goal Detail */}
-              {selectedGoal ? (
-                <div className="goal-detail-panel">
-                  <div className="goal-detail-header">
-                    <div className="goal-detail-title-group">
-                      <h2>{selectedGoal.title}</h2>
-                      <p className="goal-detail-objective">{selectedGoal.objective}</p>
-                    </div>
-                    <div className="goal-detail-controls">
-                      <span className={`goal-status-pill ${selectedGoal.status}`}>{selectedGoal.status}</span>
-                      {(selectedGoal.status === 'ready' || selectedGoal.status === 'draft' || selectedGoal.status === 'error') && (
-                        <button
-                          className="goal-btn-run"
-                          type="button"
-                          disabled={goalActionBusy || isGoalActive}
-                          onClick={() => handleRunGoal(selectedGoal.id)}
-                        >
-                          {goalActionBusy ? 'Running…' : 'Run Goal'}
-                        </button>
-                      )}
-                      {selectedGoal.status === 'running' && (
-                        <button
-                          className="goal-btn-pause"
-                          type="button"
-                          disabled={goalActionBusy}
-                          onClick={() => handlePauseGoal(selectedGoal.id)}
-                        >
-                          Pause
-                        </button>
-                      )}
-                      {selectedGoal.status === 'waiting' && selectedGoal.steps.find((s) => s.id === selectedGoal.currentStepId)?.route === 'manual' ? (
-                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                          <button
-                            className="goal-btn-run"
-                            type="button"
-                            disabled={goalActionBusy}
-                            onClick={() => {
-                              const activeStep = selectedGoal.steps.find((s) => s.id === selectedGoal.currentStepId);
-                              if (activeStep) void handleSignoffStep(selectedGoal.id, activeStep.id, 'complete');
-                            }}
-                          >
-                            <Icon name="check" />
-                            <span>Mark Step Complete</span>
-                          </button>
-                          <button
-                            className="remote-action-btn reject"
-                            type="button"
-                            disabled={goalActionBusy}
-                            onClick={() => {
-                              const activeStep = selectedGoal.steps.find((s) => s.id === selectedGoal.currentStepId);
-                              if (activeStep) void handleSignoffStep(selectedGoal.id, activeStep.id, 'fail');
-                            }}
-                          >
-                            <span>Fail Step</span>
-                          </button>
-                        </div>
-                      ) : (selectedGoal.status === 'paused' || selectedGoal.status === 'waiting') && (
-                        <button
-                          className="goal-btn-resume"
-                          type="button"
-                          disabled={goalActionBusy}
-                          onClick={() => handleResumeGoal(selectedGoal.id)}
-                        >
-                          {goalActionBusy ? 'Resuming…' : 'Resume'}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  {selectedGoal.constraints && selectedGoal.constraints.length > 0 && (
-                    <div className="goal-constraints-box">
-                      <strong>Constraints:</strong> {selectedGoal.constraints.join('; ')}
-                    </div>
-                  )}
-
-                  {/* Steps list */}
-                  <div className="goal-steps-container">
-                    <span className="task-section-label">Execution Steps ({selectedGoal.steps.length})</span>
-                    {selectedGoal.steps.map((step, idx) => (
-                      <div
-                        key={step.id}
-                        className={`goal-step-row ${step.status === 'running' ? 'step-running' : step.status === 'error' ? 'step-error' : ''}`}
-                      >
-                        <div className="goal-step-top">
-                          <div className="goal-step-title-wrap">
-                            <span className={`goal-step-badge ${step.status}`}>
-                              {step.status === 'completed' ? '✓' : step.status === 'running' ? '●' : step.status === 'waiting' ? '⏳' : step.status === 'paused' ? '⏸' : step.status === 'error' ? '✕' : step.status === 'skipped' ? '⊘' : idx + 1}
-                            </span>
-                            <strong className="goal-step-title">{step.title}</strong>
-                          </div>
-                          <div className="goal-step-tags">
-                            <span className="goal-route-tag">{step.route}</span>
-                            <span className="goal-req-tag">{step.required ? 'Required' : 'Optional'}</span>
-                            <span className={`goal-status-pill ${step.status}`}>{step.status}</span>
-                          </div>
-                        </div>
-                        {step.description && <p className="goal-step-desc">{step.description}</p>}
-                        {step.result && (
-                          <div className="goal-step-output">
-                            <strong>Result:</strong> {step.result}
-                          </div>
-                        )}
-                        {step.route === 'manual' && step.status === 'waiting' && (
-                          <div className="manual-signoff-actions" style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
-                            <button
-                              className="goal-btn-run"
-                              type="button"
-                              disabled={goalActionBusy}
-                              onClick={() => void handleSignoffStep(selectedGoal.id, step.id, 'complete')}
-                            >
-                              <Icon name="check" />
-                              <span>Mark Step Complete</span>
-                            </button>
-                            <button
-                              className="remote-action-btn reject"
-                              type="button"
-                              disabled={goalActionBusy}
-                              onClick={() => void handleSignoffStep(selectedGoal.id, step.id, 'fail')}
-                            >
-                              <span>Fail Step</span>
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Latest Checkpoint */}
-                  {selectedGoal.checkpoints && selectedGoal.checkpoints.length > 0 && (
-                    <div className="goal-checkpoint-card">
-                      <div className="goal-checkpoint-header">
-                        <span>Latest Checkpoint #{selectedGoal.checkpoints.length}</span>
-                        <span>{new Date(selectedGoal.checkpoints[selectedGoal.checkpoints.length - 1].timestamp).toLocaleTimeString()}</span>
-                      </div>
-                      <p className="goal-checkpoint-summary">
-                        {selectedGoal.checkpoints[selectedGoal.checkpoints.length - 1].summary}
-                      </p>
-                      <div className="goal-checkpoint-checks">
-                        <span>Steps: {selectedGoal.checkpoints[selectedGoal.checkpoints.length - 1].completedSteps} completed</span>
-                        {selectedGoal.checkpoints[selectedGoal.checkpoints.length - 1].route && (
-                          <span>Route: {selectedGoal.checkpoints[selectedGoal.checkpoints.length - 1].route}</span>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="task-empty-card">
-                  <Icon name="flag" />
-                  <p>Select a goal</p>
-                  <small>Choose a goal from the list or create a new one.</small>
-                </div>
-              )}
-            </div>
-          </div>
-        ) : activeNav === 'AI Connectors' ? (
-          <div className="control-center-connections-view">
-            {renderControlCenterHeader(
-              <div className={`connection-pill ${(bridgeState?.connected || publicXState?.signedIn) ? 'online' : ''}`}>
-                <span /> Remote · {bridgeState?.connected ? 'Bridge connected' : publicXState?.signedIn ? 'Project X connected' : 'Standing by'}
-              </div>
-            )}
-
-            <section className="remote-inbox-section control-center-connection-panel" aria-label="Project X connection">
-              <div className="remote-inbox-header">
-                <div>
-                  <p className="kicker">PROJECT X CONNECTION</p>
-                  <h2>Project X Remote Access</h2>
-                </div>
-                <div className="remote-inbox-controls">
-                  <div className={`connection-pill ${publicXState?.signedIn ? 'online' : ''}`}>
-                    <span /> Project X · {publicXState?.signedIn ? 'Connected' : publicXState?.configured ? 'Not signed in' : 'Not configured'}
-                  </div>
-                  {publicXState?.signedIn && (
-                    <button className="bridge-signout-btn" type="button" disabled={publicXBusy} onClick={handlePublicXSignOut}>
-                      Sign out
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {!publicXState?.configured ? (
-                <div className="bridge-auth-panel">
-                  <div className="bridge-auth-copy">
-                    <strong>Connect to Project X</strong>
-                    <span>Enter Project X's publishable (anon) key to enable X-routed remote tasks.</span>
-                  </div>
-                  <div className="bridge-auth-fields">
-                    <input
-                      type="text"
-                      value={publicXAnonKey}
-                      onChange={(event) => setPublicXAnonKey(event.target.value)}
-                      onKeyDown={(event) => { if (event.key === 'Enter') void handlePublicXSaveKey(); }}
-                      placeholder="Project X publishable (anon) key"
-                    />
-                    <button type="button" disabled={publicXBusy || !publicXAnonKey.trim()} onClick={handlePublicXSaveKey}>
-                      {publicXBusy ? 'Saving…' : 'Save key'}
-                    </button>
-                  </div>
-                </div>
-              ) : !publicXState?.signedIn ? (
-                <div className="bridge-auth-panel">
-                  <div className="bridge-auth-copy">
-                    <strong>Sign in to Project X</strong>
-                    <span>A separate Project X session. Your session is protected by macOS Keychain.</span>
-                  </div>
-                  <div className="bridge-auth-fields">
-                    <input
-                      autoComplete="email"
-                      type="email"
-                      value={publicXEmail}
-                      onChange={(event) => setPublicXEmail(event.target.value)}
-                      placeholder="Email"
-                    />
-                    <input
-                      autoComplete={publicXAuthMode === 'sign-in' ? 'current-password' : 'new-password'}
-                      type="password"
-                      minLength={8}
-                      value={publicXPassword}
-                      onChange={(event) => setPublicXPassword(event.target.value)}
-                      onKeyDown={(event) => { if (event.key === 'Enter') void handlePublicXAuth(); }}
-                      placeholder="Password (8+ characters)"
-                    />
-                    <button type="button" disabled={publicXBusy || !publicXEmail.trim() || publicXPassword.length < 8} onClick={handlePublicXAuth}>
-                      {publicXBusy ? 'Connecting…' : publicXAuthMode === 'sign-in' ? 'Sign in' : 'Create account'}
-                    </button>
-                  </div>
-                  <button
-                    className="bridge-auth-switch"
-                    type="button"
-                    onClick={() => setPublicXAuthMode((current) => current === 'sign-in' ? 'sign-up' : 'sign-in')}
-                  >
-                    {publicXAuthMode === 'sign-in' ? 'Create a Project X account' : 'I already have an account'}
-                  </button>
-                </div>
-              ) : (
-                <div className="remote-inbox-empty">
-                  <Icon name="radio" />
-                  <p>Connected to Project X</p>
-                  <small>{publicXState.accountEmail}. Queued Project X tasks are routed into Control Center → Tasks.</small>
-                </div>
-              )}
-
-
-            </section>
-
-            <AIConnectorPanel connectors={connectorItems} onToggle={setConnectorEnabled} />
-          </div>
+          <GoalsPage
+            renderGoalsHeader={renderGoalsHeader}
+            workspace={workspace}
+            chooseWorkspace={chooseWorkspace}
+            isGoalActive={isGoalActive}
+            isTaskRunning={isTaskRunning}
+            approvalQueue={approvalQueue}
+            goals={goals}
+            selectedGoal={selectedGoal}
+            terminalGoalCount={terminalGoalCount}
+            setSelectedGoalId={setSelectedGoalId}
+            setShowNewGoalModal={setShowNewGoalModal}
+            setShowClearGoalsConfirm={setShowClearGoalsConfirm}
+            goalActionBusy={goalActionBusy}
+            handleRunGoal={handleRunGoal}
+            handlePauseGoal={handlePauseGoal}
+            handleResumeGoal={handleResumeGoal}
+            handleSignoffStep={handleSignoffStep}
+            bridgeState={bridgeState}
+            publicXState={publicXState}
+            goalRequestBusy={goalRequestBusy}
+            handleImportRemoteGoalRequest={handleImportRemoteGoalRequest}
+            handleRejectRemoteGoalRequest={handleRejectRemoteGoalRequest}
+            setReviewGoalRequest={setReviewGoalRequest}
+          />
+        ) : activeNav === 'Connections' ? (
+          <ConnectionsPage
+            bridgeState={bridgeState}
+            publicXState={publicXState}
+            connections={connections}
+            connectionsBusy={connectionsBusy}
+            connectionsError={connectionsError}
+            connectionActionBusy={connectionActionBusy}
+            connectionTokenInputs={connectionTokenInputs}
+            setConnectionTokenInputs={setConnectionTokenInputs}
+            vercelTeamIdInput={vercelTeamIdInput}
+            setVercelTeamIdInput={setVercelTeamIdInput}
+            githubRepositories={githubRepositories}
+            githubRepoBusy={githubRepoBusy}
+            githubRepoErrors={githubRepoErrors}
+            githubSetupOpen={githubSetupOpen}
+            setGithubSetupOpen={setGithubSetupOpen}
+            githubPrCreateInputs={githubPrCreateInputs}
+            setGithubPrCreateInputs={setGithubPrCreateInputs}
+            refreshConnections={refreshConnections}
+            connectManagedConnection={connectManagedConnection}
+            disconnectManagedConnection={disconnectManagedConnection}
+            loadGitHubRepositories={loadGitHubRepositories}
+            selectGitHubRepository={selectGitHubRepository}
+            publicXAnonKey={publicXAnonKey}
+            setPublicXAnonKey={setPublicXAnonKey}
+            publicXAuthMode={publicXAuthMode}
+            setPublicXAuthMode={setPublicXAuthMode}
+            publicXEmail={publicXEmail}
+            setPublicXEmail={setPublicXEmail}
+            publicXPassword={publicXPassword}
+            setPublicXPassword={setPublicXPassword}
+            publicXBusy={publicXBusy}
+            handlePublicXSaveKey={handlePublicXSaveKey}
+            handlePublicXAuth={handlePublicXAuth}
+            handlePublicXSignOut={handlePublicXSignOut}
+            connectorItems={connectorItems}
+            setConnectorEnabled={setConnectorEnabled}
+          />
         ) : (
-          <>
-            <header className="page-header" id="overview">
-              <div><p className="kicker">YOUR LOCAL CONTROL CENTER</p><h1>{activeNav === 'Overview' ? 'A clear view of your work.' : activeNav}</h1><p className="intro">{({ Overview: 'Monitor your workspace and choose where to work next.', Workspace: 'Choose the folder where Hearth can work.', Permissions: 'Decide which tools can act and which need your approval.', Logs: 'Follow activity from this app session.', 'AI Connectors': 'Manage the agents and services available to your workspace.', Updates: 'Check and prepare verified Hearth releases.' } as Partial<Record<NavItem, string>>)[activeNav]}</p></div>
-              <div className={`connection-pill ${running ? 'online' : ''}`}><span /> MCP Server · {running ? 'Running' : 'Offline'}</div>
-            </header>
-
-            {activeNav === 'Overview' && <><section className={`power-console ${running ? 'is-running' : ''}`} aria-labelledby="server-title">
-              <div className="console-copy"><div className="console-icon"><Icon name="server" /><span className="pulse-ring" /></div><div><p className="section-kicker">SERVER STATUS</p><h2 id="server-title">{running ? 'MCP server is active' : 'MCP server is standing by'}</h2><p>{running ? `Streamable HTTP listening on 127.0.0.1:${port}.` : 'Start the server to expose Hearth MCP tools locally.'}</p></div></div>
-              <div className="server-action"><label className="port-readout"><span>PORT</span><input aria-label="Server port" inputMode="numeric" disabled={running || busy} value={port} onChange={(event) => setPort(Number(event.target.value.replace(/\D/g, '').slice(0, 5)) || 3001)} onBlur={() => void window.controlApp.saveSettings({ port })} /></label><button className={`power-button ${running ? 'stop' : ''}`} disabled={busy} onClick={toggleServer}><span className="power-symbol" />{busy ? 'Working…' : running ? 'Stop Server' : 'Start Server'}</button></div>
-            </section>
-
-            <section className="metrics" aria-label="System overview">
-              <article><div className="metric-icon sage"><Icon name="activity" /></div><div><span>Connection</span><strong>{busy ? 'Changing' : running ? 'Healthy' : 'Idle'}</strong><small>{running ? `Process ${pid ?? 'active'} · local` : 'No active process'}</small></div></article>
-              <article><div className="metric-icon sand"><Icon name="lock" /></div><div><span>Permissions</span><strong>{allowed} allowed</strong><small>{permissions.length - allowed} require attention</small></div></article>
-              <article><div className="metric-icon blue"><Icon name="folder" /></div><div><span>Workspace</span><strong>{workspaceValid === null ? 'Checking…' : workspaceValid ? 'Connected' : 'Not found'}</strong><small>{workspaceValid ? 'Local filesystem' : workspace ? 'Path not accessible' : 'No workspace configured'}</small></div></article>
-              <article><div className="metric-icon purple"><Icon name="console" /></div><div><span>Executor</span><strong>{executorStatus?.available ? 'Connected' : 'Unavailable'}</strong><small>{isTaskRunning ? `Task running (${taskData?.status})` : activeTaskId ? 'Task ready' : 'Standing by'}</small></div></article>
-            </section>
-
-            <section className="calm-shortcuts" aria-label="Workspace shortcuts">
-              {([{ page: 'Task Console', title: 'Control Center', detail: 'Tasks, Goals, remote work, and agents', icon: 'console' }, { page: 'Console', title: 'Connections & approvals', detail: 'Review system health and evidence', icon: 'lock' }] as Array<{page: NavItem; title: string; detail: string; icon: IconName}>).map(item => <button type="button" key={item.page} onClick={() => navigate(item.page)}><Icon name={item.icon}/><strong>{item.title}</strong><span>{item.detail}</span><Icon name="chevron"/></button>)}
-            </section></>}
-
-            <div className="dashboard-grid calm-system-page">
-              {activeNav === 'Workspace' && <section className="soft-panel workspace-panel" id="workspace">
-                <div className="panel-title"><div><p className="section-kicker">WORKSPACE</p><h2>Working directory</h2></div><button className="round-button" aria-label="Copy workspace path" onClick={async () => { await navigator.clipboard.writeText(workspace); flash('Workspace path copied'); }}><Icon name="copy" /></button></div>
-                <div className="folder-well"><div className="folder-tab" /><div className="folder-icon"><Icon name="folder" /></div><label htmlFor="workspace-path">Current folder</label><input id="workspace-path" value={workspace} onChange={(event) => setWorkspace(event.target.value)} onBlur={() => void window.controlApp.saveSettings({ workspace })} disabled={isTaskRunning || isGoalActive} /><button onClick={chooseWorkspace} disabled={isTaskRunning || isGoalActive}>Choose folder <Icon name="chevron" /></button></div>
-                <p className="panel-note">{isGoalActive ? <span style={{ color: '#8a724f' }}>🔒 Workspace is locked while a goal is active.</span> : <><span /> Changes are restricted to this directory.</>}</p>
-              </section>
-
-              }
-              {activeNav === 'Permissions' && <section className="soft-panel permission-panel" id="permissions">
-                <div className="panel-title"><div><p className="section-kicker">PERMISSIONS</p><h2>Tool access</h2></div><span className="panel-meta">Click to change</span></div>
-                <div className="permission-list">{permissions.map((permission, index) => <button className={`permission-row${permission.disabled ? ' disabled' : ''}`} onClick={() => rotatePermission(index)} key={permission.name} disabled={permission.disabled} aria-disabled={permission.disabled}><span className="permission-copy"><strong>{permission.name}</strong><small>{permission.detail}</small></span><em className={`permission-value value-${permission.value.toLowerCase()}`}><i />{permission.value}{!permission.disabled && <Icon name="chevron" />}</em></button>)}</div>
-              </section>
-
-              }
-              {activeNav === 'Updates' && <section className="soft-panel update-panel" aria-labelledby="updates-title">
-                <div className="panel-title">
-                  <div><p className="section-kicker">UPDATE</p><h2 id="updates-title">Hearth updates</h2></div>
-                  <span className={`update-status ${updateCheck?.state ?? 'idle'}`}>
-                    {updateCheck?.state === 'downloading'
-                      ? <span className="update-status-flow" aria-hidden="true" />
-                      : <i aria-hidden="true" />}
-                    <span>{updateStatusText[updateCheck?.state ?? 'idle']}</span>
-                  </span>
-                </div>
-                <dl className="update-facts">
-                  <div><dt>Current version</dt><dd>v{updaterInfo?.currentVersion ?? '—'}</dd></div>
-                  <div><dt>Current build</dt><dd title={updaterInfo?.currentBuildId}>{updaterInfo?.currentBuildId ?? '—'}</dd></div>
-                  <div><dt>Build time</dt><dd>{updaterInfo?.builtAt ? new Date(updaterInfo.builtAt).toLocaleString() : 'Development build'}</dd></div>
-                  {updateCheck?.state === 'up_to_date' && updateCheck.latestRelease && <div><dt>Latest release</dt><dd title={updateCheck.latestRelease.buildId}>v{updateCheck.latestRelease.version} · {updateCheck.latestRelease.buildId}</dd></div>}
-                  {updateCheck?.available && <div><dt>New build</dt><dd>v{updateCheck.available.version} · {updateCheck.available.buildId}</dd></div>}
-                </dl>
-                {updateCheck?.error && <p className="update-error">{updateCheck.error}</p>}
-                <div className="update-actions">
-                  <button type="button" className="subtle-action" disabled={updateBusy} onClick={checkForUpdate}>{updateBusy && updateCheck?.state === 'checking' ? 'Checking…' : 'Check for Update'}</button>
-                  {updateCheck?.state === 'update_available' && <button type="button" className="update-install" disabled={updateBusy} onClick={prepareUpdate}>Download / Prepare</button>}
-                  <button type="button" className="update-install" disabled={updateBusy || updateCheck?.state !== 'update_ready'} onClick={installUpdate}>{updateCheck?.state === 'installing' ? 'Installing…' : 'Install Update'}</button>
-                  <button type="button" className="text-action" onClick={() => setShowUpdateDetails((visible) => !visible)}>{showUpdateDetails ? 'Hide Details' : 'View Details'}</button>
-                </div>
-                {showUpdateDetails && <div className="update-details">
-                  <p>Remote updates are checked from the built-in Hearth GitHub Releases trust configuration and must pass signature, download, and staging verification before Install is enabled.</p>
-                  <p><strong>Manual trusted folder</strong><code>{updaterInfo?.updateDirectory ?? '—'}</code></p>
-                  <button type="button" className="text-action" disabled={updateBusy} onClick={chooseUpdateDirectory}>Choose manual update folder</button>
-                </div>}
-              </section>
-
-              }
-              {activeNav === 'Logs' && <section className="soft-panel logs-panel" id="logs">
-                <div className="panel-title"><div><p className="section-kicker">ACTIVITY</p><h2>System log</h2></div><div className="log-actions"><span className="live-indicator"><i /> LIVE</span><button onClick={() => setLogs([])}>Clear log</button></div></div>
-                <div className="log-well" aria-live="polite">{logs.length === 0 ? <div className="empty-state"><Icon name="terminal" /><p>No activity recorded</p><small>New system events will appear here.</small></div> : logs.map((log, index) => <div className={`log-line ${log.tone}`} key={`${log.time}-${index}`}><time>{log.time}</time><span className="log-source">{log.source}</span><p>{log.message}</p></div>)}</div>
-              </section>
-              }
-            </div>
-          </>
+          <OverviewSystemPage
+            activeNav={activeNav}
+            navigate={navigate}
+            systemTab={systemTab}
+            setSystemTab={setSystemTab}
+            running={running}
+            busy={busy}
+            pid={pid}
+            port={port}
+            setPort={setPort}
+            toggleServer={toggleServer}
+            permissions={permissions}
+            allowed={allowed}
+            rotatePermission={rotatePermission}
+            workspace={workspace}
+            setWorkspace={setWorkspace}
+            workspaceValid={workspaceValid}
+            chooseWorkspace={chooseWorkspace}
+            flash={flash}
+            isGoalActive={isGoalActive}
+            isTaskRunning={isTaskRunning}
+            executorStatus={executorStatus}
+            activeTaskId={activeTaskId}
+            taskData={taskData}
+            logs={logs}
+            setLogs={setLogs}
+            approvalEvidence={approvalEvidence}
+            durableGoalEvidence={durableGoalEvidence}
+            updaterInfo={updaterInfo}
+            updateCheck={updateCheck}
+            updateBusy={updateBusy}
+            updateStatusText={updateStatusText}
+            showUpdateDetails={showUpdateDetails}
+            setShowUpdateDetails={setShowUpdateDetails}
+            checkForUpdate={checkForUpdate}
+            prepareUpdate={prepareUpdate}
+            installUpdate={installUpdate}
+            chooseUpdateDirectory={chooseUpdateDirectory}
+          />
         )}
         <footer><span>System operates locally on this Mac</span><span>Hearth MCP tools · 1 Executor registered</span></footer>
       </main>

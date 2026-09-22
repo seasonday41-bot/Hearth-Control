@@ -174,15 +174,31 @@ test('APP-S4 an approval:resolved server event removes exactly its own requestId
 });
 
 test('APP-S5 an approval event upserts (never unconditionally overwrites) the queue', () => {
-  assert.ok(
-    appSource.includes(
-      "if (event.type === 'approval' && event.requestId && event.permission && event.action) {",
-    ),
-  );
-  assert.ok(
-    appSource.includes(
-      'setApprovalQueue((current) => upsertApproval(current, { requestId: event.requestId!, permission: event.permission!, action: event.action! }));',
-    ),
-    'approval must be upserted, never overwrite the queue',
+  const guard = "if (event.type === 'approval' && event.requestId && event.permission && event.action) {";
+  const branchStart = appSource.indexOf(guard);
+  assert.notEqual(branchStart, -1, 'the approval-event guard must be present');
+
+  // Assert the BEHAVIOUR of the branch, not one exact source line: the incoming
+  // request may legitimately be hoisted into a local so sibling calls (evidence
+  // recording) can reuse it. What must never change is that the queue is only
+  // ever updated through upsertApproval -- never replaced wholesale.
+  const branch = appSource.slice(branchStart, appSource.indexOf('\n      }', branchStart));
+
+  const upsertCall = branch.match(/setApprovalQueue\(\(current\) => upsertApproval\(current, ([^)]+)\)\);/);
+  assert.ok(upsertCall, 'approval must be upserted, never overwrite the queue');
+
+  const incoming = upsertCall[1].trim();
+  const incomingLiteral = incoming.startsWith('{')
+    ? incoming
+    : (appSource.slice(branchStart).match(new RegExp(`const ${incoming} = (\\{[^}]+\\});`)) || [])[1];
+  assert.ok(incomingLiteral, `the upserted value ${incoming} must be an object literal built in this branch`);
+  for (const field of ['requestId: event.requestId!', 'permission: event.permission!', 'action: event.action!']) {
+    assert.ok(incomingLiteral.includes(field), `the upserted request must carry ${field}`);
+  }
+
+  assert.doesNotMatch(
+    branch,
+    /setApprovalQueue\((?!\(current\) => upsertApproval)/,
+    'the approval branch must not write the queue by any other path',
   );
 });

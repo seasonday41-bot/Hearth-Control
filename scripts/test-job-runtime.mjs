@@ -3048,7 +3048,13 @@ await test('ACCELERATED_PRODUCTION_CONTINUATION: End-to-end production wiring te
 });
 
 console.log(`\n=== Test Results: ${passed} passed, ${failed} failed ===`);
-if (failed > 0) {
-  process.exit(1);
-}
+
+// These scenarios drive durable jobs directly, so the Antigravity task that owns
+// them never reaches its own terminal path -- and `handleBackgroundJobCompletion`
+// re-arms that task's 330s execution watchdog on every job completion. Those
+// timers are inert (they no-op unless the task is still starting/running), but
+// they are enough to keep this script alive for 5.5 minutes after the last
+// assertion. The watchdog lives in a closure the suite cannot reach, so exit on
+// the result instead of waiting for an empty event loop.
+process.exit(failed > 0 ? 1 : 0);
 

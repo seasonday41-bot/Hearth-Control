@@ -1,8 +1,8 @@
 # Dependencies and reproducible build artifacts
 node_modules/
-dist/
-release/
-outputs/
+/dist/
+/release/
+/outputs/
 /index-x2L1zvPw.js
 /work/lnwjud-slides/
 

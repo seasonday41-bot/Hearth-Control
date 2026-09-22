@@ -1,8 +1,8 @@
 {
   "name": "x-v0.2-candidate",
   "schema": 1,
-  "frozen_at": "2026-09-21T06:06:32.248Z",
-  "base_head": "11ef37b6fe73543477b1d8f4ffc5b0f102fbbfbb",
+  "frozen_at": "2026-09-21T15:25:37.980Z",
+  "base_head": "93a1d3e69abb4d5c96b34048a6e2aff8129ebe29",
   "committed": false,
   "gold_fingerprint": "f6ac8bfae42af5c5417e2da485f1b61f94c3e3ed6bb72cf5f3f8b142a9bdc03f",
   "x_files": {
@@ -36,7 +36,7 @@
     "mcp/x/repair-loop.mjs": "356f619e0a3db56c3a87f7e2e041ff494c73b2303dffda82717055c2b294865d",
     "mcp/x/result-builder.mjs": "0cfebb121644cc2a3e3d4248fd488ed4963babb5ed4d6308fcf354cc9b2b6a97",
     "mcp/x/result-gate.mjs": "b8a760166a485a08dd687acdc91b3f439d62866db94b8cdad7911719f10f0d2a",
-    "mcp/x/run-store.mjs": "ea76c9ea3d4e812549fe5636cd89c11295c52a4d25a9b721ab094ffb2760349e",
+    "mcp/x/run-store.mjs": "3c3703cdecbe256e02041ef7d22ec65b3cd3bfc0e155c02c4d44982254857a5e",
     "mcp/x/run-x-task.mjs": "a68c707d52e9b6dac64f006d6a432e09786140a3135a4999bdc593b04d9c9bc1",
     "mcp/x/runtime-paths.mjs": "51ab5bb614163f4386df5c5a866686425e411041e3b97058a70ff30cdd06676f",
     "mcp/x/secret-guard.mjs": "2253bef290ac1781749fdb2546ff6d679e2dad21f95a4107f8fc4a5fd9a7bdf3",
@@ -44,11 +44,12 @@
     "mcp/x/task-contract.mjs": "fc77927d03b5c3a6b67723858920afe6b43718e37cb6b7d320856cc6b90c5f6f",
     "mcp/x/validation-runner.mjs": "a0b157ede4dab995912feeed7b15a741655d7f172191d5ee3c0b986af6465986"
   },
-  "x_sha256": "d9c49582965623df968c9f3ce83065ba3e5ae9e5b2e09004f48a64dc1d774ace",
+  "x_sha256": "d1f222f0d9fd350b1f60704beafc464fa471b530d3acbee2631c6d9ee6d131b6",
   "x_file_count": 37,
   "test_files": {
     "scripts/test-x-candidate-freeze.mjs": "d09b9c9e2377f7d0d8ef76e17252916c2b145a3f62b4f6daa154aca9b9003769",
     "scripts/test-x-claim-store.mjs": "3860bf1bbbf2ff90de3cb229252ef0aae4448fe2374a8cc559ab2de5242bbb60",
+    "scripts/test-x-console-visibility.mjs": "2f66ff28ef4291002b38b0498d3b04e635beb67b97f2d5d08c8ddd47897084f7",
     "scripts/test-x-context-loader.mjs": "22ded24712121592a92d73432b79df5d930b055733516a7cb47380c00c77261d",
     "scripts/test-x-context-retrieval.mjs": "ef6b876991e2cb054092aa802c3a308b81a74527a2a191ba11b0b06ff4cb9b0f",
     "scripts/test-x-core-e2e.mjs": "ffcc89a4092356a996f0b44901c769944e0d2f0946c46480c33b198ea5d1eb13",
@@ -77,12 +78,12 @@
     "scripts/test-x-skill-integration.mjs": "10d90b23488bac61b17a1d2b53c657f6e5d9c4f0717f02aa2fd2e4158951d4db",
     "scripts/test-x-startup-reconciliation.mjs": "693e6336b4a344678bab4dd2363bcc67a91b86fa7ce15eef743ca9b17348737f",
     "scripts/test-x-task-contract.mjs": "d58f6bb432b30f2f58532f7fb112c5f9f9841ea1932569eb55f74e66926ab1e9",
-    "scripts/test-x-terminal-event.mjs": "064763bd077091669548dd417c9c9b3f2b7ed6f19bc8b43d0fe59a70c2c7200c",
+    "scripts/test-x-terminal-event.mjs": "c4428093d60e14dbce5e207c46bb3cc2a497d3932da0e9eea4f0dd2a92b8f15d",
     "scripts/test-x-validation-cancellation.mjs": "7ccc5028ccc449212843e57a84beb67adf882d4f1f1ecff513c90d9f91f1946b",
     "scripts/test-x-validation-runner.mjs": "60fd90d3294068b2d45dfa375802ef7da53cb86c4f4eb627be29910eca98ef71"
   },
-  "tests_sha256": "cce34587ee2b493993ddbc36c743cfd2d967e1cc9bfc58e98f14b15fbba5321e",
-  "test_file_count": 33,
+  "tests_sha256": "4fc6796de5e05a70259e699f8362b25c08bbaa463bc12bc983397bb200ef9704",
+  "test_file_count": 34,
   "verification": {
     "verified_at": "2026-09-21T06:08:15.018Z",
     "x_test_suite": {
@@ -90,7 +91,7 @@
       "tests": 715,
       "pass": 714,
       "fail": 1,
-      "known_failure": "EVT12 (pre-existing, Electron relay source-text test in test-x-terminal-event.mjs; unrelated to X v0.2; baseline before any v0.2 change was 617/616/1)"
+      "known_failure": "none (EVT12 was a stale source-text regex that did not accept the async serverProcess message handler; the assertion now matches behaviour and passes)"
     },
     "related_suites": {
       "tests": 77,
@@ -106,5 +107,35 @@
     "oracle_probes": "scripts/x-eval/oracle-probes-v02-slice2-results.json (stub oracle only)",
     "baseline_dry_run": "baseline.mjs --adapter stub:oracle: 3/3 SUCCESS; freeze guard verified_at_start=true",
     "no_real_model_run": true
-  }
+  },
+  "exceptions": [
+    {
+      "approved_at": "2026-09-21",
+      "approved_by": "repository owner",
+      "scope": "mcp/x/run-store.mjs",
+      "change": "added listRecentRuns(limit) — read-only SELECT of the most recently updated x_runs",
+      "introduced_by": "17f2534 feat(x): surface live runs and enforce direct approval",
+      "shipped_in": "0.4.20",
+      "rationale": "X runs were executing with no way for the operator to see them. Read-only visibility only.",
+      "does_not_touch": [
+        "execution logic",
+        "Result Gate",
+        "claim/lease",
+        "repair loop"
+      ],
+      "test_changes": [
+        "scripts/test-x-console-visibility.mjs (new, covers the read-only listing)",
+        "scripts/test-x-terminal-event.mjs (EVT12 regex now accepts the async message handler; the singular-handler invariant is unchanged)"
+      ]
+    },
+    {
+      "approved_at": "2026-09-21",
+      "approved_by": "repository owner",
+      "scope": "scripts/test-x-console-visibility.mjs",
+      "change": "reads the whole renderer source tree (scripts/lib/renderer-source.mjs) instead of src/App.tsx alone",
+      "rationale": "src/App.tsx is being split into src/pages/*. The X visibility assertions are claims about the renderer, not about which file holds the JSX, so they now hold wherever the X run list lives.",
+      "assertions_changed": "none - every assertion is unchanged, only the source it reads is broader",
+      "no_x_source_change": true
+    }
+  ]
 }

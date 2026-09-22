@@ -93,6 +93,18 @@ interface LiveV2CoordinatorState {
     evaluated_at: string | null;
   };
   circuit_breaker_active: boolean;
+  /** READY setups whose price was outside the entry zone, still on their original levels. */
+  waiting_for_entry: Array<{
+    signal_id: string;
+    strategy: 'SMC_IDM' | 'HARMONIC_PRZ';
+    direction: 'BUY' | 'SELL';
+    entry_zone: [number, number];
+    invalidation: number;
+    targets: number[];
+    first_ready_at: string;
+    expires_at: string;
+    registered_at: string | null;
+  }>;
 }
 interface DemoExecutionState {
   state: 'idle' | 'executing' | 'unavailable';
@@ -283,7 +295,7 @@ interface PublicTasksState {
 
 type UpdateStatus = 'idle' | 'checking' | 'up_to_date' | 'update_available' | 'downloading' | 'verifying' | 'update_ready' | 'installing' | 'restarting' | 'rollback' | 'error';
 type UpdateInstallBlocker = 'X_ACTIVE' | 'GOAL_ACTIVE' | 'DURABLE_JOB_ACTIVE' | 'UPDATER_BUSY' | 'RUNTIME_STATE_UNAVAILABLE';
-interface UpdaterInfo { currentVersion: string; currentBuildId: string; builtAt: string | null; updateDirectory: string; }
+interface UpdaterInfo { currentVersion: string; currentBuildId: string; currentCommit: string | null; builtFromDirtyTree?: boolean; builtAt: string | null; updateDirectory: string; }
 interface UpdateCheck extends Pick<UpdaterInfo, 'currentVersion' | 'currentBuildId'> {
   state: UpdateStatus;
   available: { version: string; buildId: string; builtAt: string; platform: string; arch: string; dmgPath: string | null } | null;

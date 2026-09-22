@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { rendererSource } from './lib/renderer-source.mjs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -94,7 +95,7 @@ test('P9 GitHub UX validates repository selection through the authenticated GitH
 
 test('P9 GitHub card keeps PAT in first-connect UI and switches to repository-first connected UI', () => {
   const component = fs.readFileSync(new URL('../src/components/GitHubConnectionCard.tsx', import.meta.url), 'utf8');
-  const app = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+  const app = rendererSource();
   assert.match(component, /const connected = connection\.status === 'CONNECTED'/);
   assert.match(component, /Select repository/);
   assert.match(component, /Fine-grained PAT · first connection only/);
