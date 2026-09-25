@@ -2,9 +2,13 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { spawn } from 'node:child_process';
+import os from 'node:os';
 import * as z from 'zod/v4';
 import { createWorkspaceGuard } from './workspace.mjs';
 import { createHearthSkillRegistry } from './skills/registry.mjs';
+import { JobManager, redactSecrets } from './runtime/job-manager.mjs';
+import { layaStatus, layaConsult, layaReview } from './laya.mjs';
 
 const execFileAsync = promisify(execFile);
 export const toolNames = [
@@ -15,9 +19,17 @@ export const toolNames = [
   'search_files',
   'read_file',
   'write_file',
+  'apply_patch',
   'git_status',
   'git_diff',
   'run_command',
+  'job_start',
+  'job_status',
+  'job_output',
+  'job_stop',
+  'laya_status',
+  'laya_consult',
+  'laya_review',
   'github_connections_list',
   'github_repositories_list',
   'github_repository_get',
@@ -52,6 +64,7 @@ const BLOCKED_COMMANDS = new Set([
  * @returns {string | null}
  */
 const isDestructiveCommand = (command, args) => {
+  command = path.basename(command);
   if (BLOCKED_COMMANDS.has(command)) {
     return `'${command}' is blocked — high-risk system command not permitted by Hearth`;
   }
@@ -121,6 +134,25 @@ const nodeSearch = async (searchRoot, query, maxResults) => {
 // write_file — limits
 // ---------------------------------------------------------------------------
 const WRITE_FILE_MAX_BYTES = 10 * 1024 * 1024; // 10 MB
+const PATCH_MAX_BYTES = 1024 * 1024;
+const jobManager = new JobManager({ storagePath: path.join(os.homedir(), 'Library', 'Application Support', 'Hearth Control', 'generic-jobs.json') });
+jobManager.reconcileStartupState();
+
+const gitApply = (cwd, patch, check) => new Promise((resolve, reject) => {
+  const child = spawn('git', ['-C', cwd, 'apply', ...(check ? ['--check'] : []), '-'], { cwd, shell: false, stdio: ['pipe', 'pipe', 'pipe'] });
+  let stderr = '';
+  child.stderr.on('data', (chunk) => { stderr = (stderr + chunk.toString()).slice(-4096); });
+  child.on('error', reject);
+  child.on('close', (code) => code === 0 ? resolve() : reject(new Error(stderr.trim() || `Patch failed (exit ${code}).`)));
+  child.stdin.on('error', () => {});
+  child.stdin.end(patch);
+});
+
+const jobView = (job) => ({
+  job_id: job.id, status: job.status, pid: job.pid,
+  created_at: job.createdAt, started_at: job.startedAt, completed_at: job.completedAt,
+  exit_code: job.exitCode, duration: job.durationMs, error: job.error,
+});
 
 // ---------------------------------------------------------------------------
 // Tool registration
@@ -269,6 +301,40 @@ export const registerWorkspaceTools = (server, options) => {
     } catch (error) { return failure(error); }
   });
 
+  server.registerTool('apply_patch', {
+    title: 'Apply unified patch',
+    description: 'Apply a standard unified diff to existing files inside the workspace. Rejects new files, deletions, renames and unmatched context.',
+    inputSchema: { patch: z.string().min(1).max(PATCH_MAX_BYTES) },
+    annotations: { destructiveHint: true },
+  }, async ({ patch }) => {
+    try {
+      await requirePermission('Files', 'Apply a repository patch');
+      if (Buffer.byteLength(patch, 'utf8') > PATCH_MAX_BYTES || /^(?:GIT binary patch|Binary files |rename (?:from|to) |new file mode |deleted file mode )/m.test(patch)) {
+        throw new Error('Patch size or operation is unsupported.');
+      }
+      const headers = [...patch.matchAll(/^diff --git a\/(\S+) b\/(\S+)$/gm)];
+      const oldPaths = [...patch.matchAll(/^--- a\/(\S+)$/gm)];
+      const newPaths = [...patch.matchAll(/^\+\+\+ b\/(\S+)$/gm)];
+      if (!headers.length || headers.length !== oldPaths.length || headers.length !== newPaths.length || /^--- \/dev\/null$|^\+\+\+ \/dev\/null$/m.test(patch)) {
+        throw new Error('Expected a unified diff for existing files.');
+      }
+      const changed = [];
+      for (let i = 0; i < headers.length; i++) {
+        const file = headers[i][1];
+        if (file !== headers[i][2] || file !== oldPaths[i][1] || file !== newPaths[i][1] || file.startsWith('-')) {
+          throw new Error('Patch paths must refer to the same existing file.');
+        }
+        const resolved = await guard.resolveExistingPath(file);
+        if (!(await fs.stat(resolved)).isFile()) throw new Error(`Patch target is not a regular file: ${file}`);
+        changed.push(file);
+      }
+      const root = await guard.resolveExistingPath('.');
+      await gitApply(root, patch, true);
+      await gitApply(root, patch, false);
+      return text(JSON.stringify({ changed_files: [...new Set(changed)] }));
+    } catch (error) { return failure(error); }
+  });
+
   server.registerTool('git_status', {
     title: 'Git status',
     description: 'Show concise Git status for the configured workspace.',
@@ -332,6 +398,92 @@ export const registerWorkspaceTools = (server, options) => {
         throw new Error(output || error.message);
       }
     } catch (error) { return failure(error); }
+  });
+
+  server.registerTool('job_start', {
+    title: 'Start background command',
+    description: 'Start one shell-free command in the workspace under Hearth process ownership.',
+    inputSchema: {
+      command: z.string().min(1), args: z.array(z.string()).default([]),
+      cwd: z.string().default('.'), timeoutSeconds: z.number().int().min(1).max(86400).optional(),
+    },
+    annotations: { destructiveHint: true },
+  }, async ({ command, args, cwd, timeoutSeconds }) => {
+    try {
+      const reason = isDestructiveCommand(command, args);
+      if (reason) throw new Error(`BLOCKED: ${reason}`);
+      await requirePermission('Terminal', `Start background command: ${[command, ...args].join(' ')}`);
+      const directory = await guard.resolveExistingPath(cwd);
+      if (!(await fs.stat(directory)).isDirectory()) throw new Error('Job cwd must be a directory.');
+      const job = jobManager.startJob({ command, args, cwd: directory, shell: false, timeoutMs: timeoutSeconds ? timeoutSeconds * 1000 : null });
+      return text(JSON.stringify(jobView(job)));
+    } catch (error) { return failure(error); }
+  });
+
+  server.registerTool('job_status', {
+    title: 'Background job status', description: 'Get persisted status of a Hearth-owned background job.',
+    inputSchema: { job_id: z.string().min(1) },
+  }, async ({ job_id }) => {
+    try {
+      await requirePermission('Terminal', `Read job status: ${job_id}`);
+      const job = jobManager.getJob(job_id);
+      if (!job || job.cwd !== await guard.resolveExistingPath('.')) {
+        // Nested directories are also valid, but never disclose jobs from another workspace.
+        if (!job || !job.cwd?.startsWith(`${await guard.resolveExistingPath('.')}${path.sep}`)) throw new Error('Job not found in this workspace.');
+      }
+      return text(JSON.stringify(jobView(job)));
+    } catch (error) { return failure(error); }
+  });
+
+  server.registerTool('job_output', {
+    title: 'Background job output', description: 'Read bounded recent stdout and stderr from a job in this workspace.',
+    inputSchema: { job_id: z.string().min(1), max_chars: z.number().int().min(1).max(16000).default(4000) },
+  }, async ({ job_id, max_chars }) => {
+    try {
+      await requirePermission('Terminal', `Read job output: ${job_id}`);
+      const job = jobManager.getJob(job_id);
+      const root = await guard.resolveExistingPath('.');
+      if (!job || (job.cwd !== root && !job.cwd?.startsWith(`${root}${path.sep}`))) throw new Error('Job not found in this workspace.');
+      return text(JSON.stringify({ job_id, stdout: redactSecrets(job.stdout).slice(-max_chars), stderr: redactSecrets(job.stderr).slice(-max_chars) }));
+    } catch (error) { return failure(error); }
+  });
+
+  server.registerTool('job_stop', {
+    title: 'Stop background job', description: 'Gracefully terminate only a child process owned by this Hearth MCP process.',
+    inputSchema: { job_id: z.string().min(1) }, annotations: { destructiveHint: true },
+  }, async ({ job_id }) => {
+    try {
+      await requirePermission('Terminal', `Stop background job: ${job_id}`);
+      const job = jobManager.getJob(job_id);
+      const root = await guard.resolveExistingPath('.');
+      if (!job || (job.cwd !== root && !job.cwd?.startsWith(`${root}${path.sep}`))) throw new Error('Job not found in this workspace.');
+      if (!jobManager.children.has(job_id)) throw new Error('Job is not owned by this process or is no longer running.');
+      return text(JSON.stringify({ job_id, stopped: jobManager.cancelJob(job_id) }));
+    } catch (error) { return failure(error); }
+  });
+
+  server.registerTool('laya_status', {
+    title: 'LAYA status', description: 'Check optional advisory provider availability without credentials.', inputSchema: {},
+  }, async () => text(JSON.stringify(await layaStatus())));
+
+  server.registerTool('laya_consult', {
+    title: 'Consult LAYA', description: 'Ask an optional specialist for advice only; no file or shell access.',
+    inputSchema: { prompt: z.string().min(1).max(16000) },
+  }, async ({ prompt }) => {
+    try { return text(JSON.stringify(await layaConsult(prompt))); }
+    catch (error) { return failure(error); }
+  });
+
+  server.registerTool('laya_review', {
+    title: 'Review with LAYA', description: 'Request advisory review of work already produced; does not edit files.',
+    inputSchema: {
+      objective: z.string().min(1).max(4000), changed_files: z.array(z.string().max(500)).max(100),
+      diff: z.string().max(60000).optional(), summary: z.string().max(8000).optional(),
+      validation: z.string().max(8000).optional(), focus: z.enum(['code', 'ui', 'ux', 'accessibility', 'architecture']),
+    },
+  }, async (input) => {
+    try { return text(JSON.stringify(await layaReview(input))); }
+    catch (error) { return failure(error); }
   });
 
   const githubAliases = z.enum(['github:personal', 'github:work']);

@@ -63,30 +63,6 @@ const createRoundTripTransport = (response, { cancelType } = {}) => {
   return roundTrip;
 };
 
-const queueIngressTransportFor = (response) => {
-  const roundTrip = createRoundTripTransport(response, { cancelType: 'x_queue_request_cancel' });
-  return {
-    enqueue: ({ requestId, task, workspace }) => roundTrip('x_queue_enqueue_request', { requestId, task, workspace }),
-    status: ({ requestId }) => roundTrip('x_queue_status_request', { requestId }),
-  };
-};
-
-const hearthJobTransportFor = (response) => {
-  const submitRoundTrip = createRoundTripTransport(response, { cancelType: 'hearth_job_request_cancel' });
-  const statusRoundTrip = createRoundTripTransport(response);
-  return {
-    submit: ({ job }) => submitRoundTrip('hearth_job_submit_request', { job, workspace }),
-    status: ({ jobId }) => statusRoundTrip('hearth_job_status_request', { jobId, workspace }),
-  };
-};
-
-/**
- * Read-only bridge to the LIVE GoalRunner instance Electron main owns --
- * never a second GoalRunner/GoalStorage. Electron main's own
- * review_queue_list_request handler (electron/main.cjs) calls the SAME
- * goalRunner.list_review_queue() the running app itself uses; this makes
- * zero writes on either side of the channel.
- */
 const githubTransportFor = (response) => {
   const roundTrip = createRoundTripTransport(response);
   return {
@@ -119,30 +95,6 @@ const vercelTransportFor = (response) => {
       }),
     getDeployment: ({ connection, idOrUrl, teamId }) =>
       roundTrip('vercel_deployment_get_request', { connection, idOrUrl, teamId: teamId || null }),
-  };
-};
-
-const reviewQueueTransportFor = (response) => {
-  const roundTrip = createRoundTripTransport(response);
-  return {
-    createGoal: ({ title, objective, steps, constraints } = {}) =>
-      roundTrip('goal_create_request', { title, objective, steps, constraints }),
-    runGoal: ({ goalId } = {}) => roundTrip('goal_run_request', { goalId }),
-    resumeGoal: ({ goalId } = {}) => roundTrip('goal_resume_request', { goalId }),
-    list: ({ goalId } = {}) => roundTrip('review_queue_list_request', { goalId: goalId || null }),
-    acknowledge: ({ goalId, reviewItemId, actor, note } = {}) =>
-      roundTrip('review_queue_acknowledge_request', { goalId, reviewItemId, actor: actor || null, note: note || null }),
-    resolve: ({ goalId, reviewItemId, action, note } = {}) =>
-      roundTrip('review_queue_resolve_request', { goalId, reviewItemId, action: action || 'accept', note: note || null }),
-    retry: ({ goalId, reviewItemId, xTask, note, actor } = {}) =>
-      roundTrip('review_queue_retry_request', { goalId, reviewItemId, xTask: xTask || null, note: note || null, actor: actor || null }),
-    getGoalContext: ({ goalId } = {}) => roundTrip('goal_get_context_request', { goalId }),
-    requestSpecialistHandoff: ({ goalId, stepId, target, reason, requestedAction, actor } = {}) =>
-      roundTrip('goal_request_specialist_handoff_request', { goalId, stepId, target, reason: reason || null, requestedAction: requestedAction || null, actor: actor || null }),
-    getSpecialistHandoff: ({ goalId, handoffId } = {}) =>
-      roundTrip('goal_get_specialist_handoff_request', { goalId, handoffId }),
-    listSpecialistHandoffs: ({ goalId } = {}) =>
-      roundTrip('goal_list_specialist_handoffs_request', { goalId }),
   };
 };
 
@@ -194,31 +146,6 @@ process.on('message', (message) => {
     );
   }
   if (message?.type === 'settings:update' && message.permissions) Object.assign(permissions, message.permissions);
-  if (message?.type === 'x_queue_enqueue_ack' || message?.type === 'x_queue_status_ack') {
-    queueReplies.get(message.transportId)?.finish(null, message.ok ? message.receipt : { accepted: false, found: false, reason: message.error });
-  }
-  if (message?.type === 'hearth_job_submit_ack' || message?.type === 'hearth_job_status_ack') {
-    queueReplies.get(message.transportId)?.finish(
-      null,
-      message.ok ? message.result : {
-        accepted: false,
-        found: false,
-        reason: message.error || 'hearth_job_request_failed',
-      },
-    );
-  }
-  if (message?.type === 'review_queue_list_ack') {
-    queueReplies.get(message.transportId)?.finish(null, message.ok ? { items: message.items } : { items: [], reason: message.error });
-  }
-  if (message?.type === 'review_queue_acknowledge_ack' || message?.type === 'review_queue_resolve_ack' || message?.type === 'review_queue_retry_ack') {
-    queueReplies.get(message.transportId)?.finish(null, message.ok ? message.result : { ok: false, reason: message.error });
-  }
-  if (message?.type === 'goal_get_context_ack') {
-    queueReplies.get(message.transportId)?.finish(null, message.ok ? message.context : { error: message.error });
-  }
-  if (['goal_create_ack', 'goal_run_ack', 'goal_resume_ack'].includes(message?.type)) {
-    queueReplies.get(message.transportId)?.finish(null, message.ok ? message.result : { error: message.error });
-  }
   if (typeof message?.type === 'string' && message.type.startsWith('github_') && message.type.endsWith('_ack')) {
     queueReplies.get(message.transportId)?.finish(
       null,
@@ -245,9 +172,6 @@ app.get('/tools', (_request, response) => response.json({ tools: toolNames }));
 app.post('/mcp', async (request, response) => {
   const server = createMcpServer({
     workspace, permissions, requestApproval,
-    queueIngressTransport: queueIngressTransportFor(response),
-    hearthJobTransport: hearthJobTransportFor(response),
-    reviewQueueTransport: reviewQueueTransportFor(response),
     githubTransport: githubTransportFor(response),
     vercelTransport: vercelTransportFor(response),
   });
