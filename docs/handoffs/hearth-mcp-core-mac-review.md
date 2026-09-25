@@ -12,6 +12,8 @@ Git state at handoff: branch `feature/hearth-mcp-core-v1`; base remote feature H
 
 Known issues / blockers: Hearth tunnel returned internal errors during Mac testing; manual Terminal output and screenshots supplied evidence instead. No narrow-width screenshot of the fixed revision yet. Verify the latest commit on Mac before considering installation; do not use the dirty original checkout as a build source.
 
+Packaging continuation: The Mac electron-builder run in the review worktree reported unresolved dependencies while `node_modules` was a symlink to the original checkout. Inspection also found `mcp/http.mjs` imports `express` directly while the manifest omitted it; the follow-up explicitly declares `express` in `package.json` and `package-lock.json`. Build and stdio MCP discovery passed after the manifest change on Linux. Before attempting installation, replace only the review worktree's `node_modules` symlink with a real `npm ci`, rebuild the Mac DMG, and inspect the packaged runtime. An earlier DMG is not validated for installation.
+
 Exact next action: Transfer and push the follow-up commit, update the isolated Mac review worktree, verify a narrow window stacks cards, and inspect runtime before any installation.
 
 Status: READY_FOR_REVIEW
