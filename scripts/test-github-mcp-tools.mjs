@@ -4,23 +4,16 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { registerWorkspaceTools, toolNames } from '../mcp/tools.mjs';
-import { XClaimStore } from '../mcp/x/claim-store.mjs';
-import { XRunStore } from '../mcp/x/run-store.mjs';
 
 const fixtures = [];
 const fixture = () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hearth-p4-mcp-'));
-  const dbPath = path.join(root, 'runtime.sqlite');
-  const claimStore = new XClaimStore({ storagePath: dbPath });
-  const runStore = new XRunStore({ storagePath: dbPath });
-  const item = { root, claimStore, runStore };
+  const item = { root };
   fixtures.push(item);
   return item;
 };
 afterEach(() => {
   for (const item of fixtures.splice(0)) {
-    item.claimStore.close();
-    item.runStore.close();
     fs.rmSync(item.root, { recursive: true, force: true });
   }
 });
@@ -29,7 +22,6 @@ const fakeServer = () => {
   const tools = new Map();
   return { tools, registerTool(name, config, handler) { tools.set(name, { config, handler }); } };
 };
-const modelAdapter = { async generate() { return { ok: true, text: JSON.stringify({ actions: [] }) }; } };
 const jsonOf = (result) => JSON.parse(result.content[0].text);
 
 const register = ({ permissions = { Git: 'Allow' }, githubTransport, requestApproval } = {}) => {
@@ -40,12 +32,6 @@ const register = ({ permissions = { Git: 'Allow' }, githubTransport, requestAppr
     permissions,
     requestApproval,
     githubTransport,
-    xRuntime: {
-      claimStore: item.claimStore,
-      runStore: item.runStore,
-      modelAdapter,
-      ownerId: 'p4-test-owner',
-    },
   });
   return { item, server };
 };

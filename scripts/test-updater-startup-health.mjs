@@ -16,22 +16,12 @@ test('1. startup health marker is written only after the main window is created'
   assert.ok(markerIndex > createWindowIndex, 'startup success marker must follow main window creation');
 });
 
-test('2. essential local runtime initialization completes before window creation and health marker', () => {
-  const taskStoreIndex = startup.indexOf('taskStore = new TaskStore(');
-  const goalRunnerIndex = startup.indexOf('goalRunner = new GoalRunner(');
-  const xRuntimeIndex = startup.indexOf('xQueueCoordinator = new XQueueCoordinator(');
-  const createWindowIndex = startup.lastIndexOf('  createWindow();');
-  const markerIndex = startup.indexOf("await localUpdater.recordStartupSuccess(app.getPath('userData'));");
-
-  for (const [name, index] of [
-    ['TaskStore', taskStoreIndex],
-    ['GoalRunner', goalRunnerIndex],
-    ['X runtime', xRuntimeIndex],
-  ]) {
-    assert.ok(index >= 0, `${name} initialization must exist`);
-    assert.ok(index < createWindowIndex, `${name} initialization must precede main window creation`);
-    assert.ok(index < markerIndex, `${name} initialization must precede startup success marker`);
-  }
+test('2. connection infrastructure initializes before window and startup marker', () => {
+  const connections = startup.indexOf('await initConnections();');
+  const createWindow = startup.lastIndexOf('    createWindow();');
+  const marker = startup.indexOf("await localUpdater.recordStartupSuccess(app.getPath('userData'));");
+  assert.ok(connections >= 0 && connections < createWindow && createWindow < marker);
+  assert.doesNotMatch(startup, /GoalRunner|XQueueCoordinator|InvestMonitor/);
 });
 
 test('3. startup health marker has one main-process owner and is not written inside createWindow', () => {
@@ -39,14 +29,14 @@ test('3. startup health marker has one main-process owner and is not written ins
   assert.equal(main.split(markerCall).length - 1, 1, 'main process must have exactly one startup marker call');
 
   const createWindowStart = main.indexOf('const createWindow = () => {');
-  const createWindowEnd = main.indexOf('const hasSingleInstanceLock', createWindowStart);
+  const createWindowEnd = main.indexOf('const getUpdaterInfo =', createWindowStart);
   assert.ok(createWindowStart >= 0 && createWindowEnd > createWindowStart);
   const createWindowBody = main.slice(createWindowStart, createWindowEnd);
   assert.equal(createWindowBody.includes('recordStartupSuccess'), false, 'window creation itself must not mark startup healthy');
 });
 
 test('4. window creation failure cannot fall through to the health marker', () => {
-  const tailStart = startup.lastIndexOf('// The updater watchdog accepts this main-process marker');
+  const tailStart = startup.lastIndexOf('    createWindow();');
   const activateIndex = startup.indexOf("app.on('activate'", tailStart);
   assert.ok(tailStart >= 0 && activateIndex > tailStart);
   const tail = startup.slice(tailStart, activateIndex);

@@ -6,15 +6,12 @@ import { spawn } from 'node:child_process';
 import os from 'node:os';
 import * as z from 'zod/v4';
 import { createWorkspaceGuard } from './workspace.mjs';
-import { createHearthSkillRegistry } from './skills/registry.mjs';
 import { JobManager, redactSecrets } from './runtime/job-manager.mjs';
 import { layaStatus, layaConsult, layaReview } from './laya.mjs';
 
 const execFileAsync = promisify(execFile);
 export const toolNames = [
   'workspace_info',
-  'skill_list',
-  'skill_load',
   'list_files',
   'search_files',
   'read_file',
@@ -135,7 +132,7 @@ const nodeSearch = async (searchRoot, query, maxResults) => {
 // ---------------------------------------------------------------------------
 const WRITE_FILE_MAX_BYTES = 10 * 1024 * 1024; // 10 MB
 const PATCH_MAX_BYTES = 1024 * 1024;
-const jobManager = new JobManager({ storagePath: path.join(os.homedir(), 'Library', 'Application Support', 'Hearth Control', 'generic-jobs.json') });
+const jobManager = new JobManager({ storagePath: process.env.CONTROL_JOB_STORE || path.join(os.homedir(), 'Library', 'Application Support', 'Hearth Control', 'generic-jobs.json') });
 jobManager.reconcileStartupState();
 
 const gitApply = (cwd, patch, check) => new Promise((resolve, reject) => {
@@ -153,13 +150,23 @@ const jobView = (job) => ({
   created_at: job.createdAt, started_at: job.startedAt, completed_at: job.completedAt,
   exit_code: job.exitCode, duration: job.durationMs, error: job.error,
 });
+export const recentJobViews = (workspace) => {
+  const root = path.resolve(workspace);
+  const all = jobManager.listJobs().filter((job) => job.cwd === root || job.cwd?.startsWith(`${root}${path.sep}`));
+  const active = all.filter((job) => ['running', 'queued'].includes(job.status));
+  return [...new Map([...active, ...all.slice(-20).reverse()].map((job) => [job.id, job])).values()]
+    .map((job) => ({
+      ...jobView(job), command: path.basename(job.command),
+      output_preview: redactSecrets(job.stderr || job.stdout || '').slice(-240),
+      process_stopped: jobManager.isJobProcessStopped(job.id),
+    }));
+};
 
 // ---------------------------------------------------------------------------
 // Tool registration
 // ---------------------------------------------------------------------------
 export const registerWorkspaceTools = (server, options) => {
   const guard = createWorkspaceGuard(options.workspace);
-  const skillRegistry = createHearthSkillRegistry();
   const permissions = options.permissions ?? {};
   const requirePermission = async (name, action) => {
     const level = permissions[name] ?? 'Blocked';
@@ -177,30 +184,6 @@ export const registerWorkspaceTools = (server, options) => {
     description: 'Show the workspace root and active permission levels.',
     inputSchema: {},
   }, async () => text(JSON.stringify({ workspace: guard.root || null, permissions }, null, 2)));
-
-  server.registerTool('skill_list', {
-    title: 'List Claude skills',
-    description: 'List read-only Hearth Skill metadata declared for Claude. Grants no tools or permissions.',
-    inputSchema: { agent: z.literal('claude').default('claude') },
-  }, async ({ agent = 'claude' } = {}) => {
-    try {
-      if (agent !== 'claude') throw new Error('Only Claude skill access is available through this tool.');
-      const skills = await skillRegistry.listMetadata({ agent });
-      return text(JSON.stringify({ agent, skills }));
-    } catch (error) { return failure(error); }
-  });
-
-  server.registerTool('skill_load', {
-    title: 'Load Claude skill',
-    description: 'Read one Hearth Skill declared for Claude. Does not execute instructions or grant tools or permissions.',
-    inputSchema: { id: z.string().min(1), agent: z.literal('claude').default('claude') },
-  }, async ({ id, agent = 'claude' } = {}) => {
-    try {
-      if (agent !== 'claude') throw new Error('Only Claude skill access is available through this tool.');
-      const skill = await skillRegistry.load(id, { agent, availableTools: [] });
-      return text(JSON.stringify(skill));
-    } catch (error) { return failure(error); }
-  });
 
   server.registerTool('list_files', {
     title: 'List files',
@@ -324,6 +307,7 @@ export const registerWorkspaceTools = (server, options) => {
         if (file !== headers[i][2] || file !== oldPaths[i][1] || file !== newPaths[i][1] || file.startsWith('-')) {
           throw new Error('Patch paths must refer to the same existing file.');
         }
+        if ((await fs.lstat(guard.resolvePath(file))).isSymbolicLink()) throw new Error(`Patch target is a symbolic link: ${file}`);
         const resolved = await guard.resolveExistingPath(file);
         if (!(await fs.stat(resolved)).isFile()) throw new Error(`Patch target is not a regular file: ${file}`);
         changed.push(file);
@@ -415,7 +399,7 @@ export const registerWorkspaceTools = (server, options) => {
       await requirePermission('Terminal', `Start background command: ${[command, ...args].join(' ')}`);
       const directory = await guard.resolveExistingPath(cwd);
       if (!(await fs.stat(directory)).isDirectory()) throw new Error('Job cwd must be a directory.');
-      const job = jobManager.startJob({ command, args, cwd: directory, shell: false, timeoutMs: timeoutSeconds ? timeoutSeconds * 1000 : null });
+      const job = jobManager.startJob({ command, args, cwd: directory, shell: false, timeoutMs: timeoutSeconds ? timeoutSeconds * 1000 : null, metadata: { genericMcp: true } });
       return text(JSON.stringify(jobView(job)));
     } catch (error) { return failure(error); }
   });
@@ -470,7 +454,7 @@ export const registerWorkspaceTools = (server, options) => {
     title: 'Consult LAYA', description: 'Ask an optional specialist for advice only; no file or shell access.',
     inputSchema: { prompt: z.string().min(1).max(16000) },
   }, async ({ prompt }) => {
-    try { return text(JSON.stringify(await layaConsult(prompt))); }
+    try { await requirePermission('LAYA', 'Consult LAYA'); return text(JSON.stringify(await layaConsult(prompt))); }
     catch (error) { return failure(error); }
   });
 
@@ -482,7 +466,7 @@ export const registerWorkspaceTools = (server, options) => {
       validation: z.string().max(8000).optional(), focus: z.enum(['code', 'ui', 'ux', 'accessibility', 'architecture']),
     },
   }, async (input) => {
-    try { return text(JSON.stringify(await layaReview(input))); }
+    try { await requirePermission('LAYA', 'Review work with LAYA'); return text(JSON.stringify(await layaReview(input))); }
     catch (error) { return failure(error); }
   });
 

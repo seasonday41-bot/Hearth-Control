@@ -58,8 +58,11 @@ export const sanitizeJobForPersistence = (raw) => {
   const status = VALID_JOB_STATUSES.has(raw.status) ? raw.status : 'error';
   const taskId = typeof raw.taskId === 'string' && raw.taskId.trim() ? raw.taskId.trim() : null;
   const conversationId = typeof raw.conversationId === 'string' && raw.conversationId.trim() ? raw.conversationId.trim() : null;
-  const command = typeof raw.command === 'string' ? raw.command : '';
-  const args = Array.isArray(raw.args) ? raw.args.map(String) : [];
+  // Generic MCP commands can carry credentials in positional arguments.
+  // Recovery needs lifecycle state, not a replayable command line.
+  const genericMcp = raw.metadata?.genericMcp === true;
+  const command = typeof raw.command === 'string' ? (genericMcp ? path.basename(raw.command) : raw.command) : '';
+  const args = genericMcp ? [] : Array.isArray(raw.args) ? raw.args.map(String) : [];
   const cwd = typeof raw.cwd === 'string' ? raw.cwd : '';
   const pid = Number.isInteger(raw.pid) ? raw.pid : null;
   const createdAt = typeof raw.createdAt === 'string' ? raw.createdAt : new Date().toISOString();
@@ -249,17 +252,19 @@ export class JobManager extends EventEmitter {
       const serialized = JSON.stringify(payload, null, 2);
       const tempPath = `${this.storagePath}.tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-      fs.writeFileSync(tempPath, serialized, 'utf8');
+      fs.writeFileSync(tempPath, serialized, { encoding: 'utf8', mode: 0o600 });
 
       if (fs.existsSync(this.storagePath)) {
         try {
           fs.copyFileSync(this.storagePath, this.backupPath);
+          fs.chmodSync(this.backupPath, 0o600);
         } catch {
           // Non-fatal backup failure
         }
       }
 
       fs.renameSync(tempPath, this.storagePath);
+      fs.chmodSync(this.storagePath, 0o600);
     } catch (err) {
       console.error(`[JobManager] Failed to save jobs to '${this.storagePath}':`, err.message);
     }

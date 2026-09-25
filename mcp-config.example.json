@@ -7,7 +7,7 @@
       ],
       "env": {
         "HEARTH_WORKSPACE": "/path/to/your/workspace",
-        "HEARTH_PERMISSIONS": "{\"Files\":\"Ask\",\"Git\":\"Allow\",\"Terminal\":\"Blocked\",\"Browser\":\"Blocked\"}"
+        "HEARTH_PERMISSIONS": "{\"Files\":\"Ask\",\"Git\":\"Allow\",\"Terminal\":\"Blocked\",\"Vercel\":\"Ask\",\"LAYA\":\"Blocked\"}"
       }
     }
   }

@@ -12,7 +12,8 @@ const service = fs.readFileSync(new URL('../electron/vercel/vercel-connection-se
 test('P6 defines a dedicated Hearth Vercel permission with Ask default', () => {
   assert.match(main, /Vercel: 'Ask'/);
   const app = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
-  assert.match(app, /name: 'Vercel'.*value: 'Ask'/);
+  assert.match(app, /permissionsList = \[[^\]]*'Vercel'/);
+  assert.match(app, /featureAccess\(name\)/);
   assert.match(tools, /requirePermission\('Vercel'/);
 });
 

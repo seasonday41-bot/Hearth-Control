@@ -39,16 +39,16 @@ test('5. updater busy blocks a concurrent install attempt', () => {
   assert.equal(result.code, updater.UPDATE_RUNTIME_BLOCKERS.UPDATER_BUSY);
 });
 
-test('6. Electron preflight reads the initialized X wakeup deadline function', async () => {
+test('6. Electron preflight checks durable generic jobs and MCP server state', async () => {
   const main = await fs.promises.readFile(new URL('../electron/main.cjs', import.meta.url), 'utf8');
   const start = main.indexOf('const getUpdaterRuntimeBlocker =');
   const end = main.indexOf('const startRollbackWatchdog =', start);
   assert.ok(start >= 0 && end > start, 'updater runtime preflight helper must exist');
   const helper = main.slice(start, end);
 
-  assert.ok(helper.includes("typeof xGetNextWakeupDeadline !== 'function'"));
-  assert.ok(helper.includes('xActive: xGetNextWakeupDeadline() != null'));
-  assert.equal(helper.includes('xGetNextXWakeupDeadline'), false);
+  assert.ok(helper.includes('queuedJobCount: pendingGenericJobs()'));
+  assert.ok(helper.includes('runningJobCount: serverState.running ? 1 : 0'));
+  assert.equal(helper.includes('xGetNextWakeupDeadline'), false);
 });
 
 test('7. no blocker preserves the existing approval/install path and required ordering', async () => {
@@ -56,7 +56,7 @@ test('7. no blocker preserves the existing approval/install path and required or
 
   const main = await fs.promises.readFile(new URL('../electron/main.cjs', import.meta.url), 'utf8');
   const start = main.indexOf("ipcMain.handle('updater:install'");
-  const end = main.indexOf("// Bridge Initialization & Handlers", start);
+  const end = main.indexOf('    createWindow();', start);
   assert.ok(start >= 0 && end > start, 'updater install IPC handler must exist');
   const handler = main.slice(start, end);
 
@@ -87,7 +87,7 @@ test('7. no blocker preserves the existing approval/install path and required or
 test('8. cancelled native approval exits before revalidation or install', async () => {
   const main = await fs.promises.readFile(new URL('../electron/main.cjs', import.meta.url), 'utf8');
   const start = main.indexOf("ipcMain.handle('updater:install'");
-  const end = main.indexOf("// Bridge Initialization & Handlers", start);
+  const end = main.indexOf('    createWindow();', start);
   const handler = main.slice(start, end);
 
   const approval = handler.indexOf('dialog.showMessageBox');
@@ -112,7 +112,7 @@ test('9. remote/MCP/Goal/X inputs cannot supply a preflight bypass flag', async 
 
   const main = await fs.promises.readFile(new URL('../electron/main.cjs', import.meta.url), 'utf8');
   const start = main.indexOf("ipcMain.handle('updater:install'");
-  const end = main.indexOf("// Bridge Initialization & Handlers", start);
+  const end = main.indexOf('    createWindow();', start);
   const handler = main.slice(start, end);
   assert.ok(handler.startsWith("ipcMain.handle('updater:install', async (event) =>"));
   const executableHandler = handler

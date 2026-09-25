@@ -34,6 +34,11 @@ export const createWorkspaceGuard = (workspace) => {
     if (parent !== workspaceRoot && !parent.startsWith(`${workspaceRoot}${path.sep}`)) {
       throw new Error('Write target escapes the configured workspace.');
     }
+    const existing = await fs.lstat(candidate).catch((error) => {
+      if (error.code === 'ENOENT') return null;
+      throw error;
+    });
+    if (existing?.isSymbolicLink()) throw new Error('Writing through a symbolic link is not permitted.');
     return candidate;
   };
 

@@ -14,4 +14,4 @@ Known issues: Slice 2 remains in progress because legacy Electron main and UI st
 
 Exact next action: Decouple legacy Electron startup and IPC while preserving updater and GitHub/Vercel, then replace UI and remove unreferenced code. Run final validation.
 
-Status: BLOCKED (migration not complete; no install/release)
+Status: READY_FOR_NEXT_SLICE (historical checkpoint; subsequent slices completed on this branch)

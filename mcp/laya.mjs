@@ -18,6 +18,7 @@ const request = async (action, body) => {
     const url = new URL(action, `${base.href.replace(/\/$/, '')}/`);
     const response = await fetch(url, {
       method: body ? 'POST' : 'GET',
+      redirect: 'error',
       headers: body ? { 'content-type': 'application/json' } : undefined,
       body: body ? JSON.stringify(body) : undefined,
       signal: controller.signal,
@@ -40,7 +41,7 @@ export const layaStatus = async () => {
       mode: 'consult+review', last_error: null,
     };
   } catch (error) {
-    return { available: true, connected: false, mode: 'consult+review', last_error: error.message.replace(/https?:\/\/\S+/g, '[endpoint]') };
+    return { available: Boolean(process.env.HEARTH_LAYA_ENDPOINT), connected: false, mode: 'consult+review', last_error: error.message.replace(/https?:\/\/\S+/g, '[endpoint]') };
   }
 };
 

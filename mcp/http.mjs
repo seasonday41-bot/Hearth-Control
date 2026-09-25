@@ -2,7 +2,7 @@ import express from 'express';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { localhostHostValidation } from '@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js';
 import { createMcpServer } from './create-server.mjs';
-import { toolNames } from './tools.mjs';
+import { toolNames, recentJobViews } from './tools.mjs';
 import crypto from 'node:crypto';
 
 // Build Express app manually so we can set body-parser limit to 12 MB.
@@ -22,15 +22,9 @@ const queueReplies = new Map();
 const queueError = (code) => Object.assign(new Error(code), { code });
 
 /**
- * Shared request/ack round trip over the fork-IPC channel to Electron main
- * (process.send/process.on('message')) -- the SAME mechanism
- * x_queue_enqueue_request/x_queue_status_request already use, generalized
- * so a new request kind (e.g. review_queue_list_request) can reuse the
- * identical transportId correlation, timeout, and response-close cleanup
- * instead of re-implementing it. `cancelType`, when given, is sent on
- * timeout/response-close exactly like x_queue_request_cancel already is;
- * omit it for a request with no server-side in-flight state worth
- * cancelling (e.g. a pure read like review_queue_list_request).
+ * Shared request/ack round trip over the fork-IPC channel to Electron main.
+ * Correlate connection-service replies with transportId and clean up on
+ * timeout or response close. Optional cancelType stops in-flight work.
  */
 const createRoundTripTransport = (response, { cancelType } = {}) => {
   const active = new Set();
@@ -138,6 +132,9 @@ const requestApproval = ({ permission, action }) => new Promise((resolve) => {
 });
 
 process.on('message', (message) => {
+  if (message?.type === 'jobs:list-request' && typeof message.requestId === 'string') {
+    process.send?.({ type: 'jobs:list-response', requestId: message.requestId, jobs: recentJobViews(workspace) });
+  }
   if (message?.type === 'approval:result') {
     settleApproval(
       message.requestId,

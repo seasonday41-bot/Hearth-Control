@@ -1,9 +1,13 @@
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { registerWorkspaceTools } from '../mcp/tools.mjs';
+const storeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'hearth-core-job-store-'));
+process.env.CONTROL_JOB_STORE = path.join(storeRoot, 'jobs.json');
+const { registerWorkspaceTools } = await import('../mcp/tools.mjs');
+const { sanitizeJobForPersistence } = await import('../mcp/runtime/job-manager.mjs');
+after(() => fs.rmSync(storeRoot, { recursive: true, force: true }));
 
 const create = (permissions = { Files: 'Allow', Terminal: 'Allow' }) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hearth-core-tools-'));
@@ -39,6 +43,32 @@ test('patch rejects traversal and blocked Files permission', async () => {
   const blocked = create({ Files: 'Blocked', Terminal: 'Allow' });
   try { assert.equal((await blocked.call('apply_patch', { patch: diff('before', 'after') })).isError, true); }
   finally { blocked.cleanup(); }
+});
+
+test('writes and patches refuse symbolic link targets', async () => {
+  const f = create();
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'hearth-outside-'));
+  try {
+    const target = path.join(outside, 'private.txt');
+    fs.writeFileSync(target, 'private\n');
+    fs.symlinkSync(target, path.join(f.root, 'linked.txt'));
+    assert.equal((await f.call('write_file', { path: 'linked.txt', content: 'changed' })).isError, true);
+    assert.equal(fs.readFileSync(target, 'utf8'), 'private\n');
+    const patch = diff('before', 'after').replaceAll('sample.txt', 'linked.txt');
+    assert.equal((await f.call('apply_patch', { patch })).isError, true);
+  } finally { f.cleanup(); fs.rmSync(outside, { recursive: true, force: true }); }
+});
+
+test('generic job persistence omits arguments and protects its store', async () => {
+  const persisted = sanitizeJobForPersistence({ id: 'job', status: 'running', command: '/usr/bin/tool', args: ['private-argument'], metadata: { genericMcp: true } });
+  assert.equal(persisted.command, 'tool');
+  assert.deepEqual(persisted.args, []);
+  const f = create();
+  try {
+    const started = await f.call('job_start', { command: process.execPath, args: ['-e', 'console.log("ok")'], cwd: '.' });
+    assert.equal(started.isError, undefined);
+    assert.equal(fs.statSync(process.env.CONTROL_JOB_STORE).mode & 0o777, 0o600);
+  } finally { f.cleanup(); }
 });
 
 test('background job reports output, exit and can be cancelled without arbitrary PID', async () => {

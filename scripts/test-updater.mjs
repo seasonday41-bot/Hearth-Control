@@ -197,7 +197,7 @@ await test('install requires explicit local user action in main process and core
 
   const main = await fs.promises.readFile(new URL('../electron/main.cjs', import.meta.url), 'utf8');
   const handlerStart = main.indexOf("ipcMain.handle('updater:install'");
-  const handlerEnd = main.indexOf("// Bridge Initialization & Handlers", handlerStart);
+  const handlerEnd = main.indexOf('    createWindow();', handlerStart);
   assert.ok(handlerStart >= 0 && handlerEnd > handlerStart, 'local updater IPC handler must exist');
   const handler = main.slice(handlerStart, handlerEnd);
   const confirmationIndex = handler.indexOf('dialog.showMessageBox');
@@ -212,12 +212,8 @@ await test('install requires explicit local user action in main process and core
   assert.ok(handler.includes('userApproved: true'), 'core updater approval flag must be supplied only by the guarded main handler');
 
   const renderer = await fs.promises.readFile(new URL('../src/App.tsx', import.meta.url), 'utf8');
-  const rendererStart = renderer.indexOf('const installUpdate = async () =>');
-  const rendererEnd = renderer.indexOf('const updateStatusText', rendererStart);
-  assert.ok(rendererStart >= 0 && rendererEnd > rendererStart, 'renderer update action must exist');
-  const rendererHandler = renderer.slice(rendererStart, rendererEnd);
-  assert.equal(rendererHandler.includes('window.confirm('), false, 'renderer must not be the authoritative approval boundary');
-  assert.ok(rendererHandler.includes('result.cancelled'), 'renderer must restore update_ready when main-process approval is cancelled');
+  assert.match(renderer, /updateCheck\?\.state === 'update_ready'[\s\S]*?api\.updaterInstall\(\)/, 'renderer exposes install only after update_ready');
+  assert.equal(renderer.includes('window.confirm('), false, 'renderer must not be the authoritative approval boundary');
 });
 await test('install creates backup in fixture and keeps user data untouched', async () => {
   const update = await fixture(); const manifest = await updater.readAndValidateManifest(update.directory, process.platform, process.arch);

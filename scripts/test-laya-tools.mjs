@@ -37,3 +37,20 @@ test('loopback LAYA handles status, consult and review without file access', asy
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test('LAYA rejects non-loopback endpoints and redirects', async () => {
+  const previous = process.env.HEARTH_LAYA_ENDPOINT;
+  try {
+    process.env.HEARTH_LAYA_ENDPOINT = 'https://example.com/';
+    await assert.rejects(layaConsult('private text'), /loopback/);
+    const server = http.createServer((_req, res) => { res.writeHead(302, { location: 'https://example.com/' }); res.end(); });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+      process.env.HEARTH_LAYA_ENDPOINT = `http://127.0.0.1:${server.address().port}`;
+      await assert.rejects(layaConsult('private text'));
+    } finally { await new Promise((resolve) => server.close(resolve)); }
+  } finally {
+    if (previous === undefined) delete process.env.HEARTH_LAYA_ENDPOINT;
+    else process.env.HEARTH_LAYA_ENDPOINT = previous;
+  }
+});
